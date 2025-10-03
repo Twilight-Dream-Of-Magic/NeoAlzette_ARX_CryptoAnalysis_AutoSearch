@@ -4,62 +4,81 @@
 #include <iostream>
 #include <random>
 #include <algorithm>
-#include "MELCC/highway_table_lin.hpp"
-#include "MELCC/lb_round_lin.hpp"
-#include "Common/canonicalize.hpp"
+#include <chrono>
+#include "melcc_analyzer.hpp"
+#include "neoalzette_core.hpp"
+#include "utility_tools.hpp"
 
-using neoalz::HighwayTableLin;
+using namespace neoalz;
 
-struct RNG { std::mt19937_64 eng{std::random_device{}()}; uint32_t word(){ return (uint32_t)eng(); } };
-
-int main(int argc, char** argv){
-    if (argc < 5){
-        std::cerr << "Usage: " << argv[0] << " R samples_per_bucket out.bin nbits(=32) [seed]\n";
+int main(int argc, char** argv) {
+    if (argc < 3) {
+        std::fprintf(stderr, 
+            "Linear Highway Table Builder - Linear suffix lower bounds\n"
+            "Usage: %s <output.bin> <max_rounds>\n\n"
+            "Arguments:\n"
+            "  output.bin    Output linear highway table file\n"
+            "  max_rounds    Maximum rounds to compute (recommended: 6-8)\n\n"
+            "Example:\n"
+            "  %s highway_lin.bin 8\n\n"
+            "Note: This may take 20min-2hours depending on max_rounds.\n"
+            "      Linear analysis is typically faster than differential.\n\n",
+            argv[0], argv[0]);
         return 1;
     }
-    int R = std::stoi(argv[1]);
-    int S = std::stoi(argv[2]);
-    std::string out = argv[3];
-    int n = (argc>4)? std::stoi(argv[4]) : 32;
 
-    HighwayTableLin HT; HT.init(R);
-    neoalz::LbFullRoundLin LBL;
-    RNG rng; if (argc>5){ rng.eng.seed( (uint64_t)std::stoull(argv[5]) ); }
-
-    for (int rem=1; rem<=R; ++rem){
-        std::vector<uint16_t> best( (size_t)HighwayTableLin::BLOCK, 0xFFFFu );
-        for (int wA=0; wA<=std::min(63,n); ++wA){
-            for (int wB=0; wB<=std::min(63,n); ++wB){
-                for (int pa=0; pa<2; ++pa){
-                    for (int pb=0; pb<2; ++pb){
-                        uint16_t key = (wA<<8)|(wB<<2)|(pa<<1)|pb;
-                        int best_w = 0x3FFF;
-                        for (int s=0; s<S; ++s){
-                            auto pick = [&](int wt, int parity){
-                                uint32_t x = 0; int placed = 0;
-                                while (placed < wt){ int i = rng.word() & (n-1); uint32_t bit = 1u<<i; if ((x & bit)==0){ x|=bit; ++placed; } }
-                                if ((x & 1u) != (uint32_t)parity) x ^= 1u; return x;
-                            };
-                            auto ca = pick(wA, pa); auto cb = pick(wB, pb);
-                            auto cn = neoalz::canonical_rotate_pair(ca, cb);
-                            int lb1 = LBL.lb_full(cn.first, cn.second, 3,3, n, 128);
-                            int lb = lb1 * rem;
-                            if (lb < best_w) best_w = lb;
-                        }
-                        if (best_w>0x3FFF) best_w=0x3FFF;
-                        best[key] = (uint16_t)best_w;
-                    }
-                }
-            }
-        }
-        for (size_t i=0;i<best.size();++i) HT.at(rem, (uint16_t)i) = best[i];
-        std::cerr << "[HighwayLin] rem="<<rem<<" done.\n";
+    std::string output_file = argv[1];
+    int max_rounds = std::stoi(argv[2]);
+    
+    if (max_rounds <= 0 || max_rounds > 12) {
+        std::fprintf(stderr, "Error: max_rounds must be between 1 and 12\n");
+        return 1;
     }
-
-    if (!HT.save(out)){
-        std::cerr << "Failed to save to "<<out<<"\n"; return 2;
+    
+    std::printf("Building linear Highway table...\n");
+    std::printf("Output: %s\n", output_file.c_str());
+    std::printf("Max Rounds: %d\n", max_rounds);
+    
+    // Estimate resources
+    auto estimate = UtilityTools::ConfigValidator::estimate_resources(max_rounds, 25, "LINEAR_HIGHWAY_BUILD");
+    std::printf("Estimated Memory: %s MB\n", 
+               UtilityTools::StringUtils::format_number(estimate.estimated_memory_mb).c_str());
+    std::printf("Estimated Time: %s\n", 
+               UtilityTools::StringUtils::format_duration(estimate.estimated_time_seconds * 1000).c_str());
+    
+    if (!estimate.suitable_for_personal_computer) {
+        std::printf("⚠️  WARNING: This may require significant computing resources!\n");
     }
-    std::cout << "Saved Linear Highway table to "<<out<<"\n";
+    std::printf("\n");
+    
+    // Build linear highway table
+    MELCCAnalyzer::LinearHighwayTable highway;
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    std::printf("Building linear highway table (this may take a while)...\n");
+    highway.build(max_rounds);
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    
+    // Save results
+    if (highway.save(output_file)) {
+        std::printf("✓ Linear highway table built successfully!\n");
+        std::printf("  Entries: %s\n", UtilityTools::StringUtils::format_number(highway.size()).c_str());
+        std::printf("  Build Time: %s\n", UtilityTools::StringUtils::format_duration(duration.count()).c_str());
+        std::printf("  Saved to: %s\n", output_file.c_str());
+        
+        // Test query functionality
+        std::printf("\nTesting query functionality:\n");
+        int test_bound = highway.query(0x80000000, 0x1, std::min(max_rounds, 4));
+        std::printf("  Query(0x80000000, 0x1, %d rounds) = %d\n", 
+                   std::min(max_rounds, 4), test_bound);
+        
+    } else {
+        std::fprintf(stderr, "✗ Failed to save linear highway table to: %s\n", output_file.c_str());
+        return 1;
+    }
+    
     return 0;
 }
-

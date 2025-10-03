@@ -16,30 +16,25 @@ else()
     message(STATUS "OpenMP not found, building without parallel optimizations")
 endif()
 add_library(neoalzette STATIC
-    src/neoalzette.cpp
+    src/neoalzette_core.cpp
+    src/medcp_analyzer.cpp
+    src/melcc_analyzer.cpp
+    src/threshold_search_framework.cpp
+    src/utility_tools.cpp
 )
 target_include_directories(neoalzette PUBLIC include)
 
 add_executable(pddt_demo src/main_pddt.cpp src/pddt.cpp)
 target_include_directories(pddt_demo PUBLIC include)
-
-add_executable(gen_round_lb_table src/gen_round_lb_table.cpp)
-target_include_directories(gen_round_lb_table PUBLIC include)
+target_link_libraries(pddt_demo PRIVATE neoalzette)
 
 add_executable(highway_table_build src/highway_table_build.cpp)
 target_include_directories(highway_table_build PUBLIC include)
+target_link_libraries(highway_table_build PRIVATE neoalzette)
 
 add_executable(highway_table_build_lin src/highway_table_build_lin.cpp)
 target_include_directories(highway_table_build_lin PUBLIC include)
-
-add_executable(threshold_lin src/threshold_lin.cpp)
-target_include_directories(threshold_lin PUBLIC include)
-
-add_executable(search_beam_diff src/search_beam_diff.cpp)
-target_include_directories(search_beam_diff PUBLIC include)
-
-add_executable(milp_diff src/milp_diff.cpp)
-target_include_directories(milp_diff PUBLIC include)
+target_link_libraries(highway_table_build_lin PRIVATE neoalzette)
 
 add_executable(analyze_medcp src/analyze_medcp.cpp)
 target_include_directories(analyze_medcp PUBLIC include)
@@ -71,13 +66,9 @@ add_executable(complete_matsui_demo src/complete_matsui_demo.cpp)
 target_include_directories(complete_matsui_demo PUBLIC include)
 target_link_libraries(complete_matsui_demo PRIVATE neoalzette)
 
-option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo search_beam_diff milp_diff threshold_lin gen_round_lb_table highway_table_build highway_table_build_lin complete_matsui_demo)" OFF)
+option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo)" OFF)
 if(NOT NA_BUILD_DEMOS)
   set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(search_beam_diff PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(milp_diff PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(threshold_lin PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(gen_round_lb_table PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(highway_table_build PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(highway_table_build_lin PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(complete_matsui_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)

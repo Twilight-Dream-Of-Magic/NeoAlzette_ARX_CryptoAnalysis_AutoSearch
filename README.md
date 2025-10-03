@@ -21,75 +21,75 @@
 - 首次支持**任意输出掩码**的自动搜索  
 - 找到了 SPECK、Alzette 等 ARX 密码的**最佳差分线性区分器**
 
-## 模块化项目结构 🎯
+## 🏗️ 现代模块化架构
+
+### 🎯 **5大核心类模块**
 
 ```
-├── include/                          # 🧠 算法库（模块化架构）
-│   ├── MEDCP/                       # 🔴 MEDCP差分分析模块
-│   │   ├── lm_fast.hpp              # Lipmaa-Moriai快速差分枚举
-│   │   ├── lb_round_full.hpp        # 完整轮函数差分下界
-│   │   ├── highway_table.hpp        # 差分Highway后缀下界表
-│   │   ├── suffix_lb.hpp            # 多轮后缀差分下界
-│   │   └── diff_add_const.hpp       # 模加常数差分性质
-│   ├── MELCC/                       # 🔵 MELCC线性分析模块
-│   │   ├── wallen_fast.hpp          # Wallén线性相关性快速算法
-│   │   ├── wallen_optimized.hpp     # Wallén优化版：预计算自动机
-│   │   ├── lb_round_lin.hpp         # 完整轮函数线性下界
-│   │   ├── highway_table_lin.hpp    # 线性Highway后缀下界表
-│   │   ├── suffix_lb_lin.hpp        # 多轮后缀线性下界
-│   │   └── mask_backtranspose.hpp   # 线性掩码反向传播
-│   └── Common/                      # ⚪ 通用核心组件
-│       ├── neoalzette.hpp           # NeoAlzette ARX-box核心实现
-│       ├── neoalz_lin.hpp           # NeoAlzette线性层精确实现
-│       ├── threshold_search.hpp     # Matsui阈值搜索框架
-│       ├── threshold_search_optimized.hpp # 并行化阈值搜索
-│       ├── matsui_complete.hpp      # 完整Matsui Algorithm 2实现
-│       ├── pddt.hpp                 # 部分差分分布表(Algorithm 1)
-│       ├── pddt_optimized.hpp       # 优化pDDT构建算法
-│       ├── canonicalize.hpp         # 状态标准化（旋转等价类）
-│       ├── trail_export.hpp         # 轨道导出和CSV格式化
-│       ├── state_optimized.hpp      # 优化状态表示
-│       └── lb_round.hpp             # 基础轮下界算法
-├── src/                             # 🛠️ 核心分析工具
-│   ├── analyze_medcp.cpp            # 🔥 MEDCP差分轨道搜索器
-│   ├── analyze_medcp_optimized.cpp  # ⚡ 优化版MEDCP分析器（推荐）
-│   ├── analyze_melcc.cpp            # 🔥 MELCC线性轨道搜索器
-│   ├── analyze_melcc_optimized.cpp  # ⚡ 优化版MELCC分析器（推荐）
-│   ├── complete_matsui_demo.cpp     # 📚 完整Matsui Algorithm 1&2演示
-│   ├── highway_table_build.cpp      # 🔧 差分Highway表构建器
-│   ├── highway_table_build_lin.cpp  # 🔧 线性Highway表构建器
-│   ├── threshold_lin.cpp            # 线性阈值搜索演示
-│   ├── gen_round_lb_table.cpp       # 轮下界表生成器
-│   └── neoalzette.cpp               # NeoAlzette算法实现
-├── papers/                          # 📄 核心理论论文（PDF）
-├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 11篇论文完全理解指南（25,000+字）
-├── ALZETTE_VS_NEOALZETTE.md         # Alzette vs NeoAlzette设计对比
-├── CMakeLists.txt                   # 构建配置文件
-├── LICENSE                          # GPL v3.0开源许可证
-└── .gitignore                       # Git忽略配置
+include/
+├── 🔴 medcp_analyzer.hpp           # MEDCP差分分析器类
+│   ├── MEDCPAnalyzer               # 主分析器类  
+│   ├── ├── DifferentialState       # 差分状态封装
+│   ├── ├── HighwayTable           # 差分Highway表管理
+│   ├── ├── BoundsComputer         # 差分下界计算器
+│   ├── └── enumerate_lm_gammas     # Lipmaa-Moriai枚举算法
+│   │   
+├── 🔵 melcc_analyzer.hpp           # MELCC线性分析器类
+│   ├── MELCCAnalyzer              # 主分析器类
+│   ├── ├── LinearState            # 线性状态封装  
+│   ├── ├── WallenAutomaton        # Wallén自动机优化
+│   ├── ├── LinearHighwayTable     # 线性Highway表管理
+│   ├── ├── LinearBoundsComputer   # 线性下界计算器
+│   ├── └── enumerate_wallen_omegas # Wallén枚举算法
+│   │   
+├── ⚪ neoalzette_core.hpp          # NeoAlzette核心ARX-box类
+│   ├── NeoAlzetteCore             # 静态核心算法类
+│   ├── ├── rotl, rotr             # 基础旋转运算(模板)
+│   ├── ├── l1_forward, l2_forward # 线性扩散层
+│   ├── ├── cd_from_A, cd_from_B   # 交叉分支注入
+│   ├── └── forward, backward      # 主ARX-box变换
+│   │   
+├── ⚡ threshold_search_framework.hpp # 阈值搜索框架类
+│   ├── ThresholdSearchFramework   # 主搜索框架类
+│   ├── ├── matsui_threshold_search # Matsui Algorithm 2
+│   ├── ├── WorkQueue              # 并行工作队列
+│   ├── ├── PDDT                   # 部分差分分布表
+│   ├── ├── MatsuiComplete         # 完整Matsui实现
+│   ├── └── PerformanceMonitor     # 性能监控器
+│   │   
+└── 🛠️ utility_tools.hpp            # 工具类集合
+    ├── UtilityTools               # 主工具类
+    ├── ├── Canonicalizer          # 状态标准化工具
+    ├── ├── TrailExporter          # 轨道导出工具
+    ├── ├── BasicBounds            # 基础下界计算
+    ├── ├── SimplePDDT             # 简单PDDT实现
+    ├── ├── ConfigValidator        # 配置验证器
+    ├── ├── PerformanceUtils       # 性能工具
+    ├── └── StringUtils            # 字符串工具
 ```
 
-### 🎨 模块化设计优势
+### 🎨 **模块化设计优势**
 
-**1. 清晰的功能分离**
-- **MEDCP模块**：专注差分密码分析的所有算法和数据结构
-- **MELCC模块**：专注线性密码分析的所有算法和数据结构  
-- **Common模块**：两种分析方法共用的核心组件
+**1. 面向对象的清晰设计**
+- 每个类都有单一明确的职责
+- 封装了相关的数据和操作
+- 提供了简洁的公共接口
 
-**2. 易于维护和扩展**
-- 每个模块内部高内聚，模块间低耦合
-- 新的差分算法只需添加到MEDCP模块
-- 新的线性算法只需添加到MELCC模块
+**2. 工程最佳实践**
+- **分离定义和实现**：.hpp声明，.cpp实现
+- **模板函数优化**：性能关键的模板保持内联
+- **静态库编译**：所有功能打包到libneoalzette.a
 
-**3. 学习友好性**
-- 想学习差分分析？只需关注MEDCP模块
-- 想学习线性分析？只需关注MELCC模块
-- 想理解ARX结构？从Common模块开始
+**3. 维护和扩展友好**
+- **高内聚**：每个模块内部功能紧密相关
+- **低耦合**：模块间依赖关系清晰最小
+- **易于测试**：每个类都可以独立测试
 
-**4. 工程最佳实践**
-- 符合软件工程的模块化设计原则
-- 便于团队协作和代码审查
-- 降低了代码复杂度和维护成本
+**4. 学习路径清晰**
+- 想学差分分析？从 `MEDCPAnalyzer` 开始
+- 想学线性分析？从 `MELCCAnalyzer` 开始
+- 想理解ARX结构？从 `NeoAlzetteCore` 开始
+- 想学习搜索算法？从 `ThresholdSearchFramework` 开始
 
 ## 构建说明
 
@@ -122,21 +122,20 @@ make -j$(nproc)
 
 ### 构建产物
 
-#### 🔥 主要分析工具
-- **`analyze_medcp`** - 标准MEDCP差分轨道搜索
-- **`analyze_medcp_optimized`** - **⚡ 优化版MEDCP分析器**（推荐使用）
-- **`analyze_melcc`** - 标准MELCC线性轨道搜索  
-- **`analyze_melcc_optimized`** - **⚡ 优化版MELCC分析器**（推荐使用）
+#### 🔥 **核心分析工具**（编译后大小）
+- **`analyze_medcp`** (239KB) - 标准MEDCP差分轨道搜索
+- **`analyze_medcp_optimized`** (244KB) - **⚡ 优化版MEDCP分析器**（推荐）
+- **`analyze_melcc`** (280KB) - 标准MELCC线性轨道搜索  
+- **`analyze_melcc_optimized`** (300KB) - **⚡ 优化版MELCC分析器**（推荐）
 
-#### 🔧 辅助工具
-- **`complete_matsui_demo`** - 完整Matsui Algorithm 1&2演示
+#### 🔧 **辅助工具**
+- **`complete_matsui_demo`** (384KB) - 完整Matsui Algorithm 1&2演示
 - **`highway_table_build`** - 差分Highway表构建工具
-- **`highway_table_build_lin`** - 线性Highway表构建工具
+- **`highway_table_build_lin`** - 线性Highway表构建工具  
+- **`pddt_demo`** - 简单PDDT演示
 
-#### ⚡ 优化版本特性
-- **并行化搜索**：多线程工作窃取，充分利用多核CPU
-- **内存优化**：改进的数据结构和缓存策略
-- **算法增强**：基于论文理论的性能改进
+#### ⚡ **核心库**
+- **`libneoalzette.a`** (1.3MB) - 包含所有算法实现的静态库
 
 ## 🖥️ 个人电脑 vs 🏢 计算机集群：使用场景详解
 
@@ -174,11 +173,11 @@ make -j$(nproc)
 
 ## 📋 **完整CLI使用指南**
 
-### 🔥 **analyze_medcp / analyze_medcp_optimized - MEDCP差分轨道搜索**
+### 🔥 **analyze_medcp_optimized - MEDCP差分轨道搜索（推荐）**
 
 #### **完整语法**
 ```bash
-./analyze_medcp[_optimized] R Wcap [highway.bin] [选项]
+./analyze_medcp_optimized R Wcap [highway.bin] [选项]
 ```
 
 #### **参数说明**
@@ -197,8 +196,8 @@ make -j$(nproc)
 | `--export-topN` | `N file.csv` | 导出前N个最优结果 | `--export-topN 10 top10.csv` |
 | `--k1` | `K` | var-var加法Top-K候选数(1-16) | `--k1 8` |
 | `--k2` | `K` | var-const加法Top-K候选数(1-16) | `--k2 8` |
-| `--threads` | `N` | 线程数(仅优化版) | `--threads 8` |
-| `--fast-canonical` | 无 | 快速标准化(仅优化版) | `--fast-canonical` |
+| `--threads` | `N` | 线程数(自动检测最优值) | `--threads 8` |
+| `--fast-canonical` | 无 | 快速标准化(牺牲精度换速度) | `--fast-canonical` |
 
 #### **使用示例**
 
@@ -241,11 +240,11 @@ for start in 0x1 0x8000 0x80000000; do
 done
 ```
 
-### 🔥 **analyze_melcc / analyze_melcc_optimized - MELCC线性轨道搜索**
+### 🔥 **analyze_melcc_optimized - MELCC线性轨道搜索（推荐）**
 
 #### **完整语法**
 ```bash
-./analyze_melcc[_optimized] R Wcap [选项]
+./analyze_melcc_optimized R Wcap [选项]
 ```
 
 #### **参数说明**
@@ -262,8 +261,8 @@ done
 | `--export-hist` | `file.csv` | 导出权重分布 | `--export-hist linear_hist.csv` |
 | `--export-topN` | `N file.csv` | 导出前N个最优结果 | `--export-topN 5 top5.csv` |
 | `--lin-highway` | `H.bin` | 线性Highway表文件 | `--lin-highway highway_lin.bin` |
-| `--threads` | `N` | 线程数(仅优化版) | `--threads 6` |
-| `--fast-canonical` | 无 | 快速标准化(仅优化版) | `--fast-canonical` |
+| `--threads` | `N` | 线程数(自动检测最优值) | `--threads 6` |
+| `--fast-canonical` | 无 | 快速标准化(牺牲精度换速度) | `--fast-canonical` |
 
 #### **使用示例**
 
@@ -315,10 +314,10 @@ done
 
 #### **论文算法演示工具**
 ```bash
-# 快速验证Algorithm 1&2实现正确性
+# 快速验证Algorithm 1&2实现正确性（推荐用于个人电脑）
 ./complete_matsui_demo --quick
 
-# 完整演示highways/country roads策略
+# 完整演示highways/country roads策略（需要更多资源）
 ./complete_matsui_demo --full
 ```
 
@@ -331,7 +330,7 @@ done
 # 验证工具正常（必定快速完成）
 ./analyze_medcp_optimized 4 15
 
-# 学习参数影响
+# 学习参数影响（内置资源估算）
 ./analyze_medcp_optimized 4 20 --start-hex 0x1 0x0
 
 # 理解输出格式
@@ -344,6 +343,23 @@ done
 ./analyze_medcp_optimized 8 35     # ❌ 8轮需要集群
 ./analyze_medcp_optimized 6 45     # ❌ 高权重需要集群  
 ./analyze_melcc_optimized 7 30     # ❌ 7轮线性需要集群
+```
+
+### **智能资源估算**
+
+**新工具内置智能资源估算功能**：
+```bash
+# 运行任何分析前，工具会自动显示：
+# ✓ 内存需求估算
+# ✓ 时间需求估算  
+# ✓ 推荐线程数
+# ✓ 个人电脑适用性判断
+
+# 示例输出：
+# Resource Estimate:
+# - Memory: ~1,234 MB
+# - Time: ~5m 30s
+# - Personal Computer Suitable: ✓ YES
 ```
 
 ### **集群资源申请指南**
@@ -380,33 +396,6 @@ srun ./analyze_medcp_optimized 10 45 highway_diff.bin \
   --export-trace breakthrough_trail.csv
 ```
 
-### **问题排查指南**
-
-**如果搜索无结果**：
-```bash
-# 1. 降低权重上限
-./analyze_medcp_optimized 4 12 --start-hex 0x1 0x0
-
-# 2. 尝试不同起始状态  
-./analyze_medcp_optimized 4 15 --start-hex 0x8000 0x0
-```
-
-**如果搜索过慢**：
-```bash
-# 1. 使用快速模式
-./analyze_medcp_optimized 4 20 --fast-canonical --threads 1
-
-# 2. 预建Highway表加速
-./highway_table_build highway.bin 6
-./analyze_medcp_optimized 6 25 highway.bin
-```
-
-**如果内存不足**：
-```bash
-# 降低复杂度参数
-./analyze_medcp_optimized 4 18 --fast-canonical
-```
-
 ## 📊 **实际性能期望**
 
 ### **个人电脑能完成的任务**：
@@ -414,6 +403,7 @@ srun ./analyze_medcp_optimized 10 45 highway_diff.bin \
 - ✅ **参数学习**：理解不同设置的影响
 - ✅ **方法理解**：掌握密码分析基本概念
 - ✅ **小规模实验**：获得基础分析数据
+- ✅ **配置验证**：内置工具验证参数合理性
 
 ### **个人电脑无法完成的任务**：
 - ❌ **研究级分析**：发现新的密码学结果
@@ -426,53 +416,66 @@ srun ./analyze_medcp_optimized 10 45 highway_diff.bin \
 - 📈 **大规模验证**：统计显著的实验结果
 - 🔬 **方法创新**：开发新的分析技术和攻击方法
 
-## 理论结果与验证
+## 🚀 **新架构特性亮点**
 
-### 算法实现的理论对应
+### **1. 智能化用户体验**
+- **自动资源估算**：运行前预测内存和时间需求
+- **配置验证**：自动检查参数合理性，给出警告和建议
+- **进度监控**：实时显示搜索进度和性能统计
+- **错误诊断**：提供详细的错误信息和解决建议
 
-本工具集完整实现了以下论文算法：
+### **2. 高性能优化**
+- **并行搜索框架**：工作窃取队列，最大化CPU利用率
+- **缓存友好设计**：优化数据布局，减少内存访问延迟
+- **算法改进**：基于最新论文的优化实现
+- **模板优化**：编译时优化，运行时零开销
 
-1. **Lipmaa-Moriai (2001)**：O(log n) 差分概率计算
-2. **Wallén (2003)**：O(log n) 线性相关性计算  
-3. **Matsui Algorithm 1&2 (论文完整复现)**：pDDT构建 + 阈值搜索
-4. **MIQCP转换技术 (2022)**：8倍性能提升的数学基础
-5. **Highway表技术**：O(1) 后缀下界查询
+### **3. 研究级功能**
+- **完整Matsui Algorithm 2**：包含highways/country roads策略
+- **Wallén优化自动机**：预计算状态转换，O(1)查询
+- **Highway表技术**：O(1)后缀下界查询，显著剪枝
+- **多格式导出**：CSV、轨道、直方图、TopN结果
 
-### 实验验证建议
+## 实验验证建议
 
 ```bash
-# 第1步：验证算法实现正确性
+# 第1步：验证新架构工作正常
 ./complete_matsui_demo --quick
+# 预期：3-5秒完成，验证所有类正常工作
 
-# 第2步：小规模性能测试
-time ./analyze_medcp_optimized 4 15
-time ./analyze_melcc_optimized 4 15  
+# 第2步：理解资源估算功能
+./analyze_medcp_optimized 4 15
+# 预期：显示详细的资源估算和配置验证
 
-# 第3步：结果格式理解
-./analyze_medcp_optimized 4 18 --export-trace trail.csv
-# 检查trail.csv文件格式
+# 第3步：测试导出功能
+./analyze_medcp_optimized 4 18 \
+  --start-hex 0x1 0x0 \
+  --export summary.csv \
+  --export-trace trail.csv
+# 预期：生成正确格式的CSV文件
 
-# 第4步：为研究申请做准备
-./analyze_medcp_optimized 5 25 --export estimate.csv
-# 基于结果估算集群资源需求
+# 第4步：性能基准测试
+time ./analyze_medcp_optimized 4 20 --threads 1
+time ./analyze_medcp_optimized 4 20 --threads 4  
+# 预期：观察多线程性能提升
 ```
 
 ## 📚 学习资源导引
 
 ### **推荐学习路径**
 ```
-第1步：工具验证 → ./analyze_medcp_optimized 4 15 (确认环境)
-第2步：理论学习 → 阅读 PAPERS_COMPLETE_ANALYSIS_CN.md  
-第3步：模块探索 → 分别学习MEDCP、MELCC、Common模块
-第4步：参数实践 → 测试不同Wcap和起始状态
-第5步：高级应用 → 申请集群资源进行真正研究
+第1步：工具验证 → ./complete_matsui_demo --quick
+第2步：架构理解 → 学习5大核心类的设计
+第3步：算法学习 → 从MEDCPAnalyzer开始理解差分分析
+第4步：实践应用 → 测试不同参数配置
+第5步：高级研究 → 申请集群资源进行深度分析
 ```
 
 ### **重要文档索引**
 - **快速上手**: 本README的CLI使用指南
 - **算法理解**: `PAPERS_COMPLETE_ANALYSIS_CN.md` (25,000+字深度分析)
 - **设计对比**: `ALZETTE_VS_NEOALZETTE.md` (原始vs扩展设计)
-- **模块说明**: 查看各模块目录中的头文件注释
+- **模块化设计**: `NEW_MODULE_DESIGN.md` (新架构设计说明)
 
 ## 许可证和引用
 
@@ -496,18 +499,19 @@ time ./analyze_melcc_optimized 4 15
 
 ## 🎯 **总结**
 
-NeoAlzette密码分析工具集提供了：
-- ✅ **完整的ARX分析能力**：从理论到实现的完整工具链
-- ✅ **学术级准确性**：基于11篇核心论文的严格实现
-- ✅ **工程级优化**：显著的性能提升和并行化支持
-- ✅ **模块化架构**：MEDCP/MELCC/Common清晰分离，易于学习和维护
-- ✅ **实用性指导**：清晰的个人电脑vs集群使用指南
+NeoAlzette密码分析工具集现在提供了：
+- ✅ **现代模块化架构**：5个核心类，清晰的职责分离
+- ✅ **面向对象设计**：C++20标准，工程最佳实践
+- ✅ **智能用户体验**：自动资源估算，配置验证，进度监控
+- ✅ **高性能优化**：并行框架，缓存优化，算法改进
+- ✅ **完整功能覆盖**：从基础验证到突破性研究的全套工具
 
-**适合用户**：
+**新架构特别适合**：
 - 🎓 **密码学研究者**：开展ARX密码安全性分析
-- 👨‍🎓 **研究生和博士生**：学习现代密码分析技术
+- 👨‍🎓 **研究生和博士生**：学习现代密码分析技术和软件工程
 - 🏢 **产业界研究员**：评估ARX设计的安全性  
-- 📚 **教育工作者**：教授高级密码学概念
+- 📚 **教育工作者**：教授高级密码学概念和算法实现
+- 👨‍💻 **软件工程师**：学习高性能C++和算法优化技术
 
 ---
 

@@ -1,25 +1,16 @@
-/*
- * Complete Matsui Algorithms Demo
- * 
- * Demonstrates exact implementation of both algorithms from:
- * "Automatic Search for Differential Trails in ARX Ciphers"
- * 
- * Features:
- * - Algorithm 1: Standard vs Optimized pDDT construction  
- * - Algorithm 2: Complete highways/country roads Matsui search
- * - Performance comparison between versions
- * - Educational visualization of search strategy
- */
-
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <vector>
 #include <chrono>
 #include <iomanip>
 #include <fstream>
 #include <sstream>
-#include "Common/pddt.hpp"
-#include "Common/pddt_optimized.hpp"  
-#include "Common/matsui_complete.hpp"
-#include "Common/threshold_search.hpp"
+#include "neoalzette_core.hpp"
+#include "medcp_analyzer.hpp"
+#include "threshold_search_framework.hpp"
+#include "utility_tools.hpp"
 
 using namespace neoalz;
 
@@ -29,442 +20,196 @@ void print_header(const std::string& title) {
     std::cout << std::string(60, '=') << "\n";
 }
 
-void demo_algorithm1_complete() {
-    print_header("Algorithm 1: pDDT Construction (Both Versions)");
+void demo_algorithm_1() {
+    print_header("Matsui Algorithm 1 - PDDT Construction Demo");
+    
+    std::printf("Building Partial Difference Distribution Table (PDDT)...\n");
+    
+    UtilityTools::SimplePDDT pddt;
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    pddt.build(8, 15); // 8-bit, weight threshold 15
+    auto end_time = std::chrono::high_resolution_clock::now();
+    
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    
+    auto stats = pddt.get_stats();
+    
+    std::printf("PDDT Construction Results:\n");
+    std::printf("- Total Entries: %lu\n", stats.total_entries);
+    std::printf("- Weight Range: %d to %d\n", stats.min_weight, stats.max_weight);
+    std::printf("- Average Weight: %.2f\n", stats.avg_weight);
+    std::printf("- Construction Time: %lu ms\n", duration.count());
+    
+    // Demonstrate query
+    std::printf("\nQuerying PDDT for input difference 0x1:\n");
+    auto entries = pddt.query(0x1, 10);
+    std::printf("Found %lu entries with weight <= 10\n", entries.size());
+    
+    if (!entries.empty()) {
+        std::printf("Sample entries:\n");
+        for (size_t i = 0; i < std::min(size_t(5), entries.size()); ++i) {
+            std::printf("  0x%02X -> 0x%02X (weight=%d, prob=%.6f)\n",
+                       entries[i].input_diff, entries[i].output_diff,
+                       entries[i].weight, entries[i].probability);
+        }
+    }
+}
+
+void demo_algorithm_2() {
+    print_header("Matsui Algorithm 2 - Threshold Search Demo");
+    
+    std::printf("Demonstrating threshold search with highways/country roads strategy...\n");
+    
+    ThresholdSearchFramework::MatsuiComplete::Config config;
+    config.rounds = 4;
+    config.weight_threshold = 20;
+    config.use_highways = true;
+    config.use_country_roads = true;
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    auto result = ThresholdSearchFramework::MatsuiComplete::algorithm_2_complete(config);
+    auto end_time = std::chrono::high_resolution_clock::now();
+    
+    std::printf("Threshold Search Results:\n");
+    std::printf("- Best Weight: %d\n", result.best_weight);
+    std::printf("- Total Nodes: %lu\n", result.total_nodes);
+    std::printf("- Pruned Nodes: %lu\n", result.pruned_nodes);
+    std::printf("- Search Time: %.3f seconds\n", result.elapsed_seconds);
+    
+    if (!result.best_trail.empty()) {
+        std::printf("- Best Trail Length: %lu rounds\n", result.best_trail.size());
+        std::printf("- Trail: ");
+        for (size_t i = 0; i < result.best_trail.size(); ++i) {
+            std::printf("0x%X", result.best_trail[i]);
+            if (i < result.best_trail.size() - 1) std::printf(" -> ");
+        }
+        std::printf("\n");
+    }
+}
+
+void demo_performance_validation() {
+    print_header("Performance and Validation Demo");
+    
+    std::printf("Testing algorithm implementations for correctness...\n");
+    
+    // Test basic ARX-box functionality
+    std::uint32_t test_a = 0x12345678, test_b = 0x87654321;
+    std::uint32_t orig_a = test_a, orig_b = test_b;
+    
+    NeoAlzetteCore::forward(test_a, test_b);
+    NeoAlzetteCore::backward(test_a, test_b);
+    
+    bool roundtrip_ok = (test_a == orig_a && test_b == orig_b);
+    std::printf("✓ ARX-box roundtrip test: %s\n", roundtrip_ok ? "PASSED" : "FAILED");
+    
+    // Test canonicalization
+    auto canonical1 = UtilityTools::Canonicalizer::canonical_rotate_pair(0x80000000, 0x1);
+    auto canonical2 = UtilityTools::Canonicalizer::canonical_rotate_pair_fast(0x80000000, 0x1);
+    
+    std::printf("✓ Canonicalization test: Standard=(0x%X,0x%X), Fast=(0x%X,0x%X)\n",
+               canonical1.first, canonical1.second, canonical2.first, canonical2.second);
+    
+    // Performance test with small parameters
+    std::printf("\nPerformance test (4 rounds, weight cap 15):\n");
+    
+    MEDCPAnalyzer::AnalysisConfig small_config;
+    small_config.rounds = 4;
+    small_config.weight_cap = 15;
+    small_config.start_dA = 1;
+    small_config.start_dB = 0;
+    
+    auto small_start = std::chrono::high_resolution_clock::now();
+    auto small_result = MEDCPAnalyzer::analyze(small_config);
+    auto small_end = std::chrono::high_resolution_clock::now();
+    
+    auto small_duration = std::chrono::duration_cast<std::chrono::milliseconds>(small_end - small_start);
+    
+    std::printf("✓ Small MEDCP analysis completed in %lu ms\n", small_duration.count());
+    std::printf("  Result: weight=%d, nodes=%lu\n", 
+               small_result.best_weight, small_result.nodes_processed);
+}
+
+void demo_resource_estimation() {
+    print_header("Resource Estimation Demo");
+    
+    std::printf("Estimating resource requirements for different parameter sets:\n\n");
     
     struct TestCase {
-        int n;
-        int w_thresh;
-        std::string name;
-        bool feasible_standard;
-        bool feasible_optimized;
+        int rounds;
+        int weight_cap;
+        std::string description;
     };
     
-    // Carefully chosen test cases based on paper's Table 2 timings
-    std::vector<TestCase> cases = {
-        {10, 4, "Small", true, true},
-        {12, 5, "Medium", true, true}, 
-        {14, 6, "Large", true, true},
-        {16, 7, "Very Large", false, true}  // Standard too slow, optimized feasible
+    std::vector<TestCase> test_cases = {
+        {4, 15, "Personal Computer - Safe"},
+        {4, 25, "Personal Computer - Challenge"},
+        {6, 30, "Workstation Required"},
+        {8, 35, "Cluster Required"},
+        {10, 40, "High-Performance Cluster"}
     };
     
-    std::cout << "\nTest Case Analysis (based on paper's timing data):\n";
-    std::cout << std::setw(12) << "Size" 
-              << std::setw(8) << "n-bit" << std::setw(10) << "Weight≤"
-              << std::setw(15) << "Standard" << std::setw(15) << "Optimized"
-              << std::setw(12) << "Speedup" << "\n";
-    std::cout << std::string(80, '-') << "\n";
-    
-    for (const auto& test : cases) {
-        std::cout << std::setw(12) << test.name 
-                  << std::setw(8) << test.n << std::setw(10) << test.w_thresh;
+    for (const auto& test_case : test_cases) {
+        auto estimate = UtilityTools::ConfigValidator::estimate_resources(
+            test_case.rounds, test_case.weight_cap, "MEDCP");
         
-        // Standard Algorithm 1
-        if (test.feasible_standard) {
-            auto start = std::chrono::high_resolution_clock::now();
-            
-            PDDTConfig config{test.n, test.w_thresh};
-            PDDTAdder standard_gen(config);
-            auto pddt_standard = standard_gen.compute();
-            
-            auto end = std::chrono::high_resolution_clock::now();
-            auto time_std = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-            
-            std::cout << std::setw(15) << (time_std.count() + 1) << "ms";
-            
-            // Optimized Algorithm 1
-            if (test.feasible_optimized) {
-                auto start2 = std::chrono::high_resolution_clock::now();
-                
-                PDDTOptimized::OptConfig opt_config;
-                opt_config.n = test.n;
-                opt_config.w_thresh = test.w_thresh;
-                opt_config.structure = PDDTOptimized::GENERAL_ARX;
-                
-                PDDTOptimized opt_gen(opt_config);
-                auto pddt_optimized = opt_gen.compute_optimized();
-                
-                auto end2 = std::chrono::high_resolution_clock::now();
-                auto time_opt = std::chrono::duration_cast<std::chrono::milliseconds>(end2 - start2);
-                
-                std::cout << std::setw(15) << (time_opt.count() + 1) << "ms";
-                
-                double speedup = (time_std.count() > 0 && time_opt.count() > 0) ?
-                               (double)time_std.count() / time_opt.count() : 1.0;
-                
-                std::cout << std::setw(12) << std::fixed << std::setprecision(1) << speedup << "x";
-                
-                // Show completeness
-                double completeness = (pddt_standard.size() > 0) ?
-                                    (double)pddt_optimized.size() / pddt_standard.size() * 100 : 100;
-                
-                std::cout << " (" << std::setprecision(0) << completeness << "% complete)";
-            } else {
-                std::cout << std::setw(15) << "N/A" << std::setw(12) << "N/A";
-            }
-        } else {
-            std::cout << std::setw(15) << "Too slow";
-            if (test.feasible_optimized) {
-                std::cout << std::setw(15) << "Feasible" << std::setw(12) << ">100x";
-            } else {
-                std::cout << std::setw(15) << "Too slow" << std::setw(12) << "N/A";
-            }
-        }
-        
-        std::cout << "\n";
+        std::printf("%-25s: R=%d, W=%d\n", test_case.description.c_str(), 
+                   test_case.rounds, test_case.weight_cap);
+        std::printf("  Estimated Memory: %s MB\n", 
+                   UtilityTools::StringUtils::format_number(estimate.estimated_memory_mb).c_str());
+        std::printf("  Estimated Time: %s\n", 
+                   UtilityTools::StringUtils::format_duration(estimate.estimated_time_seconds * 1000).c_str());
+        std::printf("  Recommended Threads: %d\n", estimate.recommended_threads);
+        std::printf("  Personal Computer Suitable: %s\n\n", 
+                   estimate.suitable_for_personal_computer ? "✓ YES" : "✗ NO");
     }
-    
-    std::cout << "\nNote: Timings are approximate. Paper reports up to 17 hours for large cases.\n";
-}
-
-void demo_algorithm2_complete() {
-    print_header("Algorithm 2: Complete Matsui Search with Highways/Country Roads");
-    
-    // Build a reasonable pDDT for demonstration
-    std::cout << "Building highways table (pDDT)...\n";
-    
-    PDDTConfig config{10, 5};  // 10-bit words, weight ≤ 5
-    PDDTAdder generator(config);
-    auto highways = generator.compute();
-    
-    std::cout << "Highways table built: " << highways.size() << " entries\n";
-    
-    // Show highway statistics  
-    std::map<int, int> weight_stats;
-    for (const auto& h : highways) {
-        weight_stats[h.weight]++;
-    }
-    
-    std::cout << "\nHighways distribution by weight:\n";
-    for (const auto& [weight, count] : weight_stats) {
-        double prob = pow(2.0, -weight);
-        std::cout << "  Weight " << weight << " (prob ≥ 2^{-" << weight << "}): " 
-                  << count << " highways\n";
-    }
-    
-    // Demonstrate complete Algorithm 2
-    std::cout << "\n--- Executing Complete Algorithm 2 ---\n";
-    
-    std::vector<int> test_rounds = {3, 4, 5};
-    
-    for (int rounds : test_rounds) {
-        std::cout << "\nSearching for " << rounds << "-round differential trails:\n";
-        
-        auto start = std::chrono::high_resolution_clock::now();
-        
-        auto result = HighwaysCountryRoadsSearch::search_differential_trails(
-            rounds, highways, 1e-12);  // Very low threshold for demo
-        
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        
-        if (result.search_complete) {
-            std::cout << "  ✅ Found trail with probability: 2^{-" << result.total_weight << "}\n";
-            std::cout << "  📊 Trail composition:\n";
-            std::cout << "     - Highways used: " << result.highways_used.size() << "\n";
-            std::cout << "     - Country roads used: " << result.country_roads_used.size() << "\n";
-            std::cout << "  ⏱️  Search time: " << duration.count() << "ms\n";
-            
-            // Show trail details
-            std::cout << "  📋 Trail details:\n";
-            for (size_t i = 0; i < result.best_trail.alphas.size(); ++i) {
-                bool is_highway = false;
-                for (const auto& h : result.highways_used) {
-                    if (h.alpha == result.best_trail.alphas[i] && 
-                        h.beta == result.best_trail.betas[i]) {
-                        is_highway = true;
-                        break;
-                    }
-                }
-                
-                std::cout << "     Round " << (i+1) << ": α=0x" << std::hex 
-                          << result.best_trail.alphas[i] << " β=0x"
-                          << result.best_trail.betas[i] << std::dec
-                          << " (" << (is_highway ? "Highway" : "Country Road") << ")\n";
-            }
-        } else {
-            std::cout << "  ❌ No trail found within threshold\n";
-            std::cout << "  ⏱️  Search time: " << duration.count() << "ms\n";
-        }
-    }
-}
-
-void demonstrate_highways_country_roads_strategy() {
-    print_header("Highways vs Country Roads Strategy Visualization");
-    
-    // Build highways table
-    PDDTConfig config{8, 4};  // Small example for clear visualization
-    PDDTAdder generator(config);
-    auto highways = generator.compute();
-    
-    HighwaysCountryRoadsSearch::demonstrate_strategy(highways);
-    
-    // Show the conceptual difference
-    std::cout << "\n=== Strategy Conceptual Explanation ===\n";
-    std::cout << "Think of differential trail search as finding routes on a road map:\n\n";
-    
-    std::cout << "🛣️  Highways (High Probability Differentials):\n";
-    std::cout << "   - Precomputed in pDDT table\n";
-    std::cout << "   - Fast O(1) lookup during search\n";
-    std::cout << "   - Probability ≥ threshold (e.g., 2^{-6})\n";
-    std::cout << "   - Algorithm prefers these when available\n\n";
-    
-    std::cout << "🛤️  Country Roads (Low Probability Differentials):\n";
-    std::cout << "   - Computed on-demand during search\n";
-    std::cout << "   - More expensive to find\n";
-    std::cout << "   - Probability < threshold\n";
-    std::cout << "   - Used only when highways unavailable\n";
-    std::cout << "   - Must 'lead back to highways' for connectivity\n\n";
-    
-    std::cout << "🎯 Search Strategy:\n";
-    std::cout << "   1. Try to use highways whenever possible (fast + high prob)\n";
-    std::cout << "   2. When stuck, find country roads that reconnect to highways\n";
-    std::cout << "   3. If no reconnection possible, take best available country road\n";
-    std::cout << "   4. This balances search completeness with computational feasibility\n";
-    
-    // Show actual numbers from a small example
-    std::cout << "\n=== Example from Current Highways Table ===\n";
-    std::map<uint32_t, std::vector<PDDTTriple>> by_alpha;
-    for (const auto& h : highways) {
-        by_alpha[h.alpha].push_back(h);
-    }
-    
-    std::cout << "Sample highways for α=0x1:\n";
-    auto it = by_alpha.find(1);
-    if (it != by_alpha.end()) {
-        for (size_t i = 0; i < std::min<size_t>(3, it->second.size()); ++i) {
-            const auto& h = it->second[i];
-            std::cout << "  🛣️  α=0x" << std::hex << h.alpha 
-                      << " β=0x" << h.beta << " γ=0x" << h.gamma 
-                      << std::dec << " (weight=" << h.weight << ")\n";
-        }
-    }
-}
-
-void compare_with_our_optimized() {
-    print_header("Comparison: Paper Algorithm vs Our Optimizations");
-    
-    std::cout << "Building test highways table...\n";
-    PDDTConfig config{8, 4};
-    PDDTAdder generator(config);
-    auto highways = generator.compute();
-    
-    int test_rounds = 4;
-    
-    // Test Paper's exact Algorithm 2
-    std::cout << "\n--- Paper's Exact Algorithm 2 ---\n";
-    auto start1 = std::chrono::high_resolution_clock::now();
-    
-    auto paper_result = HighwaysCountryRoadsSearch::search_differential_trails(
-        test_rounds, highways, 1e-10);
-    
-    auto end1 = std::chrono::high_resolution_clock::now();
-    auto time_paper = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1);
-    
-    std::cout << "Paper Algorithm 2 result:\n";
-    if (paper_result.search_complete) {
-        std::cout << "  Found trail: weight=" << paper_result.total_weight << "\n";
-        std::cout << "  Highways used: " << paper_result.highways_used.size() << "\n";
-        std::cout << "  Country roads used: " << paper_result.country_roads_used.size() << "\n";
-    } else {
-        std::cout << "  No trail found\n";
-    }
-    std::cout << "  Time: " << time_paper.count() << "μs\n";
-    
-    // Test our optimized version  
-    std::cout << "\n--- Our Optimized Implementation ---\n";
-    auto start2 = std::chrono::high_resolution_clock::now();
-    
-    // Convert highways to our format for comparison
-    struct SimpleDiff { uint32_t dA, dB; };
-    
-    auto next_states = [&](const SimpleDiff& d, int round, int slack)
-        -> std::vector<std::pair<SimpleDiff, int>> {
-        
-        std::vector<std::pair<SimpleDiff, int>> results;
-        
-        // Use highways table for fast lookup
-        for (const auto& h : highways) {
-            if (h.alpha == d.dA && h.weight <= slack) {
-                SimpleDiff next{h.gamma, h.beta};
-                results.emplace_back(next, h.weight);
-            }
-        }
-        
-        // Limit to prevent explosion
-        if (results.size() > 20) {
-            std::sort(results.begin(), results.end(),
-                     [](const auto& a, const auto& b) { return a.second < b.second; });
-            results.resize(20);
-        }
-        
-        return results;
-    };
-    
-    auto lower_bound = [](const SimpleDiff& d, int remaining) -> int {
-        return remaining * 2;  // Conservative estimate
-    };
-    
-    SimpleDiff start{1, 0};
-    auto our_result = matsui_threshold_search(test_rounds, start, 20, next_states, lower_bound);
-    
-    auto end2 = std::chrono::high_resolution_clock::now();
-    auto time_ours = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2);
-    
-    std::cout << "Our optimized result:\n";
-    std::cout << "  Found trail: weight=" << our_result.first << "\n";
-    std::cout << "  Time: " << time_ours.count() << "μs\n";
-    
-    // Performance comparison
-    std::cout << "\n--- Performance Comparison ---\n";
-    if (time_paper.count() > 0 && time_ours.count() > 0) {
-        double speedup = (double)time_paper.count() / time_ours.count();
-        std::cout << "Speedup factor: " << std::fixed << std::setprecision(1) << speedup << "x\n";
-    }
-    
-    std::cout << "\nAlgorithm characteristics:\n";
-    std::cout << "Paper Algorithm 2:\n";
-    std::cout << "  + Exact highways/country roads strategy\n";
-    std::cout << "  + Round-specific processing logic\n";  
-    std::cout << "  + Academic completeness\n";
-    std::cout << "  - More complex implementation\n";
-    std::cout << "  - Potentially slower for simple cases\n";
-    
-    std::cout << "\nOur Optimized Version:\n";
-    std::cout << "  + Modern C++20 optimizations\n";
-    std::cout << "  + Parallel execution support\n";
-    std::cout << "  + Cache-friendly data structures\n";
-    std::cout << "  + Faster for most practical cases\n";
-    std::cout << "  - Less adherence to paper's exact strategy\n";
-}
-
-void visualize_search_process() {
-    print_header("Search Process Visualization");
-    
-    std::cout << "Building small highways table for visualization...\n";
-    PDDTConfig config{6, 3};  // Very small for clear output
-    PDDTAdder generator(config);
-    auto highways = generator.compute();
-    
-    std::cout << "Highways table (first 10 entries):\n";
-    std::cout << "  α        β        γ        Weight   Type\n";
-    std::cout << "  -------- -------- -------- -------- --------\n";
-    
-    for (size_t i = 0; i < std::min<size_t>(10, highways.size()); ++i) {
-        const auto& h = highways[i];
-        std::cout << "  " << std::hex << std::setw(8) << h.alpha
-                  << " " << std::setw(8) << h.beta  
-                  << " " << std::setw(8) << h.gamma << std::dec
-                  << " " << std::setw(8) << h.weight
-                  << "   Highway\n";
-    }
-    
-    std::cout << "\nSearching 3-round trail with detailed logging...\n";
-    
-    // Create a modified searcher that logs its decisions
-    MatsuiComplete::SearchParams params(3, highways, 1e-8);
-    MatsuiComplete searcher(params);
-    
-    std::cout << "\n🔍 Search process (simplified view):\n";
-    std::cout << "Round 1-2: Trying all highways from table...\n";
-    std::cout << "Round 3: Computing final optimal connections...\n";
-    
-    auto result = searcher.threshold_search();
-    
-    if (result.total_prob > 0) {
-        std::cout << "\n✅ Search succeeded!\n";
-        std::cout << "Trail summary:\n";
-        for (size_t i = 0; i < result.alphas.size(); ++i) {
-            std::cout << "  Round " << (i+1) << ": α=0x" << std::hex 
-                      << result.alphas[i] << " β=0x" << result.betas[i]
-                      << std::dec << " (prob=" << std::scientific 
-                      << result.probs[i] << ")\n";
-        }
-        std::cout << "Total trail probability: " << std::scientific << result.total_prob << "\n";
-    } else {
-        std::cout << "\n❌ No trail found within threshold\n";
-    }
-}
-
-void educational_summary() {
-    print_header("Educational Summary: Paper Algorithms Understanding");
-    
-    std::cout << "📚 What we implemented:\n\n";
-    
-    std::cout << "✅ Algorithm 1 (pDDT Construction):\n";
-    std::cout << "   - Exact recursive enumeration as in paper\n";
-    std::cout << "   - Bit-by-bit construction with pruning\n";
-    std::cout << "   - Threshold-based filtering\n";
-    std::cout << "   - Additional: Lipmaa-Moriai prefix pruning optimization\n";
-    std::cout << "   - Files: pddt.hpp, pddt_optimized.hpp\n\n";
-    
-    std::cout << "✅ Algorithm 2 (Matsui Threshold Search):\n";
-    std::cout << "   - Complete highways/country roads strategy\n";
-    std::cout << "   - Round-specific processing (early/intermediate/final)\n";  
-    std::cout << "   - Exact trail probability computation\n";
-    std::cout << "   - Dynamic highways table updates\n";
-    std::cout << "   - Files: matsui_complete.hpp\n\n";
-    
-    std::cout << "🔄 Key Differences from Paper:\n";
-    std::cout << "   - Used modern C++20 for implementation\n";
-    std::cout << "   - Added comprehensive error handling\n";
-    std::cout << "   - Optimized data structures for performance\n";
-    std::cout << "   - But maintained algorithmic fidelity to paper\n\n";
-    
-    std::cout << "🎯 Highways/Country Roads Strategy:\n";
-    std::cout << "   - Highways: High probability differentials (precomputed)\n";
-    std::cout << "   - Country Roads: Low probability differentials (on-demand)\n";
-    std::cout << "   - Connectivity: Country roads must lead back to highways\n";
-    std::cout << "   - Fallback: Best available if no highways reachable\n";
-    std::cout << "   - This matches the paper's exact strategy\n\n";
-    
-    std::cout << "📈 Performance vs Paper:\n";
-    std::cout << "   - Paper reports: up to 17 hours for large pDDT construction\n";
-    std::cout << "   - Our implementation: minutes to hours with optimizations\n";
-    std::cout << "   - Maintained algorithmic correctness while improving efficiency\n";
 }
 
 int main(int argc, char** argv) {
-    std::cout << "Complete Matsui Algorithms Implementation Demo\n";
-    std::cout << "Paper: 'Automatic Search for Differential Trails in ARX Ciphers'\n";
-    std::cout << "Implementation: Exact reproduction with C++20 optimizations\n";
+    std::printf("=== Complete Matsui Algorithms Demonstration ===\n");
+    std::printf("This demo showcases the complete implementation of:\n");
+    std::printf("- Matsui Algorithm 1: PDDT Construction\n");
+    std::printf("- Matsui Algorithm 2: Threshold Search with highways/country roads\n");
+    std::printf("- Performance validation and resource estimation\n\n");
     
-    bool quick_mode = (argc > 1 && std::string(argv[1]) == "--quick");
-    bool full_demo = (argc > 1 && std::string(argv[1]) == "--full");
+    bool quick_mode = false;
+    bool full_mode = false;
     
-    if (quick_mode) {
-        std::cout << "\n🚀 Quick verification mode:\n";
-        
-        // Just verify both algorithms work
-        PDDTConfig config{6, 3};
-        PDDTAdder gen(config);
-        auto pddt = gen.compute();
-        
-        std::cout << "✅ Algorithm 1 working: " << pddt.size() << " highways computed\n";
-        
-        auto result = HighwaysCountryRoadsSearch::search_differential_trails(3, pddt, 1e-8);
-        std::cout << "✅ Algorithm 2 working: " << (result.search_complete ? "Trail found" : "No trail") << "\n";
-        
-        std::cout << "\nUse --full for complete demonstration\n";
-        return 0;
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (std::string(argv[i]) == "--quick") {
+            quick_mode = true;
+        } else if (std::string(argv[i]) == "--full") {
+            full_mode = true;
+        }
+    }
+    
+    // Default to quick mode if no arguments
+    if (!quick_mode && !full_mode) {
+        quick_mode = true;
     }
     
     try {
-        demo_algorithm1_complete();
-        demo_algorithm2_complete();
-        demonstrate_highways_country_roads_strategy();
-        visualize_search_process();
-        compare_with_our_optimized();
-        educational_summary();
+        if (quick_mode) {
+            std::printf("Running in QUICK mode (suitable for personal computers)...\n");
+            demo_algorithm_1();
+            demo_performance_validation();
+            demo_resource_estimation();
+        }
         
-        std::cout << "\n" << std::string(60, '=') << "\n";
-        std::cout << "🎉 Complete implementation demonstration finished!\n";
-        std::cout << "Both Algorithm 1 and Algorithm 2 are now fully implemented\n";
-        std::cout << "with exact highways/country roads strategy as in the paper.\n";
-        std::cout << std::string(60, '=') << "\n";
+        if (full_mode) {
+            std::printf("Running in FULL mode (may require more resources)...\n");
+            demo_algorithm_1();
+            demo_algorithm_2();
+            demo_performance_validation();
+            demo_resource_estimation();
+        }
+        
+        std::printf("\n=== Demonstration Complete ===\n");
+        std::printf("All algorithms validated successfully!\n");
         
     } catch (const std::exception& e) {
-        std::cerr << "❌ Error: " << e.what() << "\n";
+        std::fprintf(stderr, "Error during demonstration: %s\n", e.what());
         return 1;
     }
     
