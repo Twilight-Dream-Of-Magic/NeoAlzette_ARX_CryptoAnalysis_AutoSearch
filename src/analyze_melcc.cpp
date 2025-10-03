@@ -10,32 +10,15 @@
 #include "neoalzette.hpp"
 #include "wallen_fast.hpp"
 #include "neoalz_lin.hpp"
+#include "mask_backtranspose.hpp"
 
 namespace neoalz {
 
 struct LinPair { uint32_t mA, mB; int w; int r; };
 
-// Backtranspose approximations for mask transport (see threshold_lin.cpp)
-static inline uint32_t l1_backtranspose(uint32_t x) noexcept {
-    uint32_t out = x;
-    for (int it=0; it<3; ++it){
-        uint32_t y = out ^ rotr(out,2) ^ rotr(out,8) ^ rotr(out,10) ^ rotr(out,14)
-                   ^ rotr(out,16) ^ rotr(out,18) ^ rotr(out,20) ^ rotr(out,24)
-                   ^ rotr(out,28) ^ rotr(out,30);
-        out ^= (x ^ y);
-    }
-    return out;
-}
-static inline uint32_t l2_backtranspose(uint32_t x) noexcept {
-    uint32_t out = x;
-    for (int it=0; it<3; ++it){
-        uint32_t y = out ^ rotr(out,2) ^ rotr(out,4) ^ rotr(out,8) ^ rotr(out,12)
-                   ^ rotr(out,14) ^ rotr(out,16) ^ rotr(out,18) ^ rotr(out,22)
-                   ^ rotr(out,24) ^ rotr(out,30);
-        out ^= (x ^ y);
-    }
-    return out;
-}
+// Backtranspose via exact (L^{-1})^T using Gauss–Jordan constructed rows
+static inline uint32_t l1_backtranspose(uint32_t x) noexcept { return l1_backtranspose_exact(x); }
+static inline uint32_t l2_backtranspose(uint32_t x) noexcept { return l2_backtranspose_exact(x); }
 
 struct Cmp { bool operator()(const LinPair& a, const LinPair& b) const noexcept { return a.w > b.w; } };
 
