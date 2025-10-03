@@ -11,6 +11,8 @@
 #include "wallen_fast.hpp"
 #include "neoalz_lin.hpp"
 #include "mask_backtranspose.hpp"
+#include "lb_round_lin.hpp"
+#include "suffix_lb_lin.hpp"
 
 namespace neoalz {
 
@@ -45,6 +47,9 @@ int main(int argc, char** argv){
         }
     }
 
+    LbFullRoundLin LBL;
+    SuffixLBLin SFX;
+
     std::priority_queue<LinPair, std::vector<LinPair>, Cmp> pq;
     pq.push({start_mA,start_mB,0,0});
     int best = std::numeric_limits<int>::max();
@@ -54,12 +59,17 @@ int main(int argc, char** argv){
         if (cur.w >= std::min(best, Wcap)) continue;
         if (cur.r == R){ best = std::min(best, cur.w); continue; }
 
+        // Lower bound prune
+        int lb1 = LBL.lb_full(cur.mA, cur.mB, 3,3, 32, std::min(best, Wcap) - cur.w);
+        int lbTail = (R - cur.r - 1 > 0)? SFX.bound(cur.mA, cur.mB, R - cur.r - 1, std::min(best, Wcap) - cur.w - lb1) : 0;
+        if (cur.w + lb1 + lbTail >= std::min(best, Wcap)) continue;
+
         // Subround 0 - Add 1: B += F(A)
         uint32_t mu1 = cur.mB;
         uint32_t nu1 = rotr(cur.mA, 31) ^ rotr(cur.mA, 17);
-        enumerate_wallen_omegas(mu1, nu1, Wcap - cur.w, [&](uint32_t Bp_mask, int w1){
+        enumerate_wallen_omegas(mu1, nu1, std::min(best, Wcap) - cur.w, [&](uint32_t Bp_mask, int w1){
             uint32_t mu2 = cur.mA; uint32_t nu2 = 0u; // var-const
-            enumerate_wallen_omegas(mu2, nu2, Wcap - (cur.w + w1), [&](uint32_t Ap_mask, int w2){
+            enumerate_wallen_omegas(mu2, nu2, std::min(best, Wcap) - (cur.w + w1), [&](uint32_t Ap_mask, int w2){
                 // Linear diffusion
                 uint32_t A2_mask = l1_backtranspose( Ap_mask ^ rotl(Bp_mask,24) );
                 uint32_t B2_mask = l2_backtranspose( Bp_mask ^ rotl(Ap_mask ^ rotl(Bp_mask,24),16) );
@@ -71,10 +81,10 @@ int main(int argc, char** argv){
                 // Subround 1 - Add 3: A* += F(B2)
                 uint32_t mu3 = Astar_mask;
                 uint32_t nu3 = rotr(B2_mask,31) ^ rotr(B2_mask,17);
-                enumerate_wallen_omegas(mu3, nu3, Wcap - (cur.w + w1 + w2), [&](uint32_t A3_mask, int w3){
+                enumerate_wallen_omegas(mu3, nu3, std::min(best, Wcap) - (cur.w + w1 + w2), [&](uint32_t A3_mask, int w3){
                     // Add 4: var-const
                     uint32_t mu4 = B2_mask; uint32_t nu4 = 0u;
-                    enumerate_wallen_omegas(mu4, nu4, Wcap - (cur.w + w1 + w2 + w3), [&](uint32_t B3_mask, int w4){
+                    enumerate_wallen_omegas(mu4, nu4, std::min(best, Wcap) - (cur.w + w1 + w2 + w3), [&](uint32_t B3_mask, int w4){
                         uint32_t B4in = B3_mask ^ rotl(A3_mask,24);
                         uint32_t A4in = A3_mask ^ rotl(B4in,16);
                         uint32_t Aout = l2_backtranspose(A4in);
