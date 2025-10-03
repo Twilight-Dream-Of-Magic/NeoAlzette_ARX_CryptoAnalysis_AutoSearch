@@ -39,8 +39,9 @@ struct LbFullRound {
     }
 
     // RC needed for var–const in both subrounds
-    static constexpr uint32_t RC1 = 0xC117176A;
-    static constexpr uint32_t RC6 = 0x13198102; // RC[6]
+    // Round constants used in var–const additions (subround indices)
+    static constexpr uint32_t ROUND_CONST_SUB0_ADD2 = 0xC117176A; // RC[1]
+    static constexpr uint32_t ROUND_CONST_SUB1_ADD4 = 0x13198102; // RC[6]
 
     int lb_full(uint32_t dA0, uint32_t dB0, int K1=4, int K2=4, int n=32, int cap=64){
         uint64_t key = (uint64_t(dA0)<<32) | dB0;
@@ -64,7 +65,7 @@ struct LbFullRound {
         if ((int)G1.size() > K1eff) G1.resize(K1eff);
 
         // (2) var–const via add-constant model
-        uint32_t c1 = (uint32_t)(-int32_t(RC1));
+        uint32_t c1 = (uint32_t)(-int32_t(ROUND_CONST_SUB0_ADD2));
         std::vector<std::pair<uint32_t,int>> G2; G2.reserve(K2eff);
         // enumerate best single candidate (greedy) and a few neighbors by flipping low bits heuristically
         auto best1 = addconst_best(dA0, c1, n);
@@ -87,7 +88,7 @@ struct LbFullRound {
         }
 
         int best = cap;
-        uint32_t c2 = (uint32_t)(-int32_t(RC6));
+        uint32_t c2 = (uint32_t)(-int32_t(ROUND_CONST_SUB1_ADD4));
         for (auto &c : stage1){
             // (3) var–var: A* += F(B2)
             uint32_t alpha1 = c.A2;

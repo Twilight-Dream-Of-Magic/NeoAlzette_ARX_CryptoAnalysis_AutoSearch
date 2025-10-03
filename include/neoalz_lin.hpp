@@ -1,4 +1,22 @@
 #pragma once
+#pragma once
+/*
+ * NeoAlzette linear layers and cross-branch delta injectors (value domain)
+ *
+ * Symbols (GF(2) bit-vectors of length n=32 by default):
+ *   x << r, x >> r   : bitwise rotations (rotl/rotr)
+ *   L1(x) = x ^ rotl(x,2) ^ rotl(x,10) ^ rotl(x,18) ^ rotl(x,24)
+ *   L2(x) = x ^ rotl(x,8) ^ rotl(x,14) ^ rotl(x,22) ^ rotl(x,30)
+ *
+ * Cross-branch linearized mix (delta domain; round constants vanish):
+ *   From B: (C0,D0) = ( L2(B), L1(rotr(B,3)) );
+ *           t = rotl(C0 ^ D0, 31);
+ *           C0 ^= rotl(D0,17);  D0 ^= rotr(t,16)
+ *   From A: (C1,D1) = ( L1(A), L2(rotl(A,24)) );
+ *           t = rotr(C1 ^ D1, 31);
+ *           C1 ^= rotr(D1,17);  D1 ^= rotl(t,16)
+ * These equal the linear parts used in NeoAlzette’s subrounds with constants removed.
+ */
 #include <cstdint>
 #include "neoalzette.hpp"
 

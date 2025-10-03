@@ -1,4 +1,15 @@
 #pragma once
+/*
+ * LM-2001 fast enumeration (Lipmaa–Moriai) for addition x + y = z over Z/2^n Z
+ *
+ * Inputs:
+ *   alpha = x ⊕ y  (input difference)
+ *   beta  = carry-related projection depending on F(A) in ARX var–var
+ * Output:
+ *   Enumerates feasible gamma with exact LM weight w = HW(psi mod 2^{n-1})
+ *   using prefix pruning and incremental popcount.
+ * Reference: Lipmaa–Moriai 2001; "Automatic Search for Differential Trails in ARX Ciphers".
+ */
 #include <cstdint>
 #include <functional>
 #include <array>

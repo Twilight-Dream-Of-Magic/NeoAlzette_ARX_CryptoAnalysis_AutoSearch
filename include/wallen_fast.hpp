@@ -1,4 +1,13 @@
 #pragma once
+/*
+ * Wallén model for linear approximations of addition modulo 2^n
+ *
+ * For masks mu, nu (inputs) and omega (sum), define v = mu ⊕ nu ⊕ omega.
+ * Let z* = M_n^T v be the carry-support vector (suffix XOR of v).
+ * Feasibility requires (mu ⊕ omega) ≼ z* and (nu ⊕ omega) ≼ z* (bitwise ≤).
+ * Weight equals HW(z*).
+ * Reference: Theo Wallén; and ARX hull-search literature.
+ */
 #include <cstdint>
 #include <functional>
 #include <vector>

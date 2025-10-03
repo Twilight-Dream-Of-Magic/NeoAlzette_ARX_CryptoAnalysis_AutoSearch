@@ -1,4 +1,12 @@
 #pragma once
+/*
+ * Matsui-style threshold search framework
+ *
+ * Maintains a priority queue over partial trails ordered by w + LB.
+ * Pushes children only if w + LB < min(best, cap).
+ * Suitable for ARX trails where local expansions are pruned by exact local models
+ * and lower bounds combine one-round tight bounds with suffix bounds (Highway/recursive).
+ */
 #include <cstdint>
 #include <vector>
 #include <queue>

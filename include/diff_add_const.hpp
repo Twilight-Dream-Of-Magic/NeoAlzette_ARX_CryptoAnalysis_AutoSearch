@@ -5,6 +5,7 @@
 
 namespace neoalz {
 
+// Result for best gamma of addition-by-constant
 struct AddConstBest { uint32_t gamma; int weight; };
 
 // Compute the next carry bit for full-adder at one bit position:
