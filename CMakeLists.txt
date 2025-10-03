@@ -23,6 +23,11 @@ add_library(neoalzette STATIC
     src/utility_tools.cpp
     src/matsui_algorithm2_complete.cpp
     src/pddt_algorithm1_complete.cpp
+    # NeoAlzette專門模型
+    src/neoalzette_differential_model.cpp
+    src/neoalzette_linear_model.cpp
+    src/neoalzette_medcp_analyzer.cpp
+    src/neoalzette_melcc_analyzer.cpp
 )
 target_include_directories(neoalzette PUBLIC include)
 
@@ -72,6 +77,11 @@ target_link_libraries(complete_matsui_demo PRIVATE neoalzette)
 add_executable(demo_paper_algorithms src/demo_paper_algorithms.cpp)
 target_include_directories(demo_paper_algorithms PUBLIC include)
 target_link_libraries(demo_paper_algorithms PRIVATE neoalzette)
+
+# NeoAlzette MEDCP/MELCC analysis demo
+add_executable(demo_neoalzette_analysis src/demo_neoalzette_analysis.cpp)
+target_include_directories(demo_neoalzette_analysis PUBLIC include)
+target_link_libraries(demo_neoalzette_analysis PRIVATE neoalzette)
 
 option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo demo_paper_algorithms)" OFF)
 if(NOT NA_BUILD_DEMOS)
