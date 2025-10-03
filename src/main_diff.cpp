@@ -1,6 +1,7 @@
 #include <iostream>
 #include "neoalzette.hpp"
 #include "lm_wallen.hpp"
+#include <vector>
 
 using namespace neoalz;
 
@@ -10,7 +11,7 @@ int main(int argc, char** argv){
     uint32_t dA0 = 0, dB0 = 0;
     // demo: single local add min weight
     uint32_t alpha = dB0;
-    uint32_t beta  = (NeoAlzetteBox::rotl(dA0,31) ^ NeoAlzetteBox::rotl(dA0,17));
+    uint32_t beta  = (rotl(dA0,31) ^ rotl(dA0,17));
     int best = 1e9;
     // local generator is in bnb.cpp as free function (but we can inline a copy)
     auto enum_gammas = [&](auto&& yield){

@@ -1,4 +1,3 @@
-\
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -6,16 +5,14 @@
 #include <tuple>
 #include <limits>
 #include <algorithm>
-#include "include/wallen_fast.hpp"
-#include "include/lb_round_full.hpp" // reuse diff linear pieces (rot/lin maps)
-#include "include/highway_table.hpp"
+#include "wallen_fast.hpp"
+#include "lb_round_full.hpp" // reuse diff linear pieces (rot/lin maps)
+#include "highway_table.hpp"
+#include "neoalzette.hpp"
 
 namespace neoalz {
 
 struct LinPair { uint32_t mA, mB; int w; int r; };
-
-constexpr uint32_t rotl(uint32_t x, int r) noexcept { r&=31; return (x<<r)|(x>>(32-r)); }
-constexpr uint32_t rotr(uint32_t x, int r) noexcept { r&=31; return (x>>r)|(x<<(32-r)); }
 
 static inline uint32_t l1_forward(uint32_t x) noexcept {
     return x ^ rotl(x,2) ^ rotl(x,10) ^ rotl(x,18) ^ rotl(x,24);

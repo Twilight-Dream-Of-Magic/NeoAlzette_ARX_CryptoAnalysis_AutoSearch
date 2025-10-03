@@ -1,14 +1,13 @@
-\
 #pragma once
 #include <cstdint>
 #include <functional>
 #include <vector>
 #include <algorithm>
+#include "neoalzette.hpp"
 
 namespace neoalz {
 
-constexpr uint32_t rotl(uint32_t x, int r) noexcept { r&=31; return (x<<r)|(x>>(32-r)); }
-constexpr uint32_t rotr(uint32_t x, int r) noexcept { r&=31; return (x>>r)|(x<<(32-r)); }
+// use rotl/rotr from neoalzette.hpp
 
 // Compute z* = M_n^T v  (carry support vector) for 32-bit via prefix XOR trick.
 // v is LSB-first bit-vector in uint32_t.

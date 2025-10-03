@@ -1,4 +1,3 @@
-\
 #include <cstdint>
 #include <vector>
 #include <queue>
@@ -6,9 +5,9 @@
 #include <limits>
 #include <cstdio>
 #include <tuple>
-#include "include/lb_round_full.hpp"
-#include "include/suffix_lb.hpp"
-#include "include/highway_table.hpp"
+#include "lb_round_full.hpp"
+#include "suffix_lb.hpp"
+#include "highway_table.hpp"
 
 namespace neoalz {
 

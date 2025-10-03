@@ -1,14 +1,12 @@
-\
 #pragma once
 #include <cstdint>
 #include <functional>
 #include <array>
+#include "neoalzette.hpp"
 
 namespace neoalz {
 
-// rotate helpers (used by callers too)
-constexpr uint32_t rotl(uint32_t x, int r) noexcept { r &= 31; return (x<<r) | (x>>(32-r)); }
-constexpr uint32_t rotr(uint32_t x, int r) noexcept { r &= 31; return (x>>r) | (x<<(32-r)); }
+// rotate helpers are provided by neoalzette.hpp
 
 // Fast incremental LM-2001 enumeration with prefix-pruning.
 // Tracks psi low-bit count incrementally to avoid recomputing popcounts.
@@ -71,6 +69,12 @@ static inline void enumerate_lm_gammas_fast(uint32_t alpha, uint32_t beta, int n
             st.push_back({i+1, g2, a_pref2, b_pref2, psi_pref2, wlb});
         }
     }
+}
+
+// convenience alias matching older call sites
+template<typename Yield>
+static inline void enumerate_lm_gammas(uint32_t alpha, uint32_t beta, int n, int w_cap, Yield&& yield){
+    enumerate_lm_gammas_fast(alpha, beta, n, w_cap, std::forward<Yield>(yield));
 }
 
 } // namespace neoalz

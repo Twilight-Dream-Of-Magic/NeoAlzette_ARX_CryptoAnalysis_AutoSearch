@@ -9,8 +9,8 @@ namespace neoalz {
 std::pair<uint32_t,uint32_t> canonical(uint32_t a, uint32_t b){
     uint32_t bestA=a,bestB=b;
     for(int r=0;r<32;++r){
-        uint32_t aa = NeoAlzetteBox::rotl(a,r);
-        uint32_t bb = NeoAlzetteBox::rotl(b,r);
+        uint32_t aa = rotl(a,r);
+        uint32_t bb = rotl(b,r);
         if (std::tie(aa,bb) < std::tie(bestA,bestB)) { bestA=aa; bestB=bb; }
     }
     return {bestA,bestB};
