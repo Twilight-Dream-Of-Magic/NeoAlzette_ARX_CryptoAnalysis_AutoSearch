@@ -9,6 +9,7 @@
 #include <algorithm>
 #include "neoalzette.hpp"
 #include "wallen_fast.hpp"
+#include "neoalz_lin.hpp"
 
 namespace neoalz {
 
