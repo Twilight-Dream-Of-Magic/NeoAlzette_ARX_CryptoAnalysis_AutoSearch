@@ -12,7 +12,7 @@
 #include <functional>
 #include <vector>
 #include <algorithm>
-#include "neoalzette.hpp"
+#include "../Common/neoalzette.hpp"
 
 namespace neoalz {
 

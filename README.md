@@ -21,72 +21,75 @@
 - 首次支持**任意输出掩码**的自动搜索  
 - 找到了 SPECK、Alzette 等 ARX 密码的**最佳差分线性区分器**
 
-## 算法背景
-
-### ARX 密码结构
-
-ARX 密码基于三种基本运算：
-- **Addition (⊞)**：模 2^n 加法
-- **Rotation (<<<, >>>)**：循环位移  
-- **XOR (⊕)**：异或运算
-
-这种结构在软件实现中具有优异的性能，同时提供了足够的密码学强度。
-
-### NeoAlzette 算法
-
-NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点：
-
-- **64位状态**：(A, B) ∈ F₃₂² 
-- **双子轮结构**：每轮包含两个子轮操作
-- **非线性函数**：F(A) = B = B ⊞ (A<<< 31) ⊕ (A <<< 17) ⊕ RC[0], F(B) = A = A ⊞ (B<<< 31) ⊕ (B <<< 17) ⊕ RC[5]
-- **线性扩散层**：L₁, L₂ 提供分支数保证
-- **轮常数注入**：16个预定义轮常数
-
-## 精简项目结构
+## 模块化项目结构 🎯
 
 ```
-├── include/                          # 核心算法头文件库（精简版）
-│   ├── neoalzette.hpp               # NeoAlzette ARX-box 核心实现
-│   ├── lm_fast.hpp                  # Lipmaa-Moriai 差分快速枚举
-│   ├── wallen_fast.hpp              # Wallén 线性相关性计算
-│   ├── wallen_optimized.hpp         # Wallén 优化版：预计算自动机
-│   ├── highway_table.hpp            # 差分 Highway 后缀下界表
-│   ├── highway_table_lin.hpp        # 线性 Highway 后缀下界表
-│   ├── threshold_search.hpp         # Matsui 阈值搜索框架
-│   ├── threshold_search_optimized.hpp # 并行化阈值搜索
-│   ├── matsui_complete.hpp          # 完整Matsui Algorithm 2实现
-│   ├── pddt.hpp                     # 部分差分分布表 (Algorithm 1)
-│   ├── pddt_optimized.hpp           # 优化pDDT构建算法
-│   ├── lb_round_full.hpp            # 完整轮函数差分下界
-│   ├── lb_round_lin.hpp             # 完整轮函数线性下界  
-│   ├── suffix_lb.hpp                # 多轮后缀差分下界
-│   ├── suffix_lb_lin.hpp            # 多轮后缀线性下界
-│   ├── diff_add_const.hpp           # 模加常数差分性质（MEDCP核心）
-│   ├── canonicalize.hpp             # 状态标准化（旋转等价类）
-│   ├── mask_backtranspose.hpp       # 线性掩码反向传播
-│   ├── neoalz_lin.hpp               # NeoAlzette 线性层精确实现
-│   └── trail_export.hpp             # 轨道导出和CSV格式化
-├── src/                             # 核心分析工具（精简版）
-│   ├── analyze_medcp.cpp            # 🔥 MEDCP 差分轨道搜索器
+├── include/                          # 🧠 算法库（模块化架构）
+│   ├── MEDCP/                       # 🔴 MEDCP差分分析模块
+│   │   ├── lm_fast.hpp              # Lipmaa-Moriai快速差分枚举
+│   │   ├── lb_round_full.hpp        # 完整轮函数差分下界
+│   │   ├── highway_table.hpp        # 差分Highway后缀下界表
+│   │   ├── suffix_lb.hpp            # 多轮后缀差分下界
+│   │   └── diff_add_const.hpp       # 模加常数差分性质
+│   ├── MELCC/                       # 🔵 MELCC线性分析模块
+│   │   ├── wallen_fast.hpp          # Wallén线性相关性快速算法
+│   │   ├── wallen_optimized.hpp     # Wallén优化版：预计算自动机
+│   │   ├── lb_round_lin.hpp         # 完整轮函数线性下界
+│   │   ├── highway_table_lin.hpp    # 线性Highway后缀下界表
+│   │   ├── suffix_lb_lin.hpp        # 多轮后缀线性下界
+│   │   └── mask_backtranspose.hpp   # 线性掩码反向传播
+│   └── Common/                      # ⚪ 通用核心组件
+│       ├── neoalzette.hpp           # NeoAlzette ARX-box核心实现
+│       ├── neoalz_lin.hpp           # NeoAlzette线性层精确实现
+│       ├── threshold_search.hpp     # Matsui阈值搜索框架
+│       ├── threshold_search_optimized.hpp # 并行化阈值搜索
+│       ├── matsui_complete.hpp      # 完整Matsui Algorithm 2实现
+│       ├── pddt.hpp                 # 部分差分分布表(Algorithm 1)
+│       ├── pddt_optimized.hpp       # 优化pDDT构建算法
+│       ├── canonicalize.hpp         # 状态标准化（旋转等价类）
+│       ├── trail_export.hpp         # 轨道导出和CSV格式化
+│       ├── state_optimized.hpp      # 优化状态表示
+│       └── lb_round.hpp             # 基础轮下界算法
+├── src/                             # 🛠️ 核心分析工具
+│   ├── analyze_medcp.cpp            # 🔥 MEDCP差分轨道搜索器
 │   ├── analyze_medcp_optimized.cpp  # ⚡ 优化版MEDCP分析器（推荐）
-│   ├── analyze_melcc.cpp            # 🔥 MELCC 线性轨道搜索器
+│   ├── analyze_melcc.cpp            # 🔥 MELCC线性轨道搜索器
 │   ├── analyze_melcc_optimized.cpp  # ⚡ 优化版MELCC分析器（推荐）
 │   ├── complete_matsui_demo.cpp     # 📚 完整Matsui Algorithm 1&2演示
-│   ├── highway_table_build.cpp      # 🔧 差分 Highway 表构建器
-│   ├── highway_table_build_lin.cpp  # 🔧 线性 Highway 表构建器
+│   ├── highway_table_build.cpp      # 🔧 差分Highway表构建器
+│   ├── highway_table_build_lin.cpp  # 🔧 线性Highway表构建器
 │   ├── threshold_lin.cpp            # 线性阈值搜索演示
 │   ├── gen_round_lb_table.cpp       # 轮下界表生成器
-│   ├── neoalzette.cpp               # NeoAlzette 算法实现
-│   └── pddt.cpp                     # 部分差分分布表实现
-├── papers/                          # 核心理论论文（PDF）
-├── papers_txt/                      # 论文文本提取版本
+│   └── neoalzette.cpp               # NeoAlzette算法实现
+├── papers/                          # 📄 核心理论论文（PDF）
 ├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 11篇论文完全理解指南（25,000+字）
-├── ALZETTE_VS_NEOALZETTE.md         # Alzette vs NeoAlzette 设计对比
-├── ALGORITHM_IMPLEMENTATION_STATUS.md # 论文算法实现状态分析
+├── ALZETTE_VS_NEOALZETTE.md         # Alzette vs NeoAlzette设计对比
 ├── CMakeLists.txt                   # 构建配置文件
-├── LICENSE                          # GPL v3.0 开源许可证
-└── .gitignore                       # Git 忽略配置
+├── LICENSE                          # GPL v3.0开源许可证
+└── .gitignore                       # Git忽略配置
 ```
+
+### 🎨 模块化设计优势
+
+**1. 清晰的功能分离**
+- **MEDCP模块**：专注差分密码分析的所有算法和数据结构
+- **MELCC模块**：专注线性密码分析的所有算法和数据结构  
+- **Common模块**：两种分析方法共用的核心组件
+
+**2. 易于维护和扩展**
+- 每个模块内部高内聚，模块间低耦合
+- 新的差分算法只需添加到MEDCP模块
+- 新的线性算法只需添加到MELCC模块
+
+**3. 学习友好性**
+- 想学习差分分析？只需关注MEDCP模块
+- 想学习线性分析？只需关注MELCC模块
+- 想理解ARX结构？从Common模块开始
+
+**4. 工程最佳实践**
+- 符合软件工程的模块化设计原则
+- 便于团队协作和代码审查
+- 降低了代码复杂度和维护成本
 
 ## 构建说明
 
@@ -460,15 +463,16 @@ time ./analyze_melcc_optimized 4 15
 ```
 第1步：工具验证 → ./analyze_medcp_optimized 4 15 (确认环境)
 第2步：理论学习 → 阅读 PAPERS_COMPLETE_ANALYSIS_CN.md  
-第3步：参数实践 → 测试不同Wcap和起始状态
-第4步：高级应用 → 申请集群资源进行真正研究
+第3步：模块探索 → 分别学习MEDCP、MELCC、Common模块
+第4步：参数实践 → 测试不同Wcap和起始状态
+第5步：高级应用 → 申请集群资源进行真正研究
 ```
 
 ### **重要文档索引**
 - **快速上手**: 本README的CLI使用指南
 - **算法理解**: `PAPERS_COMPLETE_ANALYSIS_CN.md` (25,000+字深度分析)
 - **设计对比**: `ALZETTE_VS_NEOALZETTE.md` (原始vs扩展设计)
-- **实现状态**: `ALGORITHM_IMPLEMENTATION_STATUS.md` (论文算法覆盖度)
+- **模块说明**: 查看各模块目录中的头文件注释
 
 ## 许可证和引用
 
@@ -496,6 +500,7 @@ NeoAlzette密码分析工具集提供了：
 - ✅ **完整的ARX分析能力**：从理论到实现的完整工具链
 - ✅ **学术级准确性**：基于11篇核心论文的严格实现
 - ✅ **工程级优化**：显著的性能提升和并行化支持
+- ✅ **模块化架构**：MEDCP/MELCC/Common清晰分离，易于学习和维护
 - ✅ **实用性指导**：清晰的个人电脑vs集群使用指南
 
 **适合用户**：

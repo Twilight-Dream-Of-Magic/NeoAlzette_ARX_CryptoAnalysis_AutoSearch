@@ -4,9 +4,9 @@
 #include <iostream>
 #include <random>
 #include <algorithm>
-#include "highway_table_lin.hpp"
-#include "lb_round_lin.hpp"
-#include "canonicalize.hpp"
+#include "MELCC/highway_table_lin.hpp"
+#include "MELCC/lb_round_lin.hpp"
+#include "Common/canonicalize.hpp"
 
 using neoalz::HighwayTableLin;
 

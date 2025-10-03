@@ -17,7 +17,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
-#include "neoalzette.hpp"
+#include "../Common/neoalzette.hpp"
 
 namespace neoalz {
 

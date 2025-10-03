@@ -5,8 +5,8 @@
 #include <algorithm>
 #include <utility>
 #include "lm_fast.hpp"
-#include "pddt.hpp"
-#include "neoalz_lin.hpp"
+#include "../Common/pddt.hpp"
+#include "../Common/neoalz_lin.hpp"
 #include "diff_add_const.hpp"
 
 namespace neoalz {

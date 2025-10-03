@@ -16,10 +16,10 @@
 #include <iomanip>
 #include <fstream>
 #include <sstream>
-#include "pddt.hpp"
-#include "pddt_optimized.hpp"  
-#include "matsui_complete.hpp"
-#include "threshold_search.hpp"
+#include "Common/pddt.hpp"
+#include "Common/pddt_optimized.hpp"  
+#include "Common/matsui_complete.hpp"
+#include "Common/threshold_search.hpp"
 
 using namespace neoalz;
 

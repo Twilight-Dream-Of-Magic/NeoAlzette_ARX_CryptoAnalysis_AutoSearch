@@ -5,11 +5,11 @@
 #include <tuple>
 #include <limits>
 #include <algorithm>
-#include "wallen_fast.hpp"
-#include "lb_round_full.hpp" // reuse diff linear pieces (rot/lin maps)
-#include "highway_table.hpp"
-#include "neoalzette.hpp"
-#include "mask_backtranspose.hpp"
+#include "MELCC/wallen_fast.hpp"
+#include "MEDCP/lb_round_full.hpp" // reuse diff linear pieces (rot/lin maps)
+#include "MEDCP/highway_table.hpp"
+#include "Common/neoalzette.hpp"
+#include "MELCC/mask_backtranspose.hpp"
 
 namespace neoalz {
 

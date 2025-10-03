@@ -14,16 +14,16 @@
 #include <thread>
 
 // Use optimized components
-#include "neoalzette.hpp"
-#include "lm_fast.hpp"
-#include "lb_round_full.hpp"
-#include "suffix_lb.hpp"
-#include "highway_table.hpp"
-#include "threshold_search_optimized.hpp"
-#include "neoalz_lin.hpp"
-#include "state_optimized.hpp"
-#include "diff_add_const.hpp"
-#include "trail_export.hpp"
+#include "Common/neoalzette.hpp"
+#include "MEDCP/lm_fast.hpp"
+#include "MEDCP/lb_round_full.hpp"
+#include "MEDCP/suffix_lb.hpp"
+#include "MEDCP/highway_table.hpp"
+#include "Common/threshold_search_optimized.hpp"
+#include "Common/neoalz_lin.hpp"
+#include "Common/state_optimized.hpp"
+#include "MEDCP/diff_add_const.hpp"
+#include "Common/trail_export.hpp"
 
 namespace neoalz {
 

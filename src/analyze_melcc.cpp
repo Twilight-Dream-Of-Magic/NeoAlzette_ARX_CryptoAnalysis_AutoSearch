@@ -10,15 +10,15 @@
 #include <unordered_map>
 #include <map>
 #include <sstream>
-#include "neoalzette.hpp"
-#include "wallen_fast.hpp"
-#include "neoalz_lin.hpp"
-#include "mask_backtranspose.hpp"
-#include "lb_round_lin.hpp"
-#include "suffix_lb_lin.hpp"
-#include "canonicalize.hpp"
-#include "highway_table_lin.hpp"
-#include "trail_export.hpp"
+#include "Common/neoalzette.hpp"
+#include "MELCC/wallen_fast.hpp"
+#include "Common/neoalz_lin.hpp"
+#include "MELCC/mask_backtranspose.hpp"
+#include "MELCC/lb_round_lin.hpp"
+#include "MELCC/suffix_lb_lin.hpp"
+#include "Common/canonicalize.hpp"
+#include "MELCC/highway_table_lin.hpp"
+#include "Common/trail_export.hpp"
 
 namespace neoalz {
 

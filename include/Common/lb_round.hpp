@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include "pddt.hpp"
-#include "lm_fast.hpp"
+#include "../MEDCP/lm_fast.hpp"
 
 namespace neoalz {
 

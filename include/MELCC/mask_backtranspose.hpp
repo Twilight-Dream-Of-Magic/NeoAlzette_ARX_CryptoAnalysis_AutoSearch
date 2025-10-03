@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <array>
-#include "neoalz_lin.hpp"
+#include "../Common/neoalz_lin.hpp"
 
 namespace neoalz {
 

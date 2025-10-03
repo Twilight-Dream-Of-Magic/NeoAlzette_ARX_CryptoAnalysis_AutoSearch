@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <array>
-#include "neoalzette.hpp"
+#include "../Common/neoalzette.hpp"
 
 namespace neoalz {
 

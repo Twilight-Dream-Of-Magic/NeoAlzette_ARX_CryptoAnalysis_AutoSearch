@@ -5,9 +5,9 @@
 #include <limits>
 #include <cstdio>
 #include <tuple>
-#include "lb_round_full.hpp"
-#include "suffix_lb.hpp"
-#include "highway_table.hpp"
+#include "MEDCP/lb_round_full.hpp"
+#include "MEDCP/suffix_lb.hpp"
+#include "MEDCP/highway_table.hpp"
 
 namespace neoalz {
 

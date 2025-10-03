@@ -5,8 +5,8 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
-#include "highway_table.hpp"
-#include "lb_round_full.hpp"
+#include "MEDCP/highway_table.hpp"
+#include "MEDCP/lb_round_full.hpp"
 
 using neoalz::HighwayTable;
 

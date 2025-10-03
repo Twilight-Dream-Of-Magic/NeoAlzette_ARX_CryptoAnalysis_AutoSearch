@@ -4,8 +4,8 @@
 #include <tuple>
 #include <cstdint>
 #include <random>
-#include "pddt.hpp"
-#include "lb_round.hpp"
+#include "Common/pddt.hpp"
+#include "Common/lb_round.hpp"
 
 using namespace neoalz;
 

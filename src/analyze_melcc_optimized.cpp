@@ -13,16 +13,16 @@
 #include <chrono>
 
 // Use optimized components
-#include "neoalzette.hpp"
-#include "wallen_optimized.hpp"
-#include "neoalz_lin.hpp"
-#include "mask_backtranspose.hpp"
-#include "lb_round_lin.hpp"
-#include "suffix_lb_lin.hpp"
-#include "state_optimized.hpp"
-#include "highway_table_lin.hpp"
-#include "trail_export.hpp"
-#include "threshold_search_optimized.hpp"
+#include "Common/neoalzette.hpp"
+#include "MELCC/wallen_optimized.hpp"
+#include "Common/neoalz_lin.hpp"
+#include "MELCC/mask_backtranspose.hpp"
+#include "MELCC/lb_round_lin.hpp"
+#include "MELCC/suffix_lb_lin.hpp"
+#include "Common/state_optimized.hpp"
+#include "MELCC/highway_table_lin.hpp"
+#include "Common/trail_export.hpp"
+#include "Common/threshold_search_optimized.hpp"
 
 namespace neoalz {
 
