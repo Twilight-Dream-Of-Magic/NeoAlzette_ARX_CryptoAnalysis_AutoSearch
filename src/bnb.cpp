@@ -6,28 +6,28 @@
 
 namespace neoalz {
 
-std::pair<uint32_t,uint32_t> canonical(uint32_t a, uint32_t b){
-    uint32_t bestA=a,bestB=b;
-    for(int r=0;r<32;++r){
-        uint32_t aa = NeoAlzetteBox::rotl(a,r);
-        uint32_t bb = NeoAlzetteBox::rotl(b,r);
-        if (std::tie(aa,bb) < std::tie(bestA,bestB)) { bestA=aa; bestB=bb; }
+std::pair<uint32_t,uint32_t> canonical(uint32_t valueA, uint32_t valueB){
+    uint32_t bestA=valueA,bestB=valueB;
+    for(int rot=0;rot<32;++rot){
+        uint32_t rotatedA = rotl(valueA,rot);
+        uint32_t rotatedB = rotl(valueB,rot);
+        if (std::tie(rotatedA,rotatedB) < std::tie(bestA,bestB)) { bestA=rotatedA; bestB=rotatedB; }
     }
     return {bestA,bestB};
 }
 
 // LM prefix-pruning enumeration for gamma
-void enumerate_lm_gammas(uint32_t alpha, uint32_t beta, int n, auto&& yield){
-    struct F{ int i; uint32_t g; };
-    std::vector<F> st; st.reserve(96);
+void enumerate_lm_gammas(uint32_t lmAlpha, uint32_t lmBeta, int bitWidth, auto&& yield){
+    struct Frame{ int bitIndex; uint32_t gammaPrefix; };
+    std::vector<Frame> st; st.reserve(96);
     st.push_back({0,0});
     while(!st.empty()){
         auto [i,g] = st.back(); st.pop_back();
-        if (i==n){ yield(g); continue; }
+        if (i==bitWidth){ yield(g); continue; }
         for(int bit=0; bit<=1; ++bit){
             uint32_t g2 = g | (uint32_t(bit)<<i);
             uint32_t pm = (i==31)? 0xFFFFFFFFu : ((1u<<(i+1))-1);
-            uint32_t a = alpha & pm, b = beta & pm, gg = g2 & pm;
+            uint32_t a = lmAlpha & pm, b = lmBeta & pm, gg = g2 & pm;
             uint32_t a1 = (a<<1)&pm, b1=(b<<1)&pm, g1=(gg<<1)&pm;
             uint32_t psi1 = (a1 ^ b1) & (a1 ^ g1);
             uint32_t xorcond = (a ^ b ^ gg ^ b1);

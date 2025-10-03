@@ -1,14 +1,22 @@
-\
 #pragma once
+/*
+ * Wallén model for linear approximations of addition modulo 2^n
+ *
+ * For masks mu, nu (inputs) and omega (sum), define v = mu ⊕ nu ⊕ omega.
+ * Let z* = M_n^T v be the carry-support vector (suffix XOR of v).
+ * Feasibility requires (mu ⊕ omega) ≼ z* and (nu ⊕ omega) ≼ z* (bitwise ≤).
+ * Weight equals HW(z*).
+ * Reference: Theo Wallén; and ARX hull-search literature.
+ */
 #include <cstdint>
 #include <functional>
 #include <vector>
 #include <algorithm>
+#include "neoalzette.hpp"
 
 namespace neoalz {
 
-constexpr uint32_t rotl(uint32_t x, int r) noexcept { r&=31; return (x<<r)|(x>>(32-r)); }
-constexpr uint32_t rotr(uint32_t x, int r) noexcept { r&=31; return (x>>r)|(x<<(32-r)); }
+// use rotl/rotr from neoalzette.hpp
 
 // Compute z* = M_n^T v  (carry support vector) for 32-bit via prefix XOR trick.
 // v is LSB-first bit-vector in uint32_t.
@@ -42,9 +50,18 @@ static inline uint32_t MnT_of(uint32_t v) noexcept {
 // Fast Hamming weight
 static inline int hw32(uint32_t x) noexcept { return __builtin_popcount(x); }
 
-// Enumerate feasible omega given mu,nu for addition x+y=z (Wallén).
-// Yield signature: void(uint32_t omega, int weight)
-// Stops early if weight >= cap.
+/*
+ * enumerate_wallen_omegas
+ * Inputs:
+ *   mu, nu : input masks; cap : pruning threshold on HW(z*)
+ *   yield  : callback (omega, weight) per feasible mask omega
+ * Outputs:
+ *   Feasible omega and integer weight w = HW(z*) where z* = M_n^T (mu ⊕ nu ⊕ omega)
+ * Complexity:
+ *   Heuristic enumeration with early pruning; typical far below 2^n
+ * Reference:
+ *   T. Wallén; ARX linear model literature
+ */
 template<class Yield>
 inline void enumerate_wallen_omegas(uint32_t mu, uint32_t nu, int cap, Yield&& yield) {
     // We enumerate v = mu ^ nu ^ omega  ->  omega = v ^ mu ^ nu

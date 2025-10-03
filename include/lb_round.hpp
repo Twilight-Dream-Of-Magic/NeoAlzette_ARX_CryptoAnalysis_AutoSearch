@@ -1,10 +1,10 @@
-\
 #pragma once
 #include <cstdint>
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
 #include "pddt.hpp"
+#include "lm_fast.hpp"
 
 namespace neoalz {
 

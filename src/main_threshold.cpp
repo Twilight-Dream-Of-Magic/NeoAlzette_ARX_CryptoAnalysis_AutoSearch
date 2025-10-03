@@ -1,4 +1,3 @@
-\
 #include <iostream>
 #include <vector>
 #include <tuple>
@@ -9,38 +8,12 @@
 #include "lb_round_full.hpp"
 #include "suffix_lb.hpp"
 #include "highway_table.hpp"
+#include "neoalzette.hpp"
+#include "lm_fast.hpp"
+#include "threshold_search.hpp"
+#include "neoalz_lin.hpp"
 
-// We do not rely on the full class from neoalzette.hpp here to minimise coupling.
-// Instead we inline the exact forward linear pieces we need for difference propagation.
 namespace neoalz {
-
-constexpr uint32_t rotl(uint32_t x, int r) noexcept { r &= 31; return (x<<r) | (x>>(32-r)); }
-constexpr uint32_t rotr(uint32_t x, int r) noexcept { r &= 31; return (x>>r) | (x<<(32-r)); }
-
-static inline uint32_t l1_forward(uint32_t x) noexcept {
-    return x ^ rotl(x,2) ^ rotl(x,10) ^ rotl(x,18) ^ rotl(x,24);
-}
-static inline uint32_t l2_forward(uint32_t x) noexcept {
-    return x ^ rotl(x,8) ^ rotl(x,14) ^ rotl(x,22) ^ rotl(x,30);
-}
-
-// Linearised cross-branch injectors (delta versions: constants drop out)
-static inline std::pair<uint32_t,uint32_t> cd_from_B_delta(uint32_t B) noexcept {
-    uint32_t c = l2_forward(B);
-    uint32_t d = l1_forward(rotr(B,3));
-    uint32_t t = rotl(c ^ d, 31);
-    c ^= rotl(d,17);
-    d ^= rotr(t,16);
-    return {c,d};
-}
-static inline std::pair<uint32_t,uint32_t> cd_from_A_delta(uint32_t A) noexcept {
-    uint32_t c = l1_forward(A);
-    uint32_t d = l2_forward(rotl(A,24));
-    uint32_t t = rotr(c ^ d, 31);
-    c ^= rotr(d,17);
-    d ^= rotl(t,16);
-    return {c,d};
-}
 
 // Round constants (identical to your C++ reference; only RC[0..11] are used here)
 static constexpr uint32_t RC[16] = {
@@ -56,41 +29,6 @@ struct DiffPair { uint32_t dA, dB; };
 
 using namespace neoalz;
 
-// Enumerate all LM-feasible gammas for (alpha, beta) with exact weights,
-// subject to an addition-local weight cap (for pruning).
-template<typename Yield>
-static inline void enumerate_lm_gammas(uint32_t alpha, uint32_t beta, int n, int w_cap, Yield&& yield)
-{
-    struct S { int i; uint32_t g; int w_lb; };
-    std::vector<S> st; st.reserve(128);
-    st.push_back({0u, 0u, 0});
-    while(!st.empty()){
-        auto [i, g, wlb] = st.back(); st.pop_back();
-        if (i == n){
-            auto w = neoalz::detail::lm_weight(alpha, beta, g, n);
-            if (w && *w <= w_cap) yield(g, *w);
-            continue;
-        }
-        // try bit 0/1 for gamma at position i
-        for (int bit=0; bit<=1; ++bit){
-            uint32_t g2 = g | (uint32_t(bit)<<i);
-            uint32_t pm = (i==31)? 0xFFFFFFFFu : ((1u<<(i+1))-1);
-            uint32_t a = alpha & pm, b = beta & pm, gg = g2 & pm;
-            // prefix impossibility
-            uint32_t a1 = (a<<1)&pm, b1=(b<<1)&pm, g1=(gg<<1)&pm;
-            uint32_t psi1 = (a1 ^ b1) & (a1 ^ g1);
-            uint32_t xorcond = (a ^ b ^ gg ^ b1);
-            if ((psi1 & xorcond) != 0) continue;
-            // prefix weight lower bound on ψ (low bits only, up to n-1)
-            uint32_t psi = (a ^ b) & (a ^ gg);
-            uint32_t low_mask = (i+1 >= n)? ((n==32)? 0x7FFFFFFFu : ((1u<<(n-1))-1)) : ((1u<<std::min(n-1, i+1))-1);
-            int wlb2 = __builtin_popcount(psi & low_mask);
-            if (wlb2 > w_cap) continue;
-            st.push_back({i+1, g2, wlb2});
-        }
-    }
-}
-
 int main(int argc, char** argv)
 {
     int R = (argc>1)? std::atoi(argv[1]) : 2;
@@ -105,14 +43,14 @@ int main(int argc, char** argv)
         // (1) var–var: B' = B + (rotl(A,31) ^ rotl(A,17) ^ RC[0])
         uint32_t alpha0 = dB0;
         uint32_t beta0  = rotl(dA0,31) ^ rotl(dA0,17);
-        enumerate_lm_gammas(alpha0, beta0, n, slack_w, [&](uint32_t gB1, int w1){
+        enumerate_lm_gammas_fast(alpha0, beta0, n, slack_w, [&](uint32_t gB1, int w1){
 
             int slack1 = slack_w - w1;
             if (slack1 < 0) return;
 
             // (2) var–const: A' = A - RC[1]   (addition by two's-complement)
             uint32_t bconst1 = (uint32_t)(-int32_t(RC[1]));
-            enumerate_lm_gammas(dA0, bconst1, n, slack1, [&](uint32_t gA1, int w2){
+            enumerate_lm_gammas_fast(dA0, bconst1, n, slack1, [&](uint32_t gA1, int w2){
 
                 int slack2 = slack1 - w2;
                 if (slack2 < 0) return;
@@ -132,14 +70,14 @@ int main(int argc, char** argv)
                 // (5) var–var: A''' = A* + (rotl(Bkeep,31) ^ rotl(Bkeep,17) ^ RC[5])
                 uint32_t alpha1 = Astar;
                 uint32_t beta1  = rotl(Bkeep,31) ^ rotl(Bkeep,17);
-                enumerate_lm_gammas(alpha1, beta1, n, slack2, [&](uint32_t gA3, int w3){
+                enumerate_lm_gammas_fast(alpha1, beta1, n, slack2, [&](uint32_t gA3, int w3){
 
                     int slack3 = slack2 - w3;
                     if (slack3 < 0) return;
 
                     // (6) var–const: B''' = Bkeep - RC[6]
                     uint32_t bconst2 = (uint32_t)(-int32_t(RC[6]));
-                    enumerate_lm_gammas(Bkeep, bconst2, n, slack3, [&](uint32_t gB3, int w4){
+                    enumerate_lm_gammas_fast(Bkeep, bconst2, n, slack3, [&](uint32_t gB3, int w4){
 
                         int slack4 = slack3 - w4;
                         if (slack4 < 0) return;
@@ -190,7 +128,7 @@ int main(int argc, char** argv)
         return lb_round + lb_tail;
     };
 
-    DiffPair start{0u, 0u}; // 入口差分（可替换为你想要的 ΔA0, ΔB0）
+    DiffPair start{0u, 0u};
     auto res = neoalz::matsui_threshold_search<DiffPair>(R, start, Wcap, next_states, lower_bound);
     int best_w = res.first;
     DiffPair end = res.second;

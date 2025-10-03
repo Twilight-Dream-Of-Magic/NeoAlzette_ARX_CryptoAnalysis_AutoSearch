@@ -1,5 +1,17 @@
-\
 #pragma once
+/*
+ * SuffixLB - recursive suffix lower bound (differential)
+ * Inputs:
+ *   dA, dB : input differences (canonicalized recommended)
+ *   rem    : remaining rounds (T)
+ *   cap    : pruning cap
+ * Outputs:
+ *   Additive lower bound for the last T rounds (conservative)
+ * Complexity:
+ *   Depends on inner one-round LB; memoized O(unique (dA,dB,rem)) lookups
+ * Reference:
+ *   ARX differential trail search with recursive suffix bounds / highway oracles
+ */
 #include <cstdint>
 #include <unordered_map>
 #include <tuple>

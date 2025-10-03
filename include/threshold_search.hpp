@@ -1,5 +1,12 @@
-\
 #pragma once
+/*
+ * Matsui-style threshold search framework
+ *
+ * Maintains a priority queue over partial trails ordered by w + LB.
+ * Pushes children only if w + LB < min(best, cap).
+ * Suitable for ARX trails where local expansions are pruned by exact local models
+ * and lower bounds combine one-round tight bounds with suffix bounds (Highway/recursive).
+ */
 #include <cstdint>
 #include <vector>
 #include <queue>
@@ -26,9 +33,9 @@ namespace neoalz {
 template<typename DiffT>
 struct TrailNode {
     DiffT diff;
-    int   r;       // depth (round)
-    int   w;       // accumulated weight
-    int   lb;      // lower bound (for PQ ordering)
+    int   r;       // depth (round index)
+    int   w;       // accumulated weight so far
+    int   lb;      // lower bound for remaining suffix (for PQ ordering)
     bool operator<(const TrailNode& other) const {
         return lb > other.lb; // min-heap by lb
     }
