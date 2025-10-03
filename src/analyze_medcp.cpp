@@ -9,6 +9,7 @@
 #include <limits>
 #include <algorithm>
 #include <unordered_map>
+#include <map>
 #include "neoalzette.hpp"
 #include "lm_fast.hpp"
 #include "lb_round_full.hpp"
@@ -64,6 +65,9 @@ int main(int argc, char** argv){
     // defaults
     uint32_t start_dA = 0u, start_dB = 0u;
     std::string export_path;
+    std::string export_trace_path;
+    std::string export_hist_path;
+    int export_topN = 0; std::string export_topN_path;
     int K1 = 4, K2 = 4;
 
     // parse options
@@ -78,6 +82,13 @@ int main(int argc, char** argv){
             K1 = std::stoi(argv[++i]);
         } else if (t == "--k2" && i+1 < argc){
             K2 = std::stoi(argv[++i]);
+        } else if (t == "--export-trace" && i+1 < argc){
+            export_trace_path = argv[++i];
+        } else if (t == "--export-hist" && i+1 < argc){
+            export_hist_path = argv[++i];
+        } else if (t == "--export-topN" && i+2 < argc){
+            export_topN = std::stoi(argv[++i]);
+            export_topN_path = argv[++i];
         }
     }
 
@@ -152,8 +163,108 @@ int main(int argc, char** argv){
     };
 
     DifferentialState start{start_dA,start_dB};
-    auto res = matsui_threshold_search<DifferentialState>(R, start, Wcap, next_states, lower_bound);
-    int best_w = res.first;
+    // If any advanced export requested, run a path-capturing search; otherwise use the generic helper
+    int best_w = 0;
+    DifferentialState best_state{};
+    if (export_trace_path.empty() && export_hist_path.empty() && export_topN == 0){
+        auto res = matsui_threshold_search<DifferentialState>(R, start, Wcap, next_states, lower_bound);
+        best_w = res.first; best_state = res.second;
+    } else {
+        struct SearchNode { DifferentialState s; int r; int w; int lb; };
+        auto cmp = [](const SearchNode& a, const SearchNode& b){ return a.lb > b.lb; };
+        std::priority_queue<SearchNode, std::vector<SearchNode>, decltype(cmp)> pq(cmp);
+        auto key_of = [](const DifferentialState& s, int r){ return ((uint64_t)(r & 0xFF) << 56) ^ ((uint64_t)s.dA << 24) ^ (uint64_t)s.dB; };
+        std::unordered_map<uint64_t,uint64_t> parent; parent.reserve(1<<14);
+        std::unordered_map<uint64_t,int>        weight_at; weight_at.reserve(1<<14);
+        std::unordered_map<uint64_t,DifferentialState> state_at; state_at.reserve(1<<14);
+        std::map<int,int> weight_histogram; // weight histogram for completed paths
+
+        auto push_node = [&](const DifferentialState& s, int r, int w, uint64_t parent_key){
+            int lb = w + lower_bound(s, r);
+            int cap = Wcap;
+            if (lb >= cap) return;
+            SearchNode node{s,r,w,lb};
+            pq.push(node);
+            uint64_t k = key_of(s,r);
+            parent[k] = parent_key;
+            weight_at[k] = w;
+            state_at[k]  = s;
+        };
+
+        push_node(start, 0, 0, key_of(start,0));
+        int best = std::numeric_limits<int>::max();
+        std::vector<std::pair<int,DifferentialState>> topN; topN.reserve((size_t)std::max(0, export_topN));
+        while(!pq.empty()){
+            auto cur = pq.top(); pq.pop();
+            if (cur.lb >= std::min(best, Wcap)) continue;
+            if (cur.r == R){
+                best = std::min(best, cur.w);
+                // update histogram
+                weight_histogram[cur.w]++;
+                // collect topN
+                if (export_topN > 0){
+                    topN.emplace_back(cur.w, cur.s);
+                    std::sort(topN.begin(), topN.end(), [](auto&a, auto&b){ return a.first < b.first; });
+                    if ((int)topN.size() > export_topN) topN.pop_back();
+                }
+                best_state = cur.s;
+                continue;
+            }
+            int slack = std::min(best, Wcap) - cur.w;
+            auto children = next_states(cur.s, cur.r, slack);
+            uint64_t parent_key = key_of(cur.s, cur.r);
+            for (auto& [child, addw] : children){
+                int w2 = cur.w + addw;
+                push_node(child, cur.r+1, w2, parent_key);
+            }
+        }
+        best_w = best;
+        // Export trace
+        if (!export_trace_path.empty() && best < std::numeric_limits<int>::max()){
+            std::vector<std::tuple<int,uint32_t,uint32_t,int>> path; path.reserve((size_t)R+1);
+            uint64_t k = key_of(best_state, R);
+            while (true){
+                auto itS = state_at.find(k); if (itS==state_at.end()) break;
+                int r = (int)((k>>56)&0xFF);
+                int w = weight_at[k];
+                auto s = itS->second;
+                path.emplace_back(r, s.dA, s.dB, w);
+                uint64_t pk = parent[k]; if (pk == k) break; k = pk;
+            }
+            std::reverse(path.begin(), path.end());
+            // write CSV header
+            TrailExport::append_csv(export_trace_path, "algo,MEDCP,field,round,dA,dB,acc_weight");
+            for (auto& t : path){
+                int r; uint32_t a,b; int w; std::tie(r,a,b,w)=t;
+                std::ostringstream ss;
+                ss << "algo,MEDCP,trace,"
+                   << r << ",0x" << std::hex << a << std::dec
+                   << ",0x" << std::hex << b << std::dec
+                   << "," << w;
+                TrailExport::append_csv(export_trace_path, ss.str());
+            }
+        }
+        // Export histogram
+        if (!export_hist_path.empty()){
+            TrailExport::append_csv(export_hist_path, "algo,MEDCP,field,weight,count");
+            for (auto& kv : weight_histogram){
+                std::ostringstream ss;
+                ss << "algo,MEDCP,hist," << kv.first << "," << kv.second;
+                TrailExport::append_csv(export_hist_path, ss.str());
+            }
+        }
+        // Export topN
+        if (export_topN > 0 && !export_topN_path.empty()){
+            TrailExport::append_csv(export_topN_path, "algo,MEDCP,field,rank,weight,dA,dB");
+            for (size_t i=0;i<topN.size();++i){
+                std::ostringstream ss;
+                ss << "algo,MEDCP,topN," << (i+1) << "," << topN[i].first
+                   << ",0x" << std::hex << topN[i].second.dA << std::dec
+                   << ",0x" << std::hex << topN[i].second.dB << std::dec;
+                TrailExport::append_csv(export_topN_path, ss.str());
+            }
+        }
+    }
     if (!export_path.empty()){
         std::ostringstream ss;
         ss << "algo,MEDCP"

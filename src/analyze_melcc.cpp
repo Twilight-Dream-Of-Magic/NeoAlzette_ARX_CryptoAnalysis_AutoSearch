@@ -8,6 +8,8 @@
 #include <limits>
 #include <algorithm>
 #include <unordered_map>
+#include <map>
+#include <sstream>
 #include "neoalzette.hpp"
 #include "wallen_fast.hpp"
 #include "neoalz_lin.hpp"
@@ -55,6 +57,7 @@ int main(int argc, char** argv){
 
     uint32_t start_mA = 0u, start_mB = 0u;
     std::string export_path; std::string lin_hw_path;
+    std::string export_trace_path; std::string export_hist_path; int export_topN = 0; std::string export_topN_path;
     for (int i=3; i<argc; ++i){
         std::string t = argv[i];
         if (t == "--start-hex" && i+2 < argc){
@@ -64,6 +67,13 @@ int main(int argc, char** argv){
             export_path = argv[++i];
         } else if (t == "--lin-highway" && i+1 < argc){
             lin_hw_path = argv[++i];
+        } else if (t == "--export-trace" && i+1 < argc){
+            export_trace_path = argv[++i];
+        } else if (t == "--export-hist" && i+1 < argc){
+            export_hist_path = argv[++i];
+        } else if (t == "--export-topN" && i+2 < argc){
+            export_topN = std::stoi(argv[++i]);
+            export_topN_path = argv[++i];
         }
     }
 
@@ -80,10 +90,21 @@ int main(int argc, char** argv){
     std::unordered_map<uint64_t,int> lb_memo; lb_memo.reserve(1<<14);
     auto lb_key = [&](uint32_t a, uint32_t b, int r){ return ( (uint64_t)(r & 0xFF) << 56) ^ ( (uint64_t)a << 24) ^ (uint64_t)b; };
 
+    std::vector<std::pair<int,LinearState>> topN; topN.reserve((size_t)std::max(0, export_topN));
+    std::map<int,int> hist;
     while (!pq.empty()){
         auto cur = pq.top(); pq.pop();
         if (cur.w >= std::min(best, Wcap)) continue;
-        if (cur.r == R){ best = std::min(best, cur.w); continue; }
+        if (cur.r == R){
+            best = std::min(best, cur.w);
+            hist[cur.w]++;
+            if (export_topN > 0){
+                topN.emplace_back(cur.w, cur);
+                std::sort(topN.begin(), topN.end(), [](auto&a, auto&b){ return a.first < b.first; });
+                if ((int)topN.size() > export_topN) topN.pop_back();
+            }
+            continue;
+        }
 
         // Lower bound prune (use canonical state)
         auto cc = canonical_rotate_pair(cur.mA, cur.mB);
@@ -142,6 +163,24 @@ int main(int argc, char** argv){
            << ",start_mB,0x" << std::hex << start_mB << std::dec
            << ",best_w," << best;
         TrailExport::append_csv(export_path, ss.str());
+    }
+    if (!export_hist_path.empty()){
+        TrailExport::append_csv(export_hist_path, "algo,MELCC,field,weight,count");
+        for (auto& kv : hist){
+            std::ostringstream ss;
+            ss << "algo,MELCC,hist," << kv.first << "," << kv.second;
+            TrailExport::append_csv(export_hist_path, ss.str());
+        }
+    }
+    if (export_topN > 0 && !export_topN_path.empty()){
+        TrailExport::append_csv(export_topN_path, "algo,MELCC,field,rank,weight,mA,mB");
+        for (size_t i=0;i<topN.size();++i){
+            std::ostringstream ss;
+            ss << "algo,MELCC,topN," << (i+1) << "," << topN[i].first
+               << ",0x" << std::hex << topN[i].second.mA << std::dec
+               << ",0x" << std::hex << topN[i].second.mB << std::dec;
+            TrailExport::append_csv(export_topN_path, ss.str());
+        }
     }
     std::fprintf(stderr, "[analyze_melcc] best linear weight = %d\n", best);
     return 0;
