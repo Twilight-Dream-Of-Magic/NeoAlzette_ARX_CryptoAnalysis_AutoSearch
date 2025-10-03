@@ -1,4 +1,17 @@
 #pragma once
+/*
+ * SuffixLBLin - recursive suffix lower bound (linear)
+ * Inputs:
+ *   mA, mB : input masks (canonicalized recommended)
+ *   rem    : remaining rounds (T)
+ *   cap    : pruning cap
+ * Outputs:
+ *   Additive lower bound for the last T rounds (conservative)
+ * Complexity:
+ *   Depends on inner one-round LB; memoized O(unique (mA,mB,rem)) lookups
+ * Reference:
+ *   ARX linear trail search with recursive suffix bounds / highway oracles
+ */
 #include <cstdint>
 #include <unordered_map>
 #include "lb_round_lin.hpp"
