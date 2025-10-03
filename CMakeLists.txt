@@ -2,6 +2,19 @@ cmake_minimum_required(VERSION 3.16)
 project(neoalzette_search CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Optimization flags
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -mtune=native")
+endif()
+
+# Find OpenMP for parallel optimizations
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    message(STATUS "OpenMP found, enabling parallel optimizations")
+else()
+    message(STATUS "OpenMP not found, building without parallel optimizations")
+endif()
 add_library(neoalzette STATIC
     src/neoalzette.cpp
 )
@@ -46,6 +59,23 @@ target_link_libraries(analyze_medcp PRIVATE neoalzette)
 add_executable(analyze_melcc src/analyze_melcc.cpp)
 target_include_directories(analyze_melcc PUBLIC include)
 target_link_libraries(analyze_melcc PRIVATE neoalzette)
+
+# Optimized versions with parallel support
+add_executable(analyze_medcp_optimized src/analyze_medcp_optimized.cpp)
+target_include_directories(analyze_medcp_optimized PUBLIC include)
+target_link_libraries(analyze_medcp_optimized PRIVATE neoalzette)
+
+add_executable(analyze_melcc_optimized src/analyze_melcc_optimized.cpp)
+target_include_directories(analyze_melcc_optimized PUBLIC include)
+target_link_libraries(analyze_melcc_optimized PRIVATE neoalzette)
+
+# Link OpenMP if available
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(analyze_medcp_optimized PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(analyze_melcc_optimized PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_definitions(analyze_medcp_optimized PRIVATE OPENMP_ENABLED)
+    target_compile_definitions(analyze_melcc_optimized PRIVATE OPENMP_ENABLED)
+endif()
 
 option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo threshold_demo search_beam_diff milp_diff threshold_lin gen_round_lb_table highway_table_build highway_table_build_lin)" OFF)
 if(NOT NA_BUILD_DEMOS)

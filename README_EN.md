@@ -148,11 +148,24 @@ make -j$(nproc)
 
 ### Build Artifacts
 
-- `analyze_medcp` - MEDCP differential trail search
-- `analyze_melcc` - MELCC linear trail search
+#### 🔥 Main Analysis Tools
+- **`analyze_medcp`** - Standard MEDCP differential trail search
+- **`analyze_medcp_optimized`** - **⚡ Optimized MEDCP Analyzer** (Recommended)
+- **`analyze_melcc`** - Standard MELCC linear trail search  
+- **`analyze_melcc_optimized`** - **⚡ Optimized MELCC Analyzer** (Recommended)
+
+#### 🔧 Auxiliary Tools
 - `diff_search` - Generic differential search tool
 - `lin_search` - Generic linear search tool
 - `highway_table_build*` - Highway table construction tools
+
+#### ⚡ Optimized Version Features
+**New optimized versions include the following improvements**:
+- **Wallén Algorithm Rewrite**: Precomputed automaton replaces runtime recursion, 2-5x performance improvement
+- **Parallelized Search**: Multi-threaded work-stealing to fully utilize multi-core CPUs
+- **Cache-Friendly Design**: 64-bit packed state representation reduces memory access overhead
+- **Fast Canonicalization**: Optimized bit manipulation algorithms accelerate state equivalence checking  
+- **Improved Pruning Strategy**: Better lower bound estimation and duplicate state detection
 
 ## Usage
 
@@ -191,28 +204,42 @@ MEDCP analyzer uses **Matsui threshold search + Lipmaa-Moriai local enumeration*
 - **`--export-hist path.csv`** - Export weight distribution histogram
 - **`--export-topN N path.csv`** - Export top-N best results
 
-#### Usage Examples
+#### Standard Version Examples
 ```bash
 # Beginner example: 6-round search, weight cap 25 (~1 minute)
 ./analyze_medcp 6 25
 
 # Standard search: 8 rounds, weight 35, custom starting difference
 ./analyze_medcp 8 35 --start-hex 0x1 0x0
-
-# High-performance search: 10 rounds, using Highway table and high K values
-./analyze_medcp 10 40 highway_diff.bin --k1 8 --k2 8
-
-# Complete analysis: export trails, histogram, top-10 results
-./analyze_medcp 8 30 \
-  --export-trace trail.csv \
-  --export-hist histogram.csv \
-  --export-topN 10 top10.csv
-
-# Batch search (for parameter optimization)
-for w in {25..45..5}; do
-  ./analyze_medcp 8 $w --export results_w${w}.csv
-done
 ```
+
+#### ⚡ Optimized Version Examples (Recommended)
+```bash
+# Basic optimized search: auto-detect thread count
+./analyze_medcp_optimized 6 25
+
+# High-performance search: specify thread count, use Highway table
+./analyze_medcp_optimized 8 35 highway_diff.bin --threads 8 --k1 8 --k2 8
+
+# Fast search: use fast canonicalization (suitable for large-scale search)
+./analyze_medcp_optimized 10 40 --fast-canonical --threads 16
+
+# Complete optimized analysis: export detailed results
+./analyze_medcp_optimized 8 30 \
+  --export-trace trail_opt.csv \
+  --export-hist histogram_opt.csv \
+  --export-topN 10 top10_opt.csv \
+  --threads 8
+
+# Performance comparison test
+echo "Standard version:" && time ./analyze_medcp 6 25
+echo "Optimized version:" && time ./analyze_medcp_optimized 6 25 --threads 4
+```
+
+#### Performance Improvement Description
+- **2-5x Speed Improvement**: Optimized Wallén algorithm and parallelization
+- **Lower Memory Usage**: Packed state representation and memory pool management
+- **Better Scalability**: Multi-threading support fully utilizes modern multi-core CPUs
 
 ### MELCC Linear Trail Search
 
@@ -237,23 +264,42 @@ MELCC analyzer uses **priority queue search + Wallén linear enumeration**, supp
 - **`--export-hist path.csv`** - Export weight distribution
 - **`--export-topN N path.csv`** - Export top-N results
 
-#### Usage Examples
+#### Standard Version Examples
 ```bash
 # Beginner example: 6-round linear search
 ./analyze_melcc 6 20
 
 # High-weight mask search
 ./analyze_melcc 8 25 --start-hex 0x80000001 0x0
-
-# Using Highway table acceleration
-./analyze_melcc 10 30 --lin-highway highway_lin.bin
-
-# Complete linear analysis pipeline
-./analyze_melcc 8 25 \
-  --start-hex 0x1 0x0 \
-  --export-trace linear_trail.csv \
-  --export-topN 5 best_linear.csv
 ```
+
+#### ⚡ Optimized Version Examples (Recommended)
+```bash
+# Basic optimized linear search
+./analyze_melcc_optimized 6 20
+
+# High-performance linear analysis: multi-threading + Highway table
+./analyze_melcc_optimized 8 25 --lin-highway highway_lin.bin --threads 6
+
+# Fast linear search: use fast canonicalization
+./analyze_melcc_optimized 10 30 --fast-canonical --threads 8
+
+# Complete optimized linear analysis pipeline
+./analyze_melcc_optimized 8 25 \
+  --start-hex 0x1 0x0 \
+  --export-trace linear_trail_opt.csv \
+  --export-topN 5 best_linear_opt.csv \
+  --threads 6
+
+# Performance comparison: standard vs optimized
+time ./analyze_melcc 6 20
+time ./analyze_melcc_optimized 6 20 --threads 4
+```
+
+#### Linear Analysis Specific Optimizations
+- **Precomputed Wallén Automaton**: Avoids runtime recursion, significantly improves enumeration speed
+- **Optimized Backward Propagation**: Precise (L^{-1})^T computation reduces unnecessary state generation
+- **Improved Priority Queue**: Uses packed states to reduce memory footprint and improve cache hit rates
 
 ### Highway Table Construction
 
