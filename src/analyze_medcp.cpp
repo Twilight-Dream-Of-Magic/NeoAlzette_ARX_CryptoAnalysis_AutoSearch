@@ -70,7 +70,8 @@ int main(int argc, char** argv){
     std::unordered_map<uint64_t,int> lb_memo; lb_memo.reserve(1<<14);
     auto lb_key = [&](uint32_t a, uint32_t b, int r){ return ( (uint64_t)(r & 0xFF) << 56) ^ ( (uint64_t)a << 24) ^ (uint64_t)b; };
 
-    auto next_states = [&](const DifferentialState& d, int r, int slack_w){
+    // Expand one round from a given differential state using exact local models
+    auto next_states = [&](const DifferentialState& d, int roundIndex, int slackWeight){
         std::vector<std::pair<DifferentialState,int>> out;
         const int n = 32;
         auto [dA0, dB0] = canonical_rotate_pair(d.dA, d.dB);
@@ -78,17 +79,17 @@ int main(int argc, char** argv){
         // Subround 0 - Add 1 (var-var)
         uint32_t alpha0 = dB0;
         uint32_t beta0  = rotl(dA0,31) ^ rotl(dA0,17);
-        enumerate_lm_gammas_fast(alpha0, beta0, n, slack_w, [&](uint32_t gB1, int w1){
-            int slack1 = slack_w - w1; if (slack1 < 0) return;
+        enumerate_lm_gammas_fast(alpha0, beta0, n, slackWeight, [&](uint32_t gammaAfterAdd1, int weightAdd1){
+            int slackAfterAdd1 = slackWeight - weightAdd1; if (slackAfterAdd1 < 0) return;
             // Add 2: A = A - RC[1]  (var-const) -> use add-constant model with c = -RC[1]
             uint32_t c1 = (uint32_t)(-int32_t(RC[1]));
-            auto best1 = addconst_best(dA0, c1, n);
-            if (best1.weight <= slack1){
-                uint32_t gA1 = best1.gamma; int w2 = best1.weight;
-                int slack2 = slack1 - w2; if (slack2 < 0) return;
+            auto bestAdd2 = addconst_best(dA0, c1, n);
+            if (bestAdd2.weight <= slackAfterAdd1){
+                uint32_t gammaAfterAdd2 = bestAdd2.gamma; int weightAdd2 = bestAdd2.weight;
+                int slackAfterAdd2 = slackAfterAdd1 - weightAdd2; if (slackAfterAdd2 < 0) return;
                 // Linear mix
-                uint32_t A2 = gA1 ^ rotl(gB1,24);
-                uint32_t B2 = gB1 ^ rotl(A2,16);
+                uint32_t A2 = gammaAfterAdd2 ^ rotl(gammaAfterAdd1,24);
+                uint32_t B2 = gammaAfterAdd1 ^ rotl(A2,16);
                 A2 = l1_forward(A2);
                 B2 = l2_forward(B2);
                 auto [C0, D0] = cd_from_B_delta(B2);
@@ -97,23 +98,24 @@ int main(int argc, char** argv){
                 // Subround 1 - Add 3 (var-var)
                 uint32_t alpha1 = Astar;
                 uint32_t beta1  = rotl(Bkeep,31) ^ rotl(Bkeep,17);
-                enumerate_lm_gammas_fast(alpha1, beta1, n, slack2, [&](uint32_t gA3, int w3){
-                    int slack3 = slack2 - w3; if (slack3 < 0) return;
+                enumerate_lm_gammas_fast(alpha1, beta1, n, slackAfterAdd2, [&](uint32_t gammaAfterAdd3, int weightAdd3){
+                    int slackAfterAdd3 = slackAfterAdd2 - weightAdd3; if (slackAfterAdd3 < 0) return;
                     // Add 4: B = B - RC[6]  (var-const)
                     uint32_t c2 = (uint32_t)(-int32_t(RC[6]));
-                    auto best2 = addconst_best(Bkeep, c2, n);
-                    if (best2.weight <= slack3){
-                        uint32_t gB3 = best2.gamma; int w4 = best2.weight;
-                        int slack4 = slack3 - w4; if (slack4 < 0) return;
-                        uint32_t Bhat = gB3 ^ rotl(gA3,24);
-                        uint32_t Ahat = gA3 ^ rotl(Bhat,16);
+                    auto bestAdd4 = addconst_best(Bkeep, c2, n);
+                    if (bestAdd4.weight <= slackAfterAdd3){
+                        uint32_t gammaAfterAdd4 = bestAdd4.gamma; int weightAdd4 = bestAdd4.weight;
+                        int slackAfterAdd4 = slackAfterAdd3 - weightAdd4; if (slackAfterAdd4 < 0) return;
+                        uint32_t Bhat = gammaAfterAdd4 ^ rotl(gammaAfterAdd3,24);
+                        uint32_t Ahat = gammaAfterAdd3 ^ rotl(Bhat,16);
                         uint32_t Aplus = l2_forward(Ahat);
                         uint32_t Bplus = l1_forward(Bhat);
                         auto [C1, D1] = cd_from_A_delta(Aplus);
                         uint32_t Bstar = Bplus ^ rotl(C1,24) ^ rotl(D1,16);
                         auto cn = canonical_rotate_pair(Aplus, Bstar);
-                        DifferentialState dn{cn.first, cn.second};
-                        out.push_back({dn, w1+w2+w3+w4});
+                        DifferentialState nextState{cn.first, cn.second};
+                        int totalRoundWeight = weightAdd1 + weightAdd2 + weightAdd3 + weightAdd4;
+                        out.push_back({nextState, totalRoundWeight});
                     }
                 });
             }
@@ -121,11 +123,11 @@ int main(int argc, char** argv){
         return out;
     };
 
-    auto lower_bound = [&](const DifferentialState& d, int r){
+    auto lower_bound = [&](const DifferentialState& d, int roundIndex){
         auto c = canonical_rotate_pair(d.dA, d.dB);
-        uint64_t k = lb_key(c.first, c.second, r);
+        uint64_t k = lb_key(c.first, c.second, roundIndex);
         auto it = lb_memo.find(k); if (it != lb_memo.end()) return it->second;
-        int rem = R - r;
+        int rem = R - roundIndex;
         int lb_round = LBF.lb_full(c.first, c.second, K1, K2, 32, Wcap);
         int lb_tail = 0;
         if (rem > 1){ lb_tail = use_hw ? HW.query(c.first, c.second, rem-1) : SFX.bound(c.first, c.second, rem-1, Wcap); }
