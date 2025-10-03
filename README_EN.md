@@ -330,6 +330,205 @@ time ./analyze_melcc_optimized 6 20 --threads 4
 ./complete_matsui_demo --quick
 ```
 
+## 📋 **Complete CLI Usage Guide**
+
+### 🔥 **analyze_medcp / analyze_medcp_optimized - MEDCP Differential Trail Search**
+
+#### **Complete Syntax**
+```bash
+./analyze_medcp[_optimized] R Wcap [highway.bin] [options]
+```
+
+#### **Required Parameters**
+- **`R`** - Number of search rounds (integer, recommend 4-12)
+  - Personal computer: 4-6 rounds
+  - Cluster environment: 6-12 rounds
+- **`Wcap`** - Global weight cap (integer, recommend 15-50)
+  - Lower values = faster search, but may not find solutions
+  - Personal computer: 15-25
+  - Cluster environment: 25-50
+
+#### **Optional Parameters**
+- **`highway.bin`** - Highway table file path
+  - Precomputed suffix lower bound table, dramatically improves search speed
+  - Optional but strongly recommended for repeated searches
+
+#### **All Supported Options**
+
+| Option | Parameters | Description | Example |
+|--------|-----------|-------------|---------|
+| `--start-hex` | `dA dB` | Starting differential state (32-bit hex) | `--start-hex 0x1 0x0` |
+| `--export` | `file.csv` | Export search summary | `--export results.csv` |
+| `--export-trace` | `file.csv` | Export complete trail path | `--export-trace trail.csv` |
+| `--export-hist` | `file.csv` | Export weight distribution histogram | `--export-hist histogram.csv` |
+| `--export-topN` | `N file.csv` | Export top-N best results | `--export-topN 10 top10.csv` |
+| `--k1` | `K` | Top-K candidates for var-var addition (1-16) | `--k1 8` |
+| `--k2` | `K` | Top-K candidates for var-const addition (1-16) | `--k2 8` |
+| `--threads` | `N` | Number of threads (optimized version only) | `--threads 8` |
+| `--fast-canonical` | none | Fast canonicalization (optimized version only) | `--fast-canonical` |
+
+#### **Usage Examples from Beginner to Expert**
+
+**🟢 Entry Level (Personal Computer)**:
+```bash
+# Minimal verification test
+./analyze_medcp_optimized 4 15
+
+# Basic differential search
+./analyze_medcp_optimized 4 20 --start-hex 0x1 0x0
+
+# Export results for analysis
+./analyze_medcp_optimized 4 25 --export basic_result.csv
+```
+
+**🟡 Standard Level (Personal Computer/Small Cluster)**:
+```bash
+# Multi-threaded search
+./analyze_medcp_optimized 6 25 --threads 4
+
+# Use Highway table acceleration
+./analyze_medcp_optimized 6 30 highway_diff.bin --threads 4
+
+# Complete result export
+./analyze_medcp_optimized 6 25 \
+  --export summary.csv \
+  --export-trace trail.csv \
+  --export-hist histogram.csv
+```
+
+**🔴 Professional Level (Cluster Required)**:
+```bash
+# High-performance search
+./analyze_medcp_optimized 8 35 highway_diff.bin --threads 16 --k1 8 --k2 8
+
+# Large-scale parameter sweep
+for start in 0x1 0x8000 0x80000000; do
+  ./analyze_medcp_optimized 8 35 highway_diff.bin \
+    --start-hex $start 0x0 \
+    --threads 16 \
+    --export results_${start}.csv
+done
+
+# Complete research analysis
+./analyze_medcp_optimized 10 40 highway_diff.bin \
+  --fast-canonical \
+  --threads 32 \
+  --export-trace trail_10r.csv \
+  --export-hist hist_10r.csv \
+  --export-topN 20 top20_10r.csv
+```
+
+### 🔥 **analyze_melcc / analyze_melcc_optimized - MELCC Linear Trail Search**
+
+#### **Complete Syntax**
+```bash
+./analyze_melcc[_optimized] R Wcap [options]
+```
+
+#### **Required Parameters**
+- **`R`** - Number of search rounds (integer, recommend 4-10)
+  - Linear analysis is more computationally intensive than differential
+  - Personal computer: 4-5 rounds
+  - Cluster environment: 6-10 rounds
+- **`Wcap`** - Weight cap (integer, recommend 10-40)
+  - Linear analysis weights are typically more restrictive than differential
+
+#### **All Supported Options**
+
+| Option | Parameters | Description | Example |
+|--------|-----------|-------------|---------|
+| `--start-hex` | `mA mB` | Starting linear masks (32-bit hex) | `--start-hex 0x80000000 0x1` |
+| `--export` | `file.csv` | Export analysis summary | `--export linear_results.csv` |
+| `--export-trace` | `file.csv` | Export optimal linear trail | `--export-trace linear_trail.csv` |
+| `--export-hist` | `file.csv` | Export weight distribution | `--export-hist linear_hist.csv` |
+| `--export-topN` | `N file.csv` | Export top-N best results | `--export-topN 5 top5_linear.csv` |
+| `--lin-highway` | `H.bin` | Linear Highway table file | `--lin-highway highway_lin.bin` |
+| `--threads` | `N` | Number of threads (optimized version only) | `--threads 6` |
+| `--fast-canonical` | none | Fast canonicalization (optimized version only) | `--fast-canonical` |
+
+### ⚠️ **Critical Usage Guidelines**
+
+#### **Parameter Selection Guide**
+
+**Weight Cap (Wcap) Selection Strategy**:
+```bash
+# Too low: May not find any trails
+./analyze_medcp_optimized 6 10    # Likely no results
+
+# Appropriate: Usually finds meaningful trails
+./analyze_medcp_optimized 6 25    # Recommended starting value
+
+# Too high: Search time grows exponentially
+./analyze_medcp_optimized 6 50    # ⚠️ May take hours
+```
+
+**Starting State Selection Tips**:
+```bash
+# ✅ Good starting states: Sparse differences
+--start-hex 0x1 0x0           # Single bit difference
+--start-hex 0x80000000 0x1    # First/last bit difference
+--start-hex 0x8000 0x8        # Symmetric sparse difference
+
+# ❌ Avoid: Dense differences
+--start-hex 0xFFFFFFFF 0xAAAAAAAA  # Too many active bits
+--start-hex 0x0 0x0           # Zero difference is meaningless
+```
+
+**K-value Tuning Strategy**:
+```bash
+# Conservative: Fast but may miss optimal solutions
+--k1 2 --k2 2
+
+# Standard: Balanced performance and completeness
+--k1 4 --k2 4    # Default values
+
+# Aggressive: More complete but significantly slower
+--k1 8 --k2 8    # ⚠️ Cluster environment only
+```
+
+#### **Troubleshooting Common Issues**
+
+**If search finds no results**:
+```bash
+# 1. Lower weight cap
+./analyze_medcp_optimized 4 15 --start-hex 0x1 0x0
+
+# 2. Try different starting states
+./analyze_medcp_optimized 4 20 --start-hex 0x8000 0x0
+
+# 3. Check parameter validity
+./analyze_medcp_optimized 4 25    # Use default starting state
+```
+
+**If search is too slow**:
+```bash
+# 1. Reduce complexity parameters
+./analyze_medcp_optimized 4 20 --fast-canonical
+
+# 2. Reduce thread count to avoid resource contention
+./analyze_medcp_optimized 4 25 --threads 1
+
+# 3. Use Highway table acceleration
+./highway_table_build highway.bin 8
+./analyze_medcp_optimized 6 25 highway.bin
+```
+
+#### **Output File Format Documentation**
+
+**Basic Summary (--export)**:
+```csv
+algo,R,Wcap,start_dA,start_dB,K1,K2,best_w,time_ms,threads
+MEDCP_OPTIMIZED,6,25,0x1,0x0,4,4,18,15432,4
+```
+
+**Trail Path (--export-trace)**:
+```csv  
+algo,MEDCP,field,round,dA,dB,acc_weight
+MEDCP,trace,0,0x1,0x0,0
+MEDCP,trace,1,0x8000,0x8,5
+MEDCP,trace,2,0x4000,0x4000,12
+```
+
 ### Advanced Options
 
 #### Export and Analysis Options

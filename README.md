@@ -330,26 +330,347 @@ time ./analyze_melcc_optimized 6 20 --threads 4
 ./complete_matsui_demo --quick
 ```
 
-### 高级选项
+## 📋 **完整CLI使用指南**
 
-#### 导出和分析选项
+### 🔥 **analyze_medcp / analyze_medcp_optimized - MEDCP差分轨道搜索**
 
+#### **完整语法**
 ```bash
-# 导出完整轨道路径
-./analyze_medcp 8 30 --export-trace trail.csv
-
-# 导出权重分布直方图
-./analyze_medcp 8 30 --export-hist histogram.csv  
-
-# 导出前 N 个最优结果
-./analyze_medcp 8 30 --export-topN 10 top10.csv
+./analyze_medcp[_optimized] R Wcap [highway.bin] [选项]
 ```
 
-#### 搜索参数调优
+#### **必需参数**
+- **`R`** - 搜索轮数 (整数，建议4-12)
+  - 个人电脑建议：4-6轮
+  - 集群环境：6-12轮
+- **`Wcap`** - 权重上限 (整数，建议15-50)
+  - 越小搜索越快，但可能找不到解
+  - 个人电脑建议：15-25
+  - 集群环境：25-50
 
-- `--k1 K`：变量-变量加法的 Top-K 候选数（默认4）
-- `--k2 K`：变量-常数加法的 Top-K 候选数（默认4）
-- 增大 K 值可能找到更好的轨道，但会显著增加搜索时间
+#### **可选参数**
+- **`highway.bin`** - Highway表文件路径
+  - 预计算的后缀下界表，大幅提升搜索速度
+  - 可选，但强烈推荐用于重复搜索
+
+#### **所有支持选项**
+
+| 选项 | 参数 | 说明 | 示例 |
+|------|------|------|------|
+| `--start-hex` | `dA dB` | 起始差分状态(32位十六进制) | `--start-hex 0x1 0x0` |
+| `--export` | `file.csv` | 导出搜索摘要 | `--export results.csv` |
+| `--export-trace` | `file.csv` | 导出完整轨道路径 | `--export-trace trail.csv` |
+| `--export-hist` | `file.csv` | 导出权重分布直方图 | `--export-hist histogram.csv` |
+| `--export-topN` | `N file.csv` | 导出前N个最优结果 | `--export-topN 10 top10.csv` |
+| `--k1` | `K` | var-var加法Top-K候选数(1-16) | `--k1 8` |
+| `--k2` | `K` | var-const加法Top-K候选数(1-16) | `--k2 8` |
+| `--threads` | `N` | 线程数(仅优化版) | `--threads 8` |
+| `--fast-canonical` | 无 | 快速标准化(仅优化版) | `--fast-canonical` |
+
+#### **使用示例从入门到专家**
+
+**🟢 入门级 (个人电脑)**：
+```bash
+# 最小验证测试
+./analyze_medcp_optimized 4 15
+
+# 基础差分搜索  
+./analyze_medcp_optimized 4 20 --start-hex 0x1 0x0
+
+# 导出结果用于分析
+./analyze_medcp_optimized 4 25 --export basic_result.csv
+```
+
+**🟡 标准级 (个人电脑/小型集群)**：
+```bash
+# 多线程搜索
+./analyze_medcp_optimized 6 25 --threads 4
+
+# 使用Highway表加速  
+./analyze_medcp_optimized 6 30 highway_diff.bin --threads 4
+
+# 完整结果导出
+./analyze_medcp_optimized 6 25 \
+  --export summary.csv \
+  --export-trace trail.csv \
+  --export-hist histogram.csv
+```
+
+**🔴 专业级 (必需集群)**：
+```bash
+# 高性能搜索
+./analyze_medcp_optimized 8 35 highway_diff.bin --threads 16 --k1 8 --k2 8
+
+# 大规模参数扫描
+for start in 0x1 0x8000 0x80000000; do
+  ./analyze_medcp_optimized 8 35 highway_diff.bin \
+    --start-hex $start 0x0 \
+    --threads 16 \
+    --export results_${start}.csv
+done
+
+# 完整研究分析
+./analyze_medcp_optimized 10 40 highway_diff.bin \
+  --fast-canonical \
+  --threads 32 \
+  --export-trace trail_10r.csv \
+  --export-hist hist_10r.csv \
+  --export-topN 20 top20_10r.csv
+```
+
+### 🔥 **analyze_melcc / analyze_melcc_optimized - MELCC线性轨道搜索**
+
+#### **完整语法**
+```bash
+./analyze_melcc[_optimized] R Wcap [选项]
+```
+
+#### **必需参数**
+- **`R`** - 搜索轮数 (整数，建议4-10)
+  - 线性分析比差分更加计算密集
+  - 个人电脑建议：4-5轮
+  - 集群环境：6-10轮
+- **`Wcap`** - 权重上限 (整数，建议10-40)
+  - 线性分析的权重通常比差分更严格
+
+#### **所有支持选项**
+
+| 选项 | 参数 | 说明 | 示例 |
+|------|------|------|------|
+| `--start-hex` | `mA mB` | 起始线性掩码(32位十六进制) | `--start-hex 0x80000000 0x1` |
+| `--export` | `file.csv` | 导出分析摘要 | `--export linear_results.csv` |
+| `--export-trace` | `file.csv` | 导出最优线性轨道 | `--export-trace linear_trail.csv` |
+| `--export-hist` | `file.csv` | 导出权重分布 | `--export-hist linear_hist.csv` |
+| `--export-topN` | `N file.csv` | 导出前N个最优结果 | `--export-topN 5 top5_linear.csv` |
+| `--lin-highway` | `H.bin` | 线性Highway表文件 | `--lin-highway highway_lin.bin` |
+| `--threads` | `N` | 线程数(仅优化版) | `--threads 6` |
+| `--fast-canonical` | 无 | 快速标准化(仅优化版) | `--fast-canonical` |
+
+#### **使用示例从入门到专家**
+
+**🟢 入门级 (个人电脑)**：
+```bash
+# 最小线性分析
+./analyze_melcc_optimized 4 15
+
+# 指定起始掩码
+./analyze_melcc_optimized 4 20 --start-hex 0x1 0x0
+
+# 导出线性分析结果
+./analyze_melcc_optimized 4 20 --export linear_basic.csv
+```
+
+**🟡 标准级 (个人电脑/小型集群)**：
+```bash
+# 多线程线性搜索
+./analyze_melcc_optimized 5 20 --threads 4
+
+# 使用线性Highway表
+./analyze_melcc_optimized 6 25 --lin-highway highway_lin.bin
+
+# 完整线性分析流水线
+./analyze_melcc_optimized 5 22 \
+  --start-hex 0x80000001 0x0 \
+  --export-trace linear_trail.csv \
+  --export-topN 5 best_linear.csv \
+  --threads 4
+```
+
+**🔴 专业级 (必需集群)**：
+```bash
+# 高精度线性分析
+./analyze_melcc_optimized 8 30 highway_lin.bin --threads 16
+
+# 大规模线性掩码搜索
+for mask in 0x1 0x80000000 0xFFFF0000; do
+  ./analyze_melcc_optimized 8 28 highway_lin.bin \
+    --start-hex $mask 0x0 \
+    --threads 12 \
+    --export linear_results_${mask}.csv
+done
+```
+
+### 🔧 **highway_table_build / highway_table_build_lin - Highway表构建**
+
+#### **完整语法**
+```bash
+./highway_table_build output_file.bin [max_rounds]
+./highway_table_build_lin output_file.bin [max_rounds]
+```
+
+#### **参数说明**
+- **`output_file.bin`** - 输出Highway表文件路径
+- **`max_rounds`** - 最大轮数 (可选，默认10)
+
+#### **使用建议**
+```bash
+# 构建差分Highway表 (一次构建，多次使用)
+./highway_table_build highway_diff.bin 12
+# 构建时间：~1-3小时，文件大小：~2-4GB
+
+# 构建线性Highway表
+./highway_table_build_lin highway_lin.bin 10  
+# 构建时间：~30分钟-2小时，文件大小：~500MB-2GB
+
+# 使用Highway表进行加速搜索
+./analyze_medcp_optimized 8 35 highway_diff.bin --threads 8
+./analyze_melcc_optimized 8 30 --lin-highway highway_lin.bin --threads 6
+```
+
+### 🎯 **complete_matsui_demo - 论文算法演示**
+
+#### **完整语法**
+```bash
+./complete_matsui_demo [--quick|--full]
+```
+
+#### **选项说明**
+- **`--quick`** - 快速验证模式，验证Algorithm 1&2基本功能
+- **`--full`** - 完整演示模式，展示highways/country roads策略
+
+#### **教育价值**
+```bash
+# 理解论文算法实现
+./complete_matsui_demo --quick
+
+# 深入理解搜索策略  
+./complete_matsui_demo --full
+```
+
+### ⚠️ **关键使用注意事项**
+
+#### **参数选择指南**
+
+**权重上限 (Wcap) 选择策略**：
+```bash
+# 过小：可能找不到任何轨道
+./analyze_medcp_optimized 6 10    # 可能无结果
+
+# 适中：通常能找到有意义的轨道  
+./analyze_medcp_optimized 6 25    # 推荐起始值
+
+# 过大：搜索时间指数增长
+./analyze_medcp_optimized 6 50    # ⚠️ 可能需要数小时
+```
+
+**起始状态选择技巧**：
+```bash
+# ✅ 好的起始状态：稀疏差分
+--start-hex 0x1 0x0           # 单bit差分
+--start-hex 0x80000000 0x1    # 首末位差分
+--start-hex 0x8000 0x8        # 对称稀疏差分
+
+# ❌ 避免的起始状态：密集差分  
+--start-hex 0xFFFFFFFF 0xAAAAAAAA  # 太多活跃位
+--start-hex 0x0 0x0           # 零差分无意义
+```
+
+**K值调优策略**：
+```bash
+# 保守设置：快速但可能遗漏最优解
+--k1 2 --k2 2
+
+# 标准设置：平衡性能和完整性
+--k1 4 --k2 4    # 默认值
+
+# 激进设置：更完整但显著更慢
+--k1 8 --k2 8    # ⚠️ 仅用于集群环境
+```
+
+#### **常见问题排查**
+
+**如果搜索无结果**：
+```bash
+# 1. 降低权重上限
+./analyze_medcp_optimized 4 15 --start-hex 0x1 0x0
+
+# 2. 尝试不同起始状态
+./analyze_medcp_optimized 4 20 --start-hex 0x8000 0x0
+
+# 3. 检查参数有效性
+./analyze_medcp_optimized 4 25    # 使用默认起始状态
+```
+
+**如果搜索过慢**：
+```bash
+# 1. 降低复杂度参数
+./analyze_medcp_optimized 4 20 --fast-canonical
+
+# 2. 减少线程数避免资源竞争
+./analyze_medcp_optimized 4 25 --threads 1
+
+# 3. 使用Highway表加速
+./highway_table_build highway.bin 8
+./analyze_medcp_optimized 6 25 highway.bin
+```
+
+**如果内存不足**：
+```bash
+# 使用快速标准化模式
+./analyze_medcp_optimized 4 25 --fast-canonical
+
+# 降低权重上限
+./analyze_medcp_optimized 4 20
+
+# 关闭高级导出功能
+./analyze_medcp_optimized 4 25 --export simple.csv  # 仅基本导出
+```
+
+#### **输出文件格式说明**
+
+**基本摘要 (--export)**：
+```csv
+algo,R,Wcap,start_dA,start_dB,K1,K2,best_w,time_ms,threads
+MEDCP_OPTIMIZED,6,25,0x1,0x0,4,4,18,15432,4
+```
+
+**轨道路径 (--export-trace)**：
+```csv  
+algo,MEDCP,field,round,dA,dB,acc_weight
+MEDCP,trace,0,0x1,0x0,0
+MEDCP,trace,1,0x8000,0x8,5
+MEDCP,trace,2,0x4000,0x4000,12
+```
+
+**权重直方图 (--export-hist)**：
+```csv
+algo,MEDCP,field,weight,count  
+MEDCP,hist,15,1
+MEDCP,hist,18,3
+MEDCP,hist,20,1
+```
+
+#### **性能调优建议**
+
+**单次搜索优化**：
+```bash
+# 使用所有优化选项
+./analyze_medcp_optimized 6 25 highway_diff.bin \
+  --fast-canonical \
+  --threads $(nproc) \
+  --k1 6 --k2 6
+```
+
+**批量搜索优化**：
+```bash
+# 预建Highway表，批量复用
+./highway_table_build highway.bin 10
+
+# 并行批处理
+for w in {20..30..2}; do
+  ./analyze_medcp_optimized 6 $w highway.bin --export batch_w${w}.csv &
+done
+wait  # 等待所有任务完成
+```
+
+**集群环境优化**：
+```bash  
+# 大内存节点的最大化利用
+./analyze_medcp_optimized 10 45 highway_diff.bin \
+  --threads 64 \
+  --k1 16 --k2 16 \
+  --export-trace research_trail.csv
+```
 
 ### 并行化和集群部署
 
