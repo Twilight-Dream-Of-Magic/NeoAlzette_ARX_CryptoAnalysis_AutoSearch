@@ -10,8 +10,8 @@
 
 ### 核心算法
 
-- **MEDCP (Modular Addition by Constant - Differential Property)**：模加常数的差分性质分析算法
-- **MELCC (Modular Addition Linear Cryptanalysis with Correlation)**：基于相关性的模加线性密码分析算法
+- **MEDCP (Maximum Expected Differential Characteristic Probability)**：模加模减的 最大期望差分特征概率算法
+- **MELCC (Maximum Expected Linear Characteristic Correlation)**：模加模减的 最大期望差分特征相关算法
 
 ### 算法意义
 
@@ -27,7 +27,7 @@
 
 ARX 密码基于三种基本运算：
 - **Addition (⊞)**：模 2^n 加法
-- **Rotation (≪, ≫)**：循环位移  
+- **Rotation (<<<, >>>)**：循环位移  
 - **XOR (⊕)**：异或运算
 
 这种结构在软件实现中具有优异的性能，同时提供了足够的密码学强度。
@@ -47,7 +47,7 @@ NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点�
 
 - **64位状态**：(A, B) ∈ F₃₂² 
 - **双子轮结构**：每轮包含两个子轮操作
-- **非线性函数**：F(x) = (x ≪ 31) ⊕ (x ≪ 17)
+- **非线性函数**：F(A) = B = B ⊞ (A<<< 31) ⊕ (A <<< 17) ⊕ RC[0], F(B) = A = A ⊞ (B<<< 31) ⊕ (B <<< 17) ⊕ RC[5]
 - **线性扩散层**：L₁, L₂ 提供分支数保证
 - **轮常数注入**：16个预定义轮常数
 
@@ -59,6 +59,7 @@ NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点�
 │   ├── lm_fast.hpp                  # Lipmaa-Moriai 差分快速枚举算法
 │   ├── lm_wallen.hpp                # LM-Wallén 混合模型（差分+线性）
 │   ├── wallen_fast.hpp              # Wallén 线性相关性快速计算
+│   ├── wallen_optimized.hpp         # Wallén 优化版：预计算自动机
 │   ├── highway_table.hpp            # 差分 Highway 后缀下界表（O(1) 查询）
 │   ├── highway_table_lin.hpp        # 线性 Highway 后缀下界表
 │   ├── lb_round_full.hpp            # 完整轮函数差分下界估计
@@ -66,19 +67,22 @@ NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点�
 │   ├── suffix_lb.hpp                # 多轮后缀差分下界计算
 │   ├── suffix_lb_lin.hpp            # 多轮后缀线性下界计算
 │   ├── threshold_search.hpp         # Matsui 阈值搜索框架
+│   ├── threshold_search_optimized.hpp # 并行化阈值搜索
+│   ├── matsui_complete.hpp          # 完整的Matsui Algorithm 2实现
 │   ├── canonicalize.hpp             # 状态标准化（旋转等价类）
+│   ├── state_optimized.hpp          # 优化的状态表示和缓存管理
 │   ├── diff_add_const.hpp           # 模加常数差分性质（MEDCP核心）
 │   ├── mask_backtranspose.hpp       # 线性掩码反向传播
 │   ├── neoalz_lin.hpp               # NeoAlzette 线性层精确实现
-│   ├── pddt.hpp                     # 部分差分分布表
+│   ├── pddt.hpp                     # 部分差分分布表 (Algorithm 1)
+│   ├── pddt_optimized.hpp           # 优化的pDDT构建算法
 │   └── trail_export.hpp             # 轨道导出和CSV格式化
 ├── src/                             # 主要分析工具
-│   ├── analyze_medcp.cpp            # 🔥 MEDCP 差分轨道搜索器（主要工具）
-│   ├── analyze_melcc.cpp            # 🔥 MELCC 线性轨道搜索器（主要工具）
-│   ├── main_diff.cpp                # 差分分析演示程序
-│   ├── main_lin.cpp                 # 线性分析演示程序
-│   ├── main_pddt.cpp                # PDDT 构建和测试
-│   ├── main_threshold.cpp           # 阈值搜索演示
+│   ├── analyze_medcp.cpp            # 🔥 MEDCP 轨道搜索器（主要工具）
+│   ├── analyze_medcp_optimized.cpp  # ⚡ 优化版MEDCP分析器（推荐）
+│   ├── analyze_melcc.cpp            # 🔥 MELCC 轨道搜索器（主要工具）
+│   ├── analyze_melcc_optimized.cpp  # ⚡ 优化版MELCC分析器（推荐）
+│   ├── complete_matsui_demo.cpp     # 完整Matsui Algorithm 1&2演示
 │   ├── bnb.cpp                      # 分支限界搜索实现
 │   ├── neoalzette.cpp               # NeoAlzette 算法实现
 │   ├── pddt.cpp                     # 部分差分分布表实现
@@ -89,14 +93,10 @@ NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点�
 │   ├── search_beam_diff.cpp         # 束搜索差分分析
 │   └── milp_diff.cpp                # MILP 差分模型（实验性）
 ├── papers/                          # 核心理论论文（PDF）
-│   ├── A MIQCP-Based Automatic Search Algorithm...pdf  # 本项目核心论文
-│   ├── Alzette A 64-Bit ARX-box...pdf                  # NeoAlzette 基础论文  
-│   ├── Efficient Algorithms for Computing Differential Properties...pdf
-│   ├── Linear Approximations of Addition Modulo 2^n...pdf
-│   ├── MILP-Based Automatic Search Algorithms for Differential...pdf
-│   └── ... (共11篇核心论文)
 ├── papers_txt/                      # 论文文本提取版本（便于分析）
 ├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 11篇论文完全理解指南（25,000+字）
+├── ALZETTE_VS_NEOALZETTE.md         # Alzette vs NeoAlzette 设计对比
+├── ALGORITHM_IMPLEMENTATION_STATUS.md # 论文算法实现状态分析
 ├── CMakeLists.txt                   # 构建配置文件
 ├── LICENSE                          # GPL v3.0 开源许可证
 └── .gitignore                       # Git 忽略配置
@@ -159,14 +159,13 @@ make -j$(nproc)
 ### 构建产物
 
 #### 🔥 主要分析工具
-- **`analyze_medcp`** - 标准MEDCP差分轨道搜索
+- **`analyze_medcp`** - 标准MEDCP轨道搜索
 - **`analyze_medcp_optimized`** - **⚡ 优化版MEDCP分析器**（推荐使用）
-- **`analyze_melcc`** - 标准MELCC线性轨道搜索  
+- **`analyze_melcc`** - 标准MELCC轨道搜索  
 - **`analyze_melcc_optimized`** - **⚡ 优化版MELCC分析器**（推荐使用）
 
 #### 🔧 辅助工具
-- `diff_search` - 通用差分搜索工具
-- `lin_search` - 通用线性搜索工具
+- **`complete_matsui_demo`** - 完整Matsui Algorithm 1&2演示
 - `highway_table_build*` - Highway表构建工具
 
 #### ⚡ 优化版本特性
@@ -188,7 +187,7 @@ make -j$(nproc)
 - **建议环境**：高性能服务器或集群，而非个人笔记本电脑
 - **参数调试**：从小参数开始试验，逐步增加复杂度
 
-### MEDCP 差分轨道搜索
+### MEDCP 轨道搜索
 
 MEDCP 分析器使用 **Matsui 阈值搜索 + Lipmaa-Moriai 局部枚举**，支持完整的轨道路径记录。
 
@@ -251,7 +250,7 @@ echo "Optimized version:" && time ./analyze_medcp_optimized 6 25 --threads 4
 - **更低内存使用**：打包状态表示和内存池管理
 - **更好的可扩展性**：多线程支持充分利用现代多核CPU
 
-### MELCC 线性轨道搜索
+### MELCC 轨道搜索
 
 MELCC 分析器使用 **优先队列搜索 + Wallén 线性枚举**，支持精确的反向掩码传播。
 
@@ -319,6 +318,16 @@ time ./analyze_melcc_optimized 6 20 --threads 4
 
 # 构建线性 Highway 表  
 ./highway_table_build_lin output_lin.bin [max_rounds]
+```
+
+### 论文算法演示
+
+```bash
+# 演示完整的Matsui Algorithm 1&2实现
+./complete_matsui_demo --full
+
+# 快速验证算法正确性
+./complete_matsui_demo --quick
 ```
 
 ### 高级选项
@@ -391,8 +400,8 @@ done
 
 ### 内存使用模式
 
-```cpp
-// 内存组件分析
+```
+内存组件分析
 记忆化哈希表:     O(搜索状态数) ≈ 10MB - 1GB  
 优先队列:        O(活跃节点数) ≈ 1MB - 100MB
 Highway 表:      O(4^最大轮数) ≈ 16MB - 4GB
@@ -400,111 +409,25 @@ Highway 表:      O(4^最大轮数) ≈ 16MB - 4GB
 临时计算缓存:     O(单轮展开数) ≈ 10MB - 100MB
 ```
 
-### 性能优化策略
+### 个人电脑使用建议
 
-#### 1. 参数调优
+#### **4轮搜索 - 完全可行**
+- ⏱️ **时间**：10秒到10分钟（取决于权重上限）
+- 💾 **内存**：50MB到1GB（通常<500MB）
+- 💻 **CPU**：中等使用率，不会让电脑卡死
+- 📁 **存储**：几乎无磁盘I/O需求
+
+#### 建议测试流程
 ```bash
-# 渐进式参数增加策略
-./analyze_medcp 6 20    # 基线测试：~1分钟
-./analyze_medcp 6 25    # 中等测试：~5分钟  
-./analyze_medcp 8 30    # 标准配置：~1小时
-./analyze_medcp 10 35   # 重型任务：~1天（需要集群）
+# 第1步：最小测试（必定成功）
+time ./analyze_medcp_optimized 4 15
+
+# 第2步：标准测试  
+time ./analyze_medcp_optimized 4 20 --threads 2
+
+# 第3步：挑战测试（如果硬件允许）
+time ./analyze_medcp_optimized 4 25 --threads 4
 ```
-
-#### 2. Highway 表预计算
-```bash
-# 一次性预计算，多次复用
-./highway_table_build highway_diff.bin 12     # 差分表：~2GB，构建时间~1小时
-./highway_table_build_lin highway_lin.bin 10  # 线性表：~500MB，构建时间~30分钟
-
-# 使用预计算表可提速 2-5 倍
-./analyze_medcp 10 35 highway_diff.bin
-```
-
-#### 3. 集群并行化
-```bash
-# 参数空间分割策略
-for start_diff in 0x1 0x8000 0x80000000; do
-  for weight_cap in {30..45..5}; do
-    sbatch --mem=8G --time=24:00:00 \
-      run_medcp.sh 10 $weight_cap $start_diff
-  done
-done
-```
-
-### 集群部署建议
-
-#### 硬件配置建议
-- **CPU**: 16+ 核心，支持 AVX2/POPCNT 指令集
-- **内存**: 32GB+ DDR4，ECC 内存推荐
-- **存储**: NVMe SSD，用于 Highway 表和结果存储  
-- **网络**: 10Gbps+，用于分布式任务协调
-
-#### SLURM 作业脚本模板
-```bash
-#!/bin/bash
-#SBATCH --job-name=medcp_analysis
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=32G
-#SBATCH --time=48:00:00
-#SBATCH --partition=compute
-
-module load gcc/11.2.0
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-
-# 执行搜索任务
-./analyze_medcp ${ROUNDS} ${WEIGHT_CAP} highway_diff.bin \
-  --start-hex ${START_DA} ${START_DB} \
-  --export results_${SLURM_JOB_ID}.csv \
-  --export-trace trail_${SLURM_JOB_ID}.csv
-```
-
-#### 容器化部署
-```dockerfile
-FROM gcc:11.2.0
-WORKDIR /app
-COPY . .
-RUN mkdir build && cd build && cmake .. && make -j$(nproc)
-ENTRYPOINT ["./build/analyze_medcp"]
-```
-
-### 监控和故障排除
-
-#### 性能监控指标
-```bash
-# 实时监控资源使用
-htop -p $(pgrep analyze_medcp)
-iostat -x 5    # 监控磁盘I/O
-free -m        # 监控内存使用
-
-# 使用 perf 分析热点函数
-perf record ./analyze_medcp 8 30
-perf report
-```
-
-#### 常见问题与解决
-- **内存不足**：降低权重上限或使用交换空间
-- **计算卡死**：检查是否陷入深度递归，调整剪枝参数
-- **结果异常**：验证起始状态有效性，检查参数范围
-- **性能下降**：清理临时文件，重启减少内存碎片
-
-## 理论结果
-
-根据论文实验结果，本工具在以下方面取得突破：
-
-### 差分分析结果
-
-- **NeoAlzette 8轮**：最优差分概率 2^{-32}
-- **SPECK32 11轮**：相关性 -2^{-17.09}  
-- **SPECK64 12轮**：相关性 -2^{-20.46}
-
-### 线性分析结果
-
-- **算法改进**：相比之前方法，计算复杂度降低约 8 倍
-- **自动化搜索**：首次实现任意输出掩码的自动 DL 轨道搜索
-- **MIQCP 转换**：将矩阵乘法链转换为可求解的优化问题
 
 ## 开发和扩展
 
