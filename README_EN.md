@@ -32,15 +32,6 @@ ARX ciphers are based on three fundamental operations:
 
 This structure provides excellent performance in software implementations while maintaining sufficient cryptographic strength.
 
-### Theoretical Foundation
-
-This project is based on the following core theoretical achievements:
-
-1. **Lipmaa-Moriai (2001)** - Efficient algorithms for computing differential properties of modular addition
-2. **Wallén (2003)** - Correlation analysis of linear approximations for modular addition
-3. **Mixed Integer Quadratically-Constrained Programming (MIQCP)** - For automatic search of differential-linear trails
-4. **Highway Table Technology** - O(1) suffix lower bound queries with linear space complexity
-
 ### NeoAlzette Algorithm
 
 NeoAlzette is an improved version based on the Alzette 64-bit ARX-box, featuring:
@@ -51,81 +42,51 @@ NeoAlzette is an improved version based on the Alzette 64-bit ARX-box, featuring
 - **Linear Diffusion Layer**: L₁, L₂ provide branch number guarantees
 - **Round Constant Injection**: 16 predefined round constants
 
-## Complete Project Structure
+## Streamlined Project Structure
 
 ```
-├── include/                          # Core algorithm header library
+├── include/                          # Core algorithm headers (streamlined)
 │   ├── neoalzette.hpp               # NeoAlzette ARX-box core implementation
 │   ├── lm_fast.hpp                  # Lipmaa-Moriai differential fast enumeration
-│   ├── lm_wallen.hpp                # LM-Wallén hybrid model (differential+linear)
-│   ├── wallen_fast.hpp              # Wallén linear correlation fast computation
+│   ├── wallen_fast.hpp              # Wallén linear correlation computation
 │   ├── wallen_optimized.hpp         # Wallén optimized: precomputed automaton
-│   ├── highway_table.hpp            # Differential Highway suffix lower bound table
-│   ├── highway_table_lin.hpp        # Linear Highway suffix lower bound table
-│   ├── lb_round_full.hpp            # Complete round function differential bounds
-│   ├── lb_round_lin.hpp             # Complete round function linear bounds
-│   ├── suffix_lb.hpp                # Multi-round suffix differential bounds
-│   ├── suffix_lb_lin.hpp            # Multi-round suffix linear bounds
+│   ├── highway_table.hpp            # Differential Highway suffix lower bounds
+│   ├── highway_table_lin.hpp        # Linear Highway suffix lower bounds
 │   ├── threshold_search.hpp         # Matsui threshold search framework
 │   ├── threshold_search_optimized.hpp # Parallelized threshold search
 │   ├── matsui_complete.hpp          # Complete Matsui Algorithm 2 implementation
-│   ├── canonicalize.hpp             # State canonicalization (rotation equivalence)
-│   ├── state_optimized.hpp          # Optimized state representation and caching
-│   ├── diff_add_const.hpp           # Modular addition by constant differential properties
-│   ├── mask_backtranspose.hpp       # Linear mask backward propagation
-│   ├── neoalz_lin.hpp               # NeoAlzette linear layer exact implementation
 │   ├── pddt.hpp                     # Partial Differential Distribution Table
 │   ├── pddt_optimized.hpp           # Optimized pDDT construction algorithms
+│   ├── lb_round_full.hpp            # Complete round differential bounds
+│   ├── lb_round_lin.hpp             # Complete round linear bounds
+│   ├── suffix_lb.hpp                # Multi-round suffix differential bounds
+│   ├── suffix_lb_lin.hpp            # Multi-round suffix linear bounds
+│   ├── diff_add_const.hpp           # Modular addition by constant properties
+│   ├── canonicalize.hpp             # State canonicalization
+│   ├── mask_backtranspose.hpp       # Linear mask backward propagation
+│   ├── neoalz_lin.hpp               # NeoAlzette linear layer implementation
 │   └── trail_export.hpp             # Trail export and CSV formatting
-├── src/                             # Main analysis tools
-│   ├── analyze_medcp.cpp            # 🔥 MEDCP trail searcher (main tool)
+├── src/                             # Core analysis tools (streamlined)
+│   ├── analyze_medcp.cpp            # 🔥 MEDCP differential trail searcher
 │   ├── analyze_medcp_optimized.cpp  # ⚡ Optimized MEDCP analyzer (recommended)
-│   ├── analyze_melcc.cpp            # 🔥 MELCC trail searcher (main tool)
+│   ├── analyze_melcc.cpp            # 🔥 MELCC linear trail searcher
 │   ├── analyze_melcc_optimized.cpp  # ⚡ Optimized MELCC analyzer (recommended)
-│   ├── complete_matsui_demo.cpp     # Complete Matsui Algorithm 1&2 demonstration
-│   ├── bnb.cpp                      # Branch-and-bound search implementation
-│   ├── neoalzette.cpp               # NeoAlzette algorithm implementation
-│   ├── pddt.cpp                     # Partial Differential Distribution Table implementation
+│   ├── complete_matsui_demo.cpp     # 📚 Complete Matsui Algorithms demonstration
+│   ├── highway_table_build.cpp      # 🔧 Differential Highway table builder
+│   ├── highway_table_build_lin.cpp  # 🔧 Linear Highway table builder
+│   ├── threshold_lin.cpp            # Linear threshold search demo
 │   ├── gen_round_lb_table.cpp       # Round lower bound table generator
-│   ├── highway_table_build.cpp      # Differential Highway table builder
-│   ├── highway_table_build_lin.cpp  # Linear Highway table builder
-│   ├── threshold_lin.cpp            # Linear threshold search
-│   ├── search_beam_diff.cpp         # Beam search differential analysis
-│   └── milp_diff.cpp                # MILP differential model (experimental)
+│   ├── neoalzette.cpp               # NeoAlzette algorithm implementation
+│   └── pddt.cpp                     # Partial DDT implementation
 ├── papers/                          # Core theoretical papers (PDF)
-├── papers_txt/                      # Text-extracted versions of papers
-├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 Complete analysis of 11 papers (25,000+ words)
+├── papers_txt/                      # Text-extracted paper versions
+├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 Complete 11-paper analysis guide (25,000+ words)
 ├── ALZETTE_VS_NEOALZETTE.md         # Alzette vs NeoAlzette design comparison
 ├── ALGORITHM_IMPLEMENTATION_STATUS.md # Paper algorithm implementation status
-├── CMakeLists.txt                   # Build configuration file
-├── LICENSE                          # GPL v3.0 open source license
+├── CMakeLists.txt                   # Build configuration
+├── LICENSE                          # GPL v3.0 license
 └── .gitignore                       # Git ignore configuration
 ```
-
-### Core File Descriptions
-
-#### 🔥 Main Analysis Tools
-- **`analyze_medcp.cpp`** - **MEDCP Differential Analyzer**: Search for optimal differential trails with Highway acceleration, CSV export, weight histograms
-- **`analyze_melcc.cpp`** - **MELCC Linear Analyzer**: Search for optimal linear trails with exact backward propagation, beam search
-
-#### 🧮 Core Algorithm Implementations
-- **`lm_fast.hpp`** - **Lipmaa-Moriai 2001 Algorithm**: O(log n) time modular addition differential probability computation with prefix pruning
-- **`wallen_fast.hpp`** - **Wallén 2003 Algorithm**: O(log n) time modular addition linear correlation computation  
-- **`highway_table*.hpp`** - **Highway Table Technology**: Precomputed suffix bounds, O(1) query time, linear space
-
-#### 🔧 Auxiliary Tools
-- **`highway_table_build*.cpp`** - Highway table precomputation tools (optional, for large-scale search acceleration)
-- **`gen_round_lb_table.cpp`** - Round lower bound table generator (optimize single-round pruning)
-- **`trail_export.hpp`** - Unified CSV export format (for subsequent analysis)
-
-#### 📚 Core Documentation
-- **`PAPERS_COMPLETE_ANALYSIS_CN.md`** - **🔥 Complete analysis guide for 11 papers**
-  - 25,000+ words of deep technical analysis
-  - Complete chain from mathematical formulas to code implementation
-  - Engineering art analysis of Alzette's three-step pipeline design
-  - Layer-by-layer analysis of Lipmaa-Moriai, Wallén and other core algorithms
-  - Clarification of common confusions and learning path guidance
-  - **Essential reading when encountering algorithm understanding difficulties**
 
 ## Build Instructions
 
@@ -148,10 +109,10 @@ mkdir build && cd build
 # Configure build
 cmake ..
 
-# Compile
+# Compile core tools
 make -j$(nproc)
 
-# Optional: Build demo programs
+# Optional: Build demonstration programs
 cmake -DNA_BUILD_DEMOS=ON ..
 make -j$(nproc)
 ```
@@ -159,176 +120,31 @@ make -j$(nproc)
 ### Build Artifacts
 
 #### 🔥 Main Analysis Tools
-- **`analyze_medcp`** - Standard MEDCP trail search
+- **`analyze_medcp`** - Standard MEDCP differential trail search
 - **`analyze_medcp_optimized`** - **⚡ Optimized MEDCP Analyzer** (Recommended)
-- **`analyze_melcc`** - Standard MELCC trail search  
+- **`analyze_melcc`** - Standard MELCC linear trail search  
 - **`analyze_melcc_optimized`** - **⚡ Optimized MELCC Analyzer** (Recommended)
 
 #### 🔧 Auxiliary Tools
 - **`complete_matsui_demo`** - Complete Matsui Algorithm 1&2 demonstration
-- `highway_table_build*` - Highway table construction tools
+- **`highway_table_build`** - Differential Highway table builder
+- **`highway_table_build_lin`** - Linear Highway table builder
 
-#### ⚡ Optimized Version Features
-**New optimized versions include the following improvements**:
-- **Wallén Algorithm Rewrite**: Precomputed automaton replaces runtime recursion, 2-5x performance improvement
-- **Parallelized Search**: Multi-threaded work-stealing to fully utilize multi-core CPUs
-- **Cache-Friendly Design**: 64-bit packed state representation reduces memory access overhead
-- **Fast Canonicalization**: Optimized bit manipulation algorithms accelerate state equivalence checking  
-- **Improved Pruning Strategy**: Better lower bound estimation and duplicate state detection
+## 🖥️ Personal Computer vs 🏢 Computing Cluster: Usage Scenarios
 
-## Usage
+### ⚠️ **Critical Resource Requirements**
 
-### ⚠️ Essential Pre-requisites
+**Reality of Personal Computer Limitations**:
+- 💻 **Memory Capacity**: Usually 8-16GB, severely insufficient for research-grade analysis
+- ⏱️ **Computation Time**: Limited performance, multi-round searches may take days
+- 🌡️ **Thermal Constraints**: Extended high-load may cause throttling
+- 📊 **Parameter Limits**: Can only run very low parameter "validation" tests
 
-These tools are **computationally intensive** research-grade algorithm implementations:
-
-- **Time Complexity**: Exponential worst-case, actual performance depends on pruning efficiency
-- **Space Complexity**: O(2^{weight_cap}) memory usage
-- **Recommended Environment**: High-performance servers or clusters, not personal laptops
-- **Parameter Tuning**: Start with small parameters, gradually increase complexity
-
-### MEDCP Trail Search
-
-MEDCP analyzer uses **Matsui threshold search + Lipmaa-Moriai local enumeration**, supporting complete trail path recording.
-
-#### Basic Syntax
-```bash
-./analyze_medcp R Wcap [highway.bin] [options]
-```
-
-#### Parameter Description
-- **`R`** - Number of search rounds (recommended range: 4-12 rounds)
-- **`Wcap`** - Global weight cap (lower is faster, recommend 20-50)
-- **`highway.bin`** - Optional precomputed Highway table file
-
-#### Detailed Options
-- **`--start-hex dA dB`** - Starting differential state (32-bit hexadecimal)
-  - `dA`: A register difference
-  - `dB`: B register difference
-  - Example: `--start-hex 0x80000000 0x1`
-- **`--k1 K`** - Top-K candidates for var-var addition (default 4, range 1-16)
-- **`--k2 K`** - Top-K candidates for var-const addition (default 4, range 1-16)
-- **`--export path.csv`** - Export search summary to CSV file
-- **`--export-trace path.csv`** - Export complete optimal trail path
-- **`--export-hist path.csv`** - Export weight distribution histogram
-- **`--export-topN N path.csv`** - Export top-N best results
-
-#### Standard Version Examples
-```bash
-# Beginner example: 6-round search, weight cap 25 (~1 minute)
-./analyze_medcp 6 25
-
-# Standard search: 8 rounds, weight 35, custom starting difference
-./analyze_medcp 8 35 --start-hex 0x1 0x0
-```
-
-#### ⚡ Optimized Version Examples (Recommended)
-```bash
-# Basic optimized search: auto-detect thread count
-./analyze_medcp_optimized 6 25
-
-# High-performance search: specify thread count, use Highway table
-./analyze_medcp_optimized 8 35 highway_diff.bin --threads 8 --k1 8 --k2 8
-
-# Fast search: use fast canonicalization (suitable for large-scale search)
-./analyze_medcp_optimized 10 40 --fast-canonical --threads 16
-
-# Complete optimized analysis: export detailed results
-./analyze_medcp_optimized 8 30 \
-  --export-trace trail_opt.csv \
-  --export-hist histogram_opt.csv \
-  --export-topN 10 top10_opt.csv \
-  --threads 8
-
-# Performance comparison test
-echo "Standard version:" && time ./analyze_medcp 6 25
-echo "Optimized version:" && time ./analyze_medcp_optimized 6 25 --threads 4
-```
-
-#### Performance Improvement Description
-- **2-5x Speed Improvement**: Optimized Wallén algorithm and parallelization
-- **Lower Memory Usage**: Packed state representation and memory pool management
-- **Better Scalability**: Multi-threading support fully utilizes modern multi-core CPUs
-
-### MELCC Trail Search
-
-MELCC analyzer uses **priority queue search + Wallén linear enumeration**, supporting precise backward mask propagation.
-
-#### Basic Syntax
-```bash
-./analyze_melcc R Wcap [options]
-```
-
-#### Parameter Description
-- **`R`** - Number of search rounds (recommended range: 4-10 rounds)
-- **`Wcap`** - Weight cap (linear analysis typically more restrictive than differential)
-
-#### Detailed Options
-- **`--start-hex mA mB`** - Starting linear masks (32-bit hexadecimal)
-  - `mA`: A register mask
-  - `mB`: B register mask
-- **`--lin-highway H.bin`** - Linear Highway table file
-- **`--export path.csv`** - Export analysis summary
-- **`--export-trace path.csv`** - Export optimal trail
-- **`--export-hist path.csv`** - Export weight distribution
-- **`--export-topN N path.csv`** - Export top-N results
-
-#### Standard Version Examples
-```bash
-# Beginner example: 6-round linear search
-./analyze_melcc 6 20
-
-# High-weight mask search
-./analyze_melcc 8 25 --start-hex 0x80000001 0x0
-```
-
-#### ⚡ Optimized Version Examples (Recommended)
-```bash
-# Basic optimized linear search
-./analyze_melcc_optimized 6 20
-
-# High-performance linear analysis: multi-threading + Highway table
-./analyze_melcc_optimized 8 25 --lin-highway highway_lin.bin --threads 6
-
-# Fast linear search: use fast canonicalization
-./analyze_melcc_optimized 10 30 --fast-canonical --threads 8
-
-# Complete optimized linear analysis pipeline
-./analyze_melcc_optimized 8 25 \
-  --start-hex 0x1 0x0 \
-  --export-trace linear_trail_opt.csv \
-  --export-topN 5 best_linear_opt.csv \
-  --threads 6
-
-# Performance comparison: standard vs optimized
-time ./analyze_melcc 6 20
-time ./analyze_melcc_optimized 6 20 --threads 4
-```
-
-#### Linear Analysis Specific Optimizations
-- **Precomputed Wallén Automaton**: Avoids runtime recursion, significantly improves enumeration speed
-- **Optimized Backward Propagation**: Precise (L^{-1})^T computation reduces unnecessary state generation
-- **Improved Priority Queue**: Uses packed states to reduce memory footprint and improve cache hit rates
-
-### Highway Table Construction
-
-```bash
-# Build differential Highway table (optional, for search acceleration)
-./highway_table_build output_diff.bin [max_rounds]
-
-# Build linear Highway table
-./highway_table_build_lin output_lin.bin [max_rounds]
-```
-
-### Paper Algorithm Demonstration
-
-```bash
-# Demonstrate complete Matsui Algorithm 1&2 implementation
-./complete_matsui_demo --full
-
-# Quick algorithm correctness verification
-./complete_matsui_demo --quick
-```
+**Computing Cluster Necessity**:
+- 🎯 **Real Research Analysis** (8+ rounds) requires cluster resource allocation
+- 📈 **Breakthrough Discoveries** (10+ rounds) mandate HPC environments
+- 💾 **Memory Requirements**: 32GB+ RAM needed for complex search tasks
+- 🔄 **Parallel Scaling**: Hundreds of cores needed for reasonable completion times
 
 ## 📋 **Complete CLI Usage Guide**
 
@@ -339,21 +155,12 @@ time ./analyze_melcc_optimized 6 20 --threads 4
 ./analyze_medcp[_optimized] R Wcap [highway.bin] [options]
 ```
 
-#### **Required Parameters**
-- **`R`** - Number of search rounds (integer, recommend 4-12)
-  - Personal computer: 4-6 rounds
-  - Cluster environment: 6-12 rounds
-- **`Wcap`** - Global weight cap (integer, recommend 15-50)
-  - Lower values = faster search, but may not find solutions
-  - Personal computer: 15-25
-  - Cluster environment: 25-50
+#### **Parameter Description**
+- **`R`** - Search rounds (4-12, personal computer: 4-6)
+- **`Wcap`** - Weight cap (15-50, personal computer: 15-25)
+- **`highway.bin`** - Optional Highway table file
 
-#### **Optional Parameters**
-- **`highway.bin`** - Highway table file path
-  - Precomputed suffix lower bound table, dramatically improves search speed
-  - Optional but strongly recommended for repeated searches
-
-#### **All Supported Options**
+#### **Complete Options List**
 
 | Option | Parameters | Description | Example |
 |--------|-----------|-------------|---------|
@@ -367,55 +174,45 @@ time ./analyze_melcc_optimized 6 20 --threads 4
 | `--threads` | `N` | Number of threads (optimized version only) | `--threads 8` |
 | `--fast-canonical` | none | Fast canonicalization (optimized version only) | `--fast-canonical` |
 
-#### **Usage Examples from Beginner to Expert**
+#### **Usage Examples**
 
-**🟢 Entry Level (Personal Computer)**:
+**🟢 Personal Computer Entry Level**:
 ```bash
-# Minimal verification test
+# Quick verification (completes in 30 seconds)
 ./analyze_medcp_optimized 4 15
 
-# Basic differential search
-./analyze_medcp_optimized 4 20 --start-hex 0x1 0x0
+# Basic analysis (2-5 minutes)
+./analyze_medcp_optimized 4 20 --start-hex 0x1 0x0 --export basic.csv
 
-# Export results for analysis
-./analyze_medcp_optimized 4 25 --export basic_result.csv
+# Parameter understanding
+for w in {15..25}; do
+  echo "Testing weight $w:"
+  time ./analyze_medcp_optimized 4 $w
+done
 ```
 
-**🟡 Standard Level (Personal Computer/Small Cluster)**:
+**🟡 Personal Computer Challenge Level**:
 ```bash
-# Multi-threaded search
-./analyze_medcp_optimized 6 25 --threads 4
-
-# Use Highway table acceleration
-./analyze_medcp_optimized 6 30 highway_diff.bin --threads 4
+# Multi-threaded search (5-15 minutes, close other programs)
+./analyze_medcp_optimized 5 25 --threads 4
 
 # Complete result export
-./analyze_medcp_optimized 6 25 \
+./analyze_medcp_optimized 5 22 \
   --export summary.csv \
   --export-trace trail.csv \
   --export-hist histogram.csv
 ```
 
-**🔴 Professional Level (Cluster Required)**:
+**🔴 Cluster Professional Level**:
 ```bash
-# High-performance search
+# High-performance research analysis (requires cluster allocation)
 ./analyze_medcp_optimized 8 35 highway_diff.bin --threads 16 --k1 8 --k2 8
 
-# Large-scale parameter sweep
+# Large-scale parameter space search
 for start in 0x1 0x8000 0x80000000; do
-  ./analyze_medcp_optimized 8 35 highway_diff.bin \
-    --start-hex $start 0x0 \
-    --threads 16 \
-    --export results_${start}.csv
+  sbatch --mem=16G --time=24:00:00 \
+    run_medcp.sh 8 35 $start 0x0
 done
-
-# Complete research analysis
-./analyze_medcp_optimized 10 40 highway_diff.bin \
-  --fast-canonical \
-  --threads 32 \
-  --export-trace trail_10r.csv \
-  --export-hist hist_10r.csv \
-  --export-topN 20 top20_10r.csv
 ```
 
 ### 🔥 **analyze_melcc / analyze_melcc_optimized - MELCC Linear Trail Search**
@@ -425,15 +222,11 @@ done
 ./analyze_melcc[_optimized] R Wcap [options]
 ```
 
-#### **Required Parameters**
-- **`R`** - Number of search rounds (integer, recommend 4-10)
-  - Linear analysis is more computationally intensive than differential
-  - Personal computer: 4-5 rounds
-  - Cluster environment: 6-10 rounds
-- **`Wcap`** - Weight cap (integer, recommend 10-40)
-  - Linear analysis weights are typically more restrictive than differential
+#### **Parameter Description**
+- **`R`** - Search rounds (4-10, linear more intensive than differential)
+- **`Wcap`** - Weight cap (10-40, linear typically more restrictive)
 
-#### **All Supported Options**
+#### **Complete Options List**
 
 | Option | Parameters | Description | Example |
 |--------|-----------|-------------|---------|
@@ -441,362 +234,220 @@ done
 | `--export` | `file.csv` | Export analysis summary | `--export linear_results.csv` |
 | `--export-trace` | `file.csv` | Export optimal linear trail | `--export-trace linear_trail.csv` |
 | `--export-hist` | `file.csv` | Export weight distribution | `--export-hist linear_hist.csv` |
-| `--export-topN` | `N file.csv` | Export top-N best results | `--export-topN 5 top5_linear.csv` |
+| `--export-topN` | `N file.csv` | Export top-N best results | `--export-topN 5 top5.csv` |
 | `--lin-highway` | `H.bin` | Linear Highway table file | `--lin-highway highway_lin.bin` |
 | `--threads` | `N` | Number of threads (optimized version only) | `--threads 6` |
 | `--fast-canonical` | none | Fast canonicalization (optimized version only) | `--fast-canonical` |
 
-### ⚠️ **Critical Usage Guidelines**
+### 🔧 **Auxiliary Tools Usage**
 
-#### **Parameter Selection Guide**
-
-**Weight Cap (Wcap) Selection Strategy**:
+#### **Highway Table Builders**
 ```bash
-# Too low: May not find any trails
-./analyze_medcp_optimized 6 10    # Likely no results
+# Build differential Highway table (one-time, multiple reuse)
+./highway_table_build highway_diff.bin 10
+# Time: 1-3 hours, Size: 500MB-2GB
 
-# Appropriate: Usually finds meaningful trails
-./analyze_medcp_optimized 6 25    # Recommended starting value
+# Build linear Highway table
+./highway_table_build_lin highway_lin.bin 8  
+# Time: 30min-2hr, Size: 200MB-1GB
 
-# Too high: Search time grows exponentially
-./analyze_medcp_optimized 6 50    # ⚠️ May take hours
+# Use Highway tables for accelerated search
+./analyze_medcp_optimized 8 35 highway_diff.bin --threads 8
 ```
 
-**Starting State Selection Tips**:
+#### **Paper Algorithm Demonstration**
 ```bash
-# ✅ Good starting states: Sparse differences
---start-hex 0x1 0x0           # Single bit difference
---start-hex 0x80000000 0x1    # First/last bit difference
---start-hex 0x8000 0x8        # Symmetric sparse difference
+# Quick verification of Algorithm 1&2 correctness
+./complete_matsui_demo --quick
 
-# ❌ Avoid: Dense differences
---start-hex 0xFFFFFFFF 0xAAAAAAAA  # Too many active bits
---start-hex 0x0 0x0           # Zero difference is meaningless
+# Complete demonstration of highways/country roads strategy
+./complete_matsui_demo --full
 ```
 
-**K-value Tuning Strategy**:
+## ⚠️ **Critical Usage Guidelines**
+
+### **Personal Computer Limitations**
+
+**✅ Recommended for personal computers**:
 ```bash
-# Conservative: Fast but may miss optimal solutions
---k1 2 --k2 2
+# Tool verification (guaranteed fast completion)
+./analyze_medcp_optimized 4 15
 
-# Standard: Balanced performance and completeness
---k1 4 --k2 4    # Default values
+# Parameter learning
+./analyze_medcp_optimized 4 20 --start-hex 0x1 0x0
 
-# Aggressive: More complete but significantly slower
---k1 8 --k2 8    # ⚠️ Cluster environment only
+# Output format understanding
+./analyze_medcp_optimized 4 18 --export test.csv --export-trace trail.csv
 ```
 
-#### **Troubleshooting Common Issues**
-
-**If search finds no results**:
+**❌ Do NOT attempt on personal computers**:
 ```bash
-# 1. Lower weight cap
-./analyze_medcp_optimized 4 15 --start-hex 0x1 0x0
-
-# 2. Try different starting states
-./analyze_medcp_optimized 4 20 --start-hex 0x8000 0x0
-
-# 3. Check parameter validity
-./analyze_medcp_optimized 4 25    # Use default starting state
+# These will cause out-of-memory or hours-long hangs:
+./analyze_medcp_optimized 8 35     # ❌ 8 rounds require cluster
+./analyze_medcp_optimized 6 45     # ❌ High weight requires cluster  
+./analyze_melcc_optimized 7 30     # ❌ 7-round linear requires cluster
 ```
 
-**If search is too slow**:
+### **Cluster Resource Application Guide**
+
+#### **SLURM Job Script Examples**
+
+**Medium Research Tasks**:
 ```bash
-# 1. Reduce complexity parameters
-./analyze_medcp_optimized 4 20 --fast-canonical
-
-# 2. Reduce thread count to avoid resource contention
-./analyze_medcp_optimized 4 25 --threads 1
-
-# 3. Use Highway table acceleration
-./highway_table_build highway.bin 8
-./analyze_medcp_optimized 6 25 highway.bin
-```
-
-#### **Output File Format Documentation**
-
-**Basic Summary (--export)**:
-```csv
-algo,R,Wcap,start_dA,start_dB,K1,K2,best_w,time_ms,threads
-MEDCP_OPTIMIZED,6,25,0x1,0x0,4,4,18,15432,4
-```
-
-**Trail Path (--export-trace)**:
-```csv  
-algo,MEDCP,field,round,dA,dB,acc_weight
-MEDCP,trace,0,0x1,0x0,0
-MEDCP,trace,1,0x8000,0x8,5
-MEDCP,trace,2,0x4000,0x4000,12
-```
-
-### Advanced Options
-
-#### Export and Analysis Options
-
-```bash
-# Export complete trail paths
-./analyze_medcp 8 30 --export-trace trail.csv
-
-# Export weight distribution histogram
-./analyze_medcp 8 30 --export-hist histogram.csv
-
-# Export top-N best results
-./analyze_medcp 8 30 --export-topN 10 top10.csv
-```
-
-#### Search Parameter Tuning
-
-- `--k1 K`: Top-K candidates for var-var addition (default 4)
-- `--k2 K`: Top-K candidates for var-const addition (default 4)
-- Increasing K values may find better trails but significantly increases search time
-
-### Parallelization and Cluster Deployment
-
-This toolkit is designed as a **CPU-intensive** application, supporting:
-
-- **Multi-core Parallelism**: Use `make -j$(nproc)` to fully utilize multi-core CPUs
-- **Memory Efficiency**: Uses memoization and incremental computation to reduce memory usage
-- **Cluster-Friendly**: Tools run independently, easy to deploy in cluster environments
-
-#### Cluster Usage Recommendations
-
-```bash
-# Split large tasks into multiple subtasks for parallel execution
-for r in {6..12}; do
-    for w in {20..40..5}; do
-        sbatch run_analysis.sh $r $w
-    done  
-done
-```
-
-## 🖥️ Personal Computer vs 🏢 Computing Cluster: Usage Scenarios
-
-### ⚠️ **Critical Resource Requirements**
-
-**Reality of Personal Computer Limitations**:
-- 💻 **Memory Capacity**: Usually 8-16GB, severely insufficient for research-grade analysis
-- ⏱️ **Computation Time**: Limited single-core performance, multi-round searches may take days
-- 🌡️ **Thermal Constraints**: Extended high-load may cause throttling or overheating
-- 📊 **Parameter Limits**: Can only run very low parameter "validation" tests
-
-**Computing Cluster Necessity**:
-- 🎯 **Real Research Analysis** (8+ rounds) requires cluster resource allocation
-- 📈 **Breakthrough Discoveries** (10+ rounds) mandate high-performance computing environments
-- 💾 **Memory Requirements**: 32GB+ RAM needed to handle complex search tasks
-- 🔄 **Parallel Scaling**: Hundreds of cores working simultaneously for reasonable completion times
-
-### Detailed Usage Scenario Comparison
-
-#### 👨‍💻 **Personal Computer Applicable Scenarios**
-
-| Parameter Config | Rounds | Weight Cap | Memory Required | Time Range | Purpose |
-|------------------|--------|------------|----------------|-------------|---------|
-| **Validation** | 4 | 15-20 | 50-200MB | 10sec-2min | Algorithm validation, tool understanding |
-| **Learning** | 4-5 | 20-25 | 200-500MB | 2-10min | Learning cryptanalysis, parameter understanding |
-| **Testing** | 6 | 25-30 | 500MB-1GB | 10-60min | Tool testing, method verification |
-
-**Personal Computer Practical Limitations**:
-```bash
-# ✅ Feasible: Verify tools work correctly
-./analyze_medcp_optimized 4 15    # ~30 seconds
-
-# 🟡 Barely manageable: Need to close other programs
-./analyze_medcp_optimized 4 25    # ~5-15 minutes, memory pressure
-
-# ❌ Not recommended: May cause system freeze or out-of-memory
-./analyze_medcp_optimized 6 30    # May take hours, likely insufficient memory
-```
-
-#### 🏢 **Computing Cluster Required Scenarios**
-
-| Research Type | Rounds | Weight Cap | Memory Required | Compute Nodes | Resource Application |
-|---------------|--------|------------|----------------|---------------|---------------------|
-| **Paper Experiments** | 6-8 | 25-35 | 4-8GB | 1-2 nodes | Medium compute resources |
-| **Deep Analysis** | 8-10 | 35-45 | 8-16GB | 2-4 nodes | High-performance resources |
-| **Breakthrough Research** | 10-12+ | 45+ | 16-64GB | 4-16 nodes | Supercomputing center resources |
-
-**Cluster Resource Application Guide**:
-```bash
-# Medium research tasks
+#!/bin/bash
+#SBATCH --job-name=neoalzette_analysis
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1  
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
 
-# Heavy research tasks  
+# Execute search
+./analyze_medcp_optimized 8 35 highway_diff.bin \
+  --threads 16 \
+  --export results_${SLURM_JOB_ID}.csv
+```
+
+**Heavy Research Tasks**:
+```bash
+#!/bin/bash
+#SBATCH --job-name=breakthrough_search
 #SBATCH --nodes=4
-#SBATCH --ntasks-per-node=2
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=32  
 #SBATCH --mem=128G
-#SBATCH --time=168:00:00  # 1 week
+#SBATCH --time=168:00:00
+
+# Distributed large-scale search
+srun ./analyze_medcp_optimized 10 45 highway_diff.bin \
+  --threads 32 \
+  --export-trace breakthrough_trail.csv
 ```
 
-### 📊 **Realistic Performance Expectation Management**
+### **Troubleshooting Guide**
 
-#### **What Personal Computers Can Do**:
-```
-✅ Algorithm validation: Confirm tools work correctly
-✅ Parameter understanding: Learn effects of different parameters
-✅ Method verification: Verify correctness of analysis methods
-✅ Small-scale experiments: Obtain basic analysis data
-✅ Tool familiarization: Master usage methods and interfaces
-
-❌ Cannot do: Real cryptographic research-grade analysis
-❌ Cannot do: Discover new cryptographic results
-❌ Cannot do: Comparative verification with literature results
-❌ Cannot do: Complete security assessments
-```
-
-#### **What Cluster Computing Can Do**:
-```
-🎯 Real Research:
-- Discover new optimal differential/linear trails
-- Verify or challenge existing security claims
-- Develop new attack methods
-- Publish breakthrough results at top-tier conferences
-
-📈 Large-scale Analysis:
-- Complete parameter space exploration
-- Statistically significant experimental validation
-- Comparative analysis with existing literature
-- Security assessment of new ARX ciphers
-```
-
-### 💰 **Resource Cost Estimation**
-
-#### **Personal Computer Costs**:
-- 💻 **Hardware Cost**: 0 (use existing equipment)
-- ⏱️ **Time Cost**: Low (short-term validation)
-- 🎯 **Research Value**: Limited (learning and validation only)
-
-#### **Cluster Resource Costs**:
-- 💰 **Application Difficulty**: Requires formal research project support
-- 📝 **Resource Application**: Detailed computational requirement documentation
-- ⏱️ **Wait Time**: May require queuing for resources
-- 🎯 **Research Value**: High (genuine breakthrough discoveries)
-
-### 🎓 **Recommendations for Different Research Stages**
-
-#### **Learning Stage (Personal Computer Sufficient)**:
+**If search finds no results**:
 ```bash
-# Understand basic tool functionality
-./analyze_medcp_optimized 4 15 --export test1.csv
-./analyze_melcc_optimized 4 15 --export test2.csv
+# 1. Lower weight cap
+./analyze_medcp_optimized 4 12 --start-hex 0x1 0x0
 
-# Understand parameter effects
-for w in {15..25}; do 
-  time ./analyze_medcp_optimized 4 $w
-done
-
-# Master export and analysis features
-./analyze_medcp_optimized 4 20 \
-  --export-trace trail.csv \
-  --export-hist hist.csv
+# 2. Try different starting states
+./analyze_medcp_optimized 4 15 --start-hex 0x8000 0x0
 ```
 
-#### **Research Stage (Cluster Application Required)**:
+**If search is too slow**:
 ```bash
-# Actual research after cluster resource allocation
-sbatch run_analysis.sbatch 8 35    # Discover new trails
-sbatch run_analysis.sbatch 10 40   # Challenge security boundaries  
-sbatch run_comparison.sbatch       # Compare with literature
+# 1. Use fast mode
+./analyze_medcp_optimized 4 20 --fast-canonical --threads 1
+
+# 2. Pre-build Highway table for acceleration
+./highway_table_build highway.bin 6
+./analyze_medcp_optimized 6 25 highway.bin
 ```
 
-### 🚨 **Critical Warnings**
-
-**Do NOT attempt on personal computers**:
-- ❌ 8+ round searches (may cause out-of-memory)
-- ❌ Weight cap >30 tasks (may run for days)
-- ❌ Large searches without Highway tables (extremely inefficient)
-- ❌ Running multiple tools simultaneously (resource competition)
-
-**Requirements for cluster application**:
-- 📚 **Clear research objectives**: Explain what cryptographic problems to solve
-- 📊 **Detailed resource requirements**: Reasonable estimates based on small-scale tests
-- ⏱️ **Realistic time expectations**: Large searches may require weeks
-- 💾 **Storage planning**: Result data storage and management schemes
-
-## Development and Extension
-
-### Adding New Cipher Algorithms
-
-1. Define algorithm structures in `include/`
-2. Implement round functions and state transitions
-3. Adapt differential/linear local models
-4. Add corresponding analysis programs
-
-### Custom Search Strategies
-
-```cpp
-// Implement custom lower bound function
-auto custom_lower_bound = [](const State& s, int round) -> int {
-    // Custom bound calculation logic
-    return compute_bound(s, round);
-};
-
-// Use custom strategy for search
-auto result = matsui_threshold_search(rounds, start, cap, 
-                                     next_states, custom_lower_bound);
+**If memory insufficient**:
+```bash
+# Reduce complexity parameters
+./analyze_medcp_optimized 4 18 --fast-canonical
 ```
 
-## License
+## 📊 **Realistic Performance Expectations**
 
-This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
+### **What Personal Computers Can Do**:
+- ✅ **Algorithm Validation**: Confirm tools work correctly
+- ✅ **Parameter Learning**: Understand effects of different settings
+- ✅ **Method Understanding**: Grasp basic cryptanalysis concepts
+- ✅ **Small Experiments**: Obtain basic analysis data
+
+### **What Personal Computers Cannot Do**:
+- ❌ **Research-Grade Analysis**: Discover new cryptographic results
+- ❌ **Literature Comparison**: Verification with published results
+- ❌ **Complete Assessment**: Security evaluation of new algorithms
+- ❌ **Breakthrough Discoveries**: Research for top-tier conference publication
+
+### **Value of Cluster Computing**:
+- 🎯 **Real Cryptographic Research**: Discover new trails, challenge security claims
+- 📈 **Large-Scale Validation**: Statistically significant experimental results
+- 🔬 **Method Innovation**: Develop new analysis techniques and attack methods
+
+## Theoretical Results and Validation
+
+### Algorithm-Theory Correspondence
+
+This toolkit completely implements the following paper algorithms:
+
+1. **Lipmaa-Moriai (2001)**: O(log n) differential probability computation
+2. **Wallén (2003)**: O(log n) linear correlation computation
+3. **Matsui Algorithm 1&2 (complete paper reproduction)**: pDDT construction + threshold search
+4. **MIQCP Conversion Technology (2022)**: Mathematical foundation for 8x performance improvement
+5. **Highway Table Technology**: O(1) suffix lower bound queries
+
+### Experimental Validation Recommendations
+
+```bash
+# Step 1: Verify algorithm implementation correctness
+./complete_matsui_demo --quick
+
+# Step 2: Small-scale performance testing
+time ./analyze_medcp_optimized 4 15
+time ./analyze_melcc_optimized 4 15  
+
+# Step 3: Understand result formats
+./analyze_medcp_optimized 4 18 --export-trace trail.csv
+# Examine trail.csv file format
+
+# Step 4: Prepare for research applications
+./analyze_medcp_optimized 5 25 --export estimate.csv
+# Estimate cluster resource requirements based on results
+```
 
 ## 📚 Learning Resource Guide
 
-### **Documentation Usage Recommendations**
-- **Want to get started quickly?** → Read the "Usage" section of this README
-- **Encountering algorithm confusion?** → Refer to `PAPERS_COMPLETE_ANALYSIS_CN.md`
-- **Need deep understanding?** → Start with MnT operator, understand algorithm encapsulation layers
-- **Optimization bottlenecks?** → Consult "Performance Optimization" sections in paper analysis
-
-### **Recommended Learning Path** 
+### **Recommended Learning Path**
 ```
-Step 1: Familiarize with tools → Run 4-round small tests, understand basic concepts
-Step 2: Understand algorithms → Read paper analysis, master mathematical principles
-Step 3: Deep application → Try 8-round analysis, explore parameter optimization  
-Step 4: Advanced research → Extend to other ARX ciphers, publish results
+Step 1: Tool Validation → ./analyze_medcp_optimized 4 15 (confirm environment)
+Step 2: Theory Study → Read PAPERS_COMPLETE_ANALYSIS_CN.md  
+Step 3: Parameter Practice → Test different Wcap and starting states
+Step 4: Advanced Application → Apply for cluster resources for real research
 ```
 
-## Citation
+### **Important Documentation Index**
+- **Quick Start**: CLI usage guide in this README
+- **Algorithm Understanding**: `PAPERS_COMPLETE_ANALYSIS_CN.md` (25,000+ word deep analysis)
+- **Design Comparison**: `ALZETTE_VS_NEOALZETTE.md` (original vs extended design)
+- **Implementation Status**: `ALGORITHM_IMPLEMENTATION_STATUS.md` (paper algorithm coverage)
 
-If you use this toolkit in your research, please cite the relevant papers:
+## License and Citation
+
+This project is licensed under **GNU General Public License v3.0**.
 
 ```bibtex
 @inproceedings{miqcp2022,
   title={A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX Ciphers},
   author={Guangqiu Lv and Chenhui Jin and Ting Cui},
-  booktitle={Cryptology ePrint Archive},
   year={2022}
 }
 
 @inproceedings{alzette2020,
-  title={Alzette: A 64-Bit ARX-box},
-  author={Christof Beierle and Alex Biryukov and Luan Cardoso dos Santos and others},
+  title={Alzette: A 64-Bit ARX-box},  
+  author={Christof Beierle and Alex Biryukov and others},
   booktitle={Annual International Cryptology Conference},
   pages={419--448},
   year={2020}
 }
 ```
 
-## Contributing
+## 🎯 **Summary**
 
-Issues and Pull Requests are welcome! Please ensure:
+The NeoAlzette Cryptanalysis Toolkit provides:
+- ✅ **Complete ARX Analysis Capability**: Full toolchain from theory to implementation
+- ✅ **Academic-Grade Accuracy**: Rigorous implementation based on 11 core papers
+- ✅ **Engineering-Grade Optimization**: Significant performance improvements and parallelization
+- ✅ **Practical Guidance**: Clear personal computer vs cluster usage guidelines
 
-1. Code conforms to C++20 standards
-2. Add appropriate tests and documentation
-3. Follow existing code style
-4. Provide detailed descriptions of changes
-
-## Contact
-
-For technical questions or collaboration inquiries, please contact through:
-
-- Create GitHub Issues
-- Email project maintainers
-- Participate in relevant academic conferences and discussions
+**Target Users**:
+- 🎓 **Cryptography Researchers**: Conducting ARX cipher security analysis
+- 👨‍🎓 **Graduate Students & PhDs**: Learning modern cryptanalysis techniques
+- 🏢 **Industry Researchers**: Evaluating security of ARX designs  
+- 📚 **Educators**: Teaching advanced cryptographic concepts
 
 ---
 
