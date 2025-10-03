@@ -1,0 +1,3910 @@
+A MIQCP-Based Automatic Search Algorithm
+for Differential-Linear Trails of ARX Ciphers
+Guangqiu Lv1 , Chenhui Jin1 and Ting Cui1
+1
+
+PLA SSF Information Engineering University, Zhengzhou 450000, China
+2
+LGQ_Running@163.com
+
+Abstract. Differential-linear (DL) cryptanalysis has undergone remarkable advancements since it was first proposed by Langford and Hellman [LH94] in 1994. At
+CRYPTO 2022, Niu et al. studied the (rotational) DL cryptanalysis of n-bit modulo
+additions with 2 inputs, i.e., 2 , and presented a technique for evaluating the (rotational) DL correlation of ARX ciphers. However, the problem of how to automatically
+search for good DL trails on ARX with solvers was left open, which is the focus of
+this work.
+In this paper, we solve this open problem through some techniques to reduce complexity and a transformation technique from matrix multiplication chain to Mixed Integer
+Quadratically-Constrained Programs (MIQCP). First, the computational complexity
+of the DL correlation of 2 is reduced to approximately one-eighth of the state of art,
+which can be computed by a 2 × 2 matrix multiplication chain of the same length as
+before. Some methods to further reduce complexity in special cases have been studied.
+Additionally, we present how to compute the extended (rotational) DL correlations
+of k for k ≥ 2, where two output linear masks of the cipher pairs can be different.
+Second, to ensure that the existing solver Gurobi1 can compute DL correlations
+of 2 , we propose a method to transform an arbitrary matrix multiplication chain
+into a MIQCP, which forms the foundation of our automatic search of DL trails in
+ARX ciphers. Third, in ARX ciphers, we use a single DL trail under some explicit
+conditions to give a good estimate of the correlation, which avoids the exhaustion
+of intermediate differences. We then derive an automatic method for evaluating the
+DL correlations of ARX, which we apply to Alzette and some versions of SPECK.
+Experimentally verified results confirm the validity of our method, with the predicted
+correlations being close to the experimental ones. To the best of our knowledge,
+this method finds the best DL distinguishers for these ARX primitives currently.
+Furthermore, we presented the lowest time-complexity attacks against 12-14 rounds
+of SPECK32 to date.
+Keywords: Automatic cryptanalysis · Differential-linear cryptanalysis · ARX ·
+SPECK · Alzette
+
+1
+
+Introduction
+
+The two main classes of cryptanalysis are the linear and differential attacks. Differentiallinear (DL) cryptanalysis is to employ two most important cryptanalysis (differential and
+linear attacks) to enhance the effectiveness of the individual attacks. Let the cipher be
+presented as a composition E = E1 ◦ E0 of two parts. The idea of DL cryptanalysis is
+to apply a (truncated) differential attack and a linear attack on the first part E0 and
+the second part E1 , respectively, and then combine them to a single distinguisher over
+1 The solver used in this paper is Gurobi, and some ready-made functions in Gurobi are also used, such
+as LOG_2 and ABS. The source code is available at https://.
+
+2
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+the cipher. DL cryptanalysis was first proposed by Langford and Hellman [LH94] in
+1994 to analyse DES. In recent years, we have witnessed remarkable advancements in the
+development of DL cryptanalysis.
+Differential-linear Cryptanalysis. The correlation of an ordinary differential-linear
+n
+m
+approximation (∆P
+in , Γ) of the vectorial Boolean function E : F2 → F2 is defined as
+1
+Γ·(E(x)⊕E(x⊕∆in ))
+n
+Cor(∆in , Γ) = 2n x∈Fn (−1)
+, where ∆in ∈ F2 and Γ ∈ Fm
+2 . A classic
+2
+and trivial analysis method is depicted in Figure 1(a). Let (∆in , ∆m ) be a differential trail
+with probability p, and (γ, Γ) be a linear trial for E1 with correlation q. Then, the overall
+correlation of DL distinguisher can be estimated with the piling-up lemma [Mat93] as
+Cor = 2 × Pr[Γ · (E(x0 ) ⊕ E(y0 ))] − 1 = pq 2 ,
+
+(1)
+
+since Γ · (E(x0 ) ⊕ E(y0 ) can be decomposed into the XOR sum of three terms γ · (E0 (x0 ) ⊕
+E0 (y0 )), γ · E0 (x0 ) ⊕ Γ · E(x0 ) and γ · E0 (y0 ) ⊕ Γ · E(y0 ). The above equation relies on
+the following two assumptions[LLL21, LSL21].
+
+Assumption 1. E0 and E1 are independent.
+Assumption 2. Pr[γ · (E0 (x0 ) ⊕ E0 (y0 )) = 0|E0 (x0 ) ⊕ E0 (y0 ) 6= ∆m ] = 12
+However, it has been observed that Assumption 2 may fail in many cases. In [BLN17],
+Blondeau et al. presented an exact expression of the correlation in a closed form under
+Assumption 1 and found that it is possible to state some explicit assumptions under which
+a single DL trail gives a good estimate of the correlation. However, the exact expression is
+computationally infeasible due to the need of exhausting all intermediate masks.
+
+(a) The classical analysis of an ordinary
+differential-linear distinguisher.
+
+(b) A differential-linear distinguisher
+with Differential-linear Connectivity
+Table (DLCT). Generally, the correlation of DL trial (∆m , γ), denoted as r,
+is determined by experiments.
+
+Figure 1: Differential-linear cryptanalysis
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+3
+
+Table 1: A summary of the results. R-DL = rotational differential-linear, DL = differentiallinear, LC = linear characteristic, DC = differential characteristic, DL(NB) = a distinguisher combining DL trail with neutral bit technique of differential propagation. We show
+differentials with probabilities and LC/DL/R-DL/DL(NB) with correlations.
+Permutation
+
+Alzette
+
+SPECK32
+
+SPECK48
+
+SPECK64
+
+Type
+
+Round
+
+R-DL
+DL
+DC
+LC
+DL
+DC
+DC
+DL
+DL
+DL
+DC
+LC
+DL
+DL(NB)3
+DC
+LC
+DL(NB)
+DL
+DL(NB)
+DL1
+DL1
+DL(NB)
+DC
+LC
+DL
+DC
+LC
+DC
+LC
+DL
+DL
+
+4
+4
+8
+8
+8
+9
+10
+8
+9
+10
+10†
+10†
+10
+10
+11†
+11†
+11
+10
+10
+11
+11
+11
+11†
+11†
+11
+11†
+11†
+12 †
+12 †
+11
+12
+
+Probability/Correlation
+Theory
+Exp.
+2−11.37
+2−7.35
+2−0.27
+2−0.1
+−32
+≤2
+2−15.79
+−2−8.24
+−2−5.50
+−36
+≤2
+≤ 2−42
+2−4.14
+2−4.06
+−2−10.08
+−2−7.60
+−11.00
+2
+2−10.48
+−34
+2
+2−17
+2−13.90
+2−15.23
+−2−11
+2−38
+2−19
+−2−14
+−2−13.37
+−2−11.58
+−2−8.58
+−2−19.37
+−2−17.09
+−2−18.37
+−2−16.68
+−12.09
+−2
+2−45
+2−25
+−2−20.46
+−2−17.55
+2−42
+2−24
+2−46
+2−27
+2−22.13
+2−19.44
+2−26.93
+-
+
+Ref.
+[LSL21]
+[LSL21]
+[BBCdS+ 20]
+[BBCdS+ 20]
+[NSLL22]
+[BBCdS+ 20]
+[BBCdS+ 20]
+Our
+[SWW21]
+[SWW21]
+[NSLL22]
+[BGG+ 23]
+[SWW21]
+[SWW21]
+[BGG+ 23]
+
+Our
+
+[SWW21]
+[SWW21]
+Our
+[SWW21]
+[SWW21]
+[SWW21]
+[SWW21]
+Our
+
+1 We random chose 28 master keys and compute the average DL correlation by going though the full
+
+plaintext space. For random permutation, the experimental correlation should be about ±2−20 .
+This information leakage can be used to distinguish 11-round SPECK32 from random functions,
+if given the encrypted ciphertext under multiple random keys. Moreover, given sufficient neutral
+bits of top short-round differential, it can be converted into a new valid distinguisher for key
+recovery, denoted by DL(NB). See Section 2.2 and 5.2 for more details.
+2 Entries marked with † is the optimal single differential/linear trail.
+3 To compare with the DL trails without using NBs, we regard the correlations of DL(NB) as
+1
+p 2 rq 2 , since the data complexity required is O(pr−2 q −4 ).
+
+Aiming at Assumption 1, Bar-On et al. [BODKW19] found that the dependency between the two subciphers significantly affects the complexity of the DL attack and proposed
+Differential-Linear Connectivity Table (DLCT) to take into account the dependency. They
+divided the cipher E into three subciphers E0 , Em , and E1 such that E = E1 ◦Em ◦E0 , and
+the middle part Em is experimentally evaluated, as depicted in Figure 1(b). The correlation
+of DL trail (∆m , γ) for Em is denoted by r. They assumed that the empirical correlations
+
+4
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Table 2: The key recovery attacks of reduced-round SPECK32/64. Diff. = differential, ND
+= neural distinguisher, GoogLeNet = a distinguisher using GoogLeNet neural network,
+DL(NB) = a distinguisher combining DL trails with the neutral bit technique of differential
+propagation.
+
+R
+
+KeySpace
+
+12/22
+
+264
+
+264
+13/22
+263
+
+14/22
+
+264
+263
+
+Type
+
+Data
+
+Time
+
+Ref .
+
+†
+
+30.42
+
+33.84
+
+[BdST+ 22]
+[BGL+ 23]
+[ZWW22]
+Our
+[BGG+ 23]
+[BdST+ 22]
+Our
+[BGL+ 23]
+[ZWW22]
+Our
+[BdST+ 22]
+[BGG+ 23]
+Our
+
+Diff.
+2
+ND†
+218.5
+†
+GoogLeNet
+225
+DL(NB)
+219
+DL(NB)
+224
+31.13
+Diff.
+2
+DL(NB)
+219
+†
+ND
+229
+†
+GoogLeNet
+231
+DL(NB)
+225
+Diff.
+260.99
+DL(NB)
+231
+DL(NB)
+225
+
+1 Entries marked with † (resp.
+
+2
+243.3
+242.3
+234
+252
+50.16
+2
+250
+251.5
+249.8
+241
+231.75
+258
+257
+
+without †) are practical (resp. theoretical)
+
+attacks.
+
+obtained by sampling for a sufficiently large number of messages closely match the actual
+correlations. For the DL cryptanalysis of ARX ciphers, Beierle et al. [BLT20] combined
+the DL attack with the neutral bit technique for differential part and the partitioning
+technique for linear part to further reduce the attack complexity.
+Though DLCT can be constructed efficiently using the Fast Fourier Transform, a good
+DL trail (∆m , γ) for Em is usually found experimentally at present, which is due to the
+huge computation complexity of DLCT. Liu et al. [LLL21] introduced a technique called
+Differential Algebraic Transitional Form (DATF) for DL cryptanalysis, where DLCT is no
+longer used. The DATF technique is applicable to ciphers with low algebraic degree of
+round function, but not to ARX ciphers. The algebraic degree of ARX ciphers is usually
+high after only a very few rounds as the carry bit within one modular addition already
+reaches almost maximal degree.
+For the theoretical estimation of DL correlation in ARX ciphers, Liu et al. [LSL21]
+introduced Morawiecki et al.’s technique [MPS13], which is called correlation propagation
+of difference bits in this paper, to compute the DL correlations in ARX ciphers. They
+presented the so-called rotational DL cryptanalysis and proposed the open problem that
+how to compute DL correlation of ARX cihpers with arbitrary output linear masks. To
+solve this problem, Niu et al. [NSLL22] introduced a chain of 4 × 4 matrix multiplications
+to compute the DL correlation of modulo additions with arbitrary output linear masks
+and combined this technique with the correlation propagation technique of difference bits
+to compute the DL correlation for ARX ciphers. [NSLL22] pointed that the major pain
+spot of the current development is that
+"there is no effective tool that can automatically search for good DL approximations, and
+thus in practice the search space is severely limited to low Hamming weight output masks."
+In this paper, we partially solve this open problem through some techniques to reduce
+complexity and a transformation technique from matrix multiplication chain to MIQCP.
+ARX ciphers and differential/linear cryptanalysis. ARX is an abbreviation for addition
+(modulo a power of two), word-wise rotation and XOR, and ARX ciphers are generally
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+5
+
+efficient in software since the above three operations have underlying hardware support in
+almost all general-purpose processors. For differential and linear attack, the algorithms to
+efficiently compute differential probability and linear correlation of modulo additions were
+presented in [LM01] and [Wal03], respectively. Now, there are quite powerful tools (e.g.,
+MILP, SAT, or SMT) to analyze ARX primitives[FWG+ 16, SWW21].
+Our Contributions. This paper achieves the automatic search of DL trails in ARX
+ciphers step by step, and has three main contributions.
+(1) Extended (rotational) differential-linear cryptanalysis of k for k ≥ 2 and the
+round function in ARX ciphers. The computational complexity of the DL correlation
+of 2 is reduced to approximately one-eighth of [NSLL22], which can be computed by a
+simple chain of 2 × 2 matrix multiplications. Furthermore, we reduced the computational
+complexity in special cases, such as when the DL correlation is equal to 0 or ±1. What’s
+more, we presented how to compute the extended (rotational) differential-linear correlation
+of k for k ≥ 2, where the two output linear masks of the left and right branches are
+different. To verify our results, we have conducted experiments under all extended DL
+approximations on the 4-bit additions 42 and 43 . The results confirm the effectiveness of
+our approach.
+(2) Transformation from Arbitrary Matrix Multiplication Chain to MIQCP. To ensure
+that the existing solver can compute DL correlation of 2 , we proposed a method to
+transform an arbitrary matrix multiplication chain into the Mixed Integer QuadraticallyConstrained Programs (MIQCP), which serves as the foundation of our automatic search
+of DL trails in ARX ciphers. This technique has significant potential. For instance,
+when used in automatic searching for linear approximations of 3 , the above method can
+accurately compute the correlation of linear approximations, whereas the widely used
+method currently splits 3 into two 2 operations, which yields a less precise value.
+(3) An automatic search algorithm for DL trails in ARX ciphers and its application.
+In ARX ciphers, we use a single DL trail under some explicit conditions to give a good
+estimate of the correlation. We then developed an automatic method for evaluating the
+DL correlation of ARX ciphers, which we applied to Alzette and some versions of SPECK.
+The improved results were experimentally verified to confirm the validity of our method,
+with the predicted correlations being close to the experimental ones. To the best of our
+knowledge, this method finds the best differential-linear distinguishers for these ARX
+primitives. Additionally, we presented the lowest time-complexity attacks against 12-14
+rounds of SPECK32 to date.
+Outline. In Section 2, we introduce notations and preliminaries for DL cryptanalysis.
+In Section 3, we presented the extended (rotational) DL cryptanalysis of k for all k ≥ 2
+and the round function in ARX ciphers. In Section 4, we proposed a method to transform an
+arbitrary matrix multiplication chain into MIQCP and an automated method of searching
+for DL trials in ARX ciphers. In Section 5, the above method is applied to Alzette and
+some versions of SPECK, and all improved results are experimentally verified. Section 6
+concludes the paper with some open problems.
+
+2
+
+Notations and Preliminaries
+
+The notations we use in this paper are summarised in Table 3.
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+6
+
+Table 3: Notations.
+Symbol
+F loor(x)
+nk (x0 , . . . , xk−1 )
+
+nk,dJc (x0 , . . . , xk−1 )
+
+ĉa (x0 , x1 , ..., xk−1 )
+x[i]
+HIndex(x)
+bxc(t)
+(t)
+
+dxe
+x≪t
+x≫t
+·
+#X
+HW (x)
+BW (x)
+Pr[x = 0]
+xky
+0t /1t /∗t
+A[x, y]
+|x|
+
+Description
+The maximum integer not larger than x.
+The addition function nk (x0 , . . . , xk−1 ) = (x0 + · · · + xk−1 ) mod 2n .
+When n is clear from the context, it is written as k for simplicity.
+nk (x0 , . . . , xk−1 ) is also called n-bit modulo addition or addition modulo 2n .
+The addition function nk,dJc (x0 , . . . , xk−1 ) = (x0 + · · · + xk−1 + c) mod 2n .
+c and d are called as the initial carry and the most significant carry, respectively.
+Here x0 + · · · + xk−1 + c = d2n + nk,dJc (x0 , . . . , xk−1 ) and c, d ∈ {0, 1, . . . , k − 1}.
+Similarly, nk,∗Jc (x0 , . . . , xk−1 ) = (x0 + · · · + xk−1 + c) mod 2n
+and there is no requirement for the most significant carry.
+The most significant carry of addition,
+i.e., ĉa (x0 , x1 , ..., xk−1 ) = F loor((x0 + · · · + xk−1 + a)/2n ).
+The i-th bit of x, written as xi for simplicity.
+xn−1 (resp. x0 ) is the most (resp. least) significant bit of x.
+The integer such that x[j] = 0 for HIndex(x) < j < n and x[HIndex(x)] = 1.
+The least significant t bits of x, i.e., (xt−1 , ..., x0 )
+The most significant t bits of x, i.e., (xn−1 , ..., xn−t )
+− for simplicity.
+Rotation of x by t-bit to the left, written as ←
+x
+−
+Rotation of x by t-bit to the right, written as →
+x for simplicity.
+The inner product of two vectors.
+The size of a set X .
+The Hamming weight of x.
+The bit width of x.
+Probability that x equals 0.
+Concatenation operation. xn−1 is the most significant bit of the new binary string.
+A vector with t zeros (resp. ones/∗).
+Here ∗ indicates that there is no limit, i.e., the bit can be either 1 or 0.
+The entry of matrix A in row x and column y, written as Ax,y for simplicity.
+The absolute value of x.
+
+In this paper, the input differences and output masks are represented in hexadecimal.
+
+2.1
+
+Preliminaries
+
+Lemma 1 (Piling-up Lemma [Mat93]). Let X0 , X2 , · · · , Xn−1 be n independent binary
+random variables with Pr[Xi = 0] = pi . Then, it holds that
+2Pr[X0 ⊕ · · · ⊕ Xn−1 = 0] − 1 =
+
+n−1
+Y
+
+(2pi − 1).
+
+i=0
+
+Definition 1 (Correlation [BLN17, Mat93]). Let (λ0 , λ1 ) be a linear approximation of
+Boolean function f : Fn2 → F2 . The correlation of the linear approximation (λ0 , λ1 ) is
+defined as
+X
+0
+1
+Corf (λ0 , λ1 ) = 2−n
+(−1)λ ·x⊕λ ·f (x)
+x∈Fn
+2
+
+.
+When f is clear from the context, we may denote Cor(λ0 , λ1 ) as the correlation of
+linear approximation (λ0 , λ1 ).
+Definition 2 (Extended Rotational Differential-Linear (ERDL) Correlation). Let S :
+Fn2 → Fm
+2 be a vectorial Boolean function. Denote an extended rotational differential-linear
+approximation of S by (t, α, λ0 , λ1 ). Then the correlation is defined as
+Cor(t, α, λ0 , λ1 ) =
+
+0
+1
+1 X
+(−1)λ ·(S(x)≪t)⊕λ ·S((x≪t)⊕α) ,
+n
+2
+n
+
+x∈F2
+
+(2)
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+7
+
+where t, α ∈ Fn2 and λ0 , λ1 ∈ Fn2 are the rotational offset, rotational difference and output
+linear masks of the extended rotational differential-linear approximation, respectively.
+Equation (2) is a generalization of the (rotational) differential-linear cryptanalysis
+[LSL21] and the extended differential-linear cryptanalysis [CY21]. When λ0 = λ1 , Equation
+(2) computes the ordinary rotational differential-linear correlation [LSL21, NSLL22] of S,
+denoted by Cor(t, α, λ0 ). When t = 0, Equation (2) computes the extended differentiallinear correlation [CY21] of S, denoted by Cor(α, λ0 , λ1 ). When λ0 = λ1 and t = 0,
+Equation (2) computes the ordinary differential-linear correlation [LH94, BODKW19] of
+S, denoted by Cor(α, λ0 ).
+In addition, Equation (2) is the definition of the correlation of a DL approximation,
+which specifies only the input differences and output masks. In this paper, the correlation
+of a DL approximation is estimated by one DL trail with the same input differences and
+output masks, where the DL trail additionally specifies the intermediate differences or
+linear masks relative to the DL approximation.
+Though this paper focuses on the automated search of differential-linear trails of ARX,
+we present a complete extended (rotational) differential-linear cryptanalysis of the primitive
+k for k ≥ 2 in Section 3.
+
+2.2
+
+Improvement upon the DL Distinguisher—Neutral Bit
+
+Let us be given a cipher E : Fn2 → Fn2 . This section explains how to use a DL approximation
+n
+with advantage slightly less than 2− 2 to construct an effective distinguisher, as long as
+n
+sufficient neutral bits are given. This shows that DL trails with advantage less than 2− 2
+may be of great significance for recovering keys.
+This section reviews neutral bit technique of differential propagation [BLT20, BGL+ 23]1 ,
+which can reduce the required data complexity O(p−2 r−2 q −4 ) to O(p−1 r−2 q −4 ). In a
+usual DL attack on a permutation E : Fn2 → Fn2 as explained in Figure 1(b), we divide
+the cipher E into three subciphers E0 , Em , and E1 such that E = E1 ◦ Em ◦ E0 . Let
+(∆in , ∆m ) be a differential trail of E0 with probability p, and (∆m , Γ) be a DL trial for
+E1 ◦ Em with correlation rq 2 , i.e., (∆in , Γ) is one DL trail of E with correlation prq 2 .
+Generally, the attacker can distinguish the cipher E from a random permutation by
+preparing O(p−2 r−2 q −4 ) chosen plaintexts.
+The following is the definition of neutral bits of a differential. It indicates that we can
+use one neutral bit generate another one confirming pair from one known confirming pair
+at no cost.
+Definition 3 (Neutral bits of a differential (NB) [BC04]). Let ei = 0x1 ≪ i ∈ Fn2 .
+A differential of E is denoted by (∆in , ∆out ), and the input plaintext pair and output
+ciphertext pair of E are denoted by (p, p0 ) and (c, c0 ), respectively. If p ⊕ p0 = ∆in and
+c ⊕ c0 = ∆out , (p, p0 ) is said to confirm the differential (∆in , ∆out ). The i-th bit is called a
+E
+NB for the differential ∆in −
+→ ∆out if (p ⊕ ei , p0 ⊕ ei ) is also a confirming pair for any
+confirming pair (p, p0 ).
+Definition 4 (Probabilistic NB (PNB) [AFK+ 08]). Let ei = 0x1 ≪ i ∈ Fn2 . The i-th bit
+is a p-PNB of the differential (∆in , ∆out ) if (P ⊕ ei , P 0 ⊕ ei ) conforms to the differential
+with probability p for any confirming pair (P, P 0 ).
+We call the probability p the neutral probability of PNBs. In sequel attacks, the higher
+the probability p is, the higher the neutrality quality, and the more useful the neutral bit
+becomes.
+1 In [BLT20] and [BGL+ 23], neutral bit technique has different names. For clarity, we call it neutral
+bit technique of differential propagation in this paper. Note that there is also a technology called the
+neutral bit technique of linear part in [BLT20]. Only the neutral bit technique of differential propagation
+is used in this paper.
+
+8
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Definition 5 (Conditional (simultaneous-) NB(-set)s (CSNBS) [BGL+ 23]). Let Is =
+i1 , i2 , · · · , is be a set of indices. Denote fIs = ⊕i∈Is ei . Let C be a set of constraints on
+the value of an input p, and let PC be the set of inputs that fulfill the constraints C. The
+bit-set Is is called a CSNBS for the differential ∆in → ∆out , if for any conforming pair
+(p, p0 |p ∈ PC ), (p ⊕ fIs , p0 ⊕ fIs ) is also a conforming pair.
+To amplify the correlation of DL trail (∆in , Γ), let us be given m neutral bits of the
+differential (∆in , ∆m ). If 2m > r−1 q −2 , the DL distinguisher (∆in , Γ) would work as
+follows:
+1. Randomly generate a pair of plaintext (x0 , x00 ), where x00 = x0 ⊕ ∆in . Then we use m
+neutral bits to generate 2m pairs of plaintext X = {(x0 , x00 ), (x1 , x01 ) . . . (x2m −1 , x02m −1 )}.
+2. Use the cipher E encrypt X and compute
+Cor =
+
+1
+2m
+
+X
+
+0
+
+(−1)Γ·(E(xi )⊕E(xi )) .
+
+0≤i<2m
+
+3. If we observe a correlation of rq 2 using 2m pairs, the distinguisher succeeded.
+Otherwise, start over with Step 1.
+Note that 2m > r−1 q −2 . With probability p, all plaintext pairs of X make the output
+difference of E0 be ∆m . In that case, the distinguisher succeeds in step 3. Thus, the data
+complexity of (∆in , Γ) required is O(p−1 r−2 q −4 ) instead of O(p−2 r−2 q −4 ).
+In this paper, the differential-linear trails that can use neutral bit technique to reduce
+data complicity are called DL(NB) for short. The core idea of DL(NB) is to perform
+statistical analysis on all ciphertexts that ensure the establishment of the top short-round
+differential trail. To compare with the DL trails without using NBs, we regard the
+1
+correlations of DL(NB) as p 2 rq 2 , since the data complexity required is O(pr−2 q −4 ). The
+availability of a DL(NB) is simultaneously determined by the probability of a prepended
+short-round differential, the correlation of the bottom DL trail and the number of neural
+bit(-set)s. However, for a sole differential-linear distinguisher, the availability is only
+determined by the whole correlation. Thus, the differential-linear (DL) distinguisher
+utilizing neutral bits, also known as DL(NB), can be viewed as a novel type of distinguisher.
+All DL(NB)s used in this paper are listed in Table 6.
+
+3
+
+Differential-Linear Cryptanalysis of k and the Round
+Function of ARX ciphers
+
+First of all, we study the extended differential-linear cryptanalysis of additions with k
+inputs for k ≥ 2, i.e., k . Specially, we reduce the computational complexity of ordinary
+differential-linear correlation of 2 to one-eighth of [NSLL22]. Some methods to further
+reduce complexity in special cases, e.g., the DL correlation is equal to 0 or ±1, have been
+studied. We also present the extended rotational differential-linear cryptanalysis of k for
+k ≥ 2. See Appendix B for more details.
+The above focus on the analysis of modulo additions. Second, we further studied how to
+compute the extended differential-linear correlation of round function S(x0 , x1 , ..., xk−1 ) =
+(k (x0 , x1 , ..., xk−1 ), x1 , x2 , ..., xk−1 ), which is widely used in ARX.
+
+3.1
+
+Extended Differential-linear Correlation of k
+
+In the following, we study how to compute the correlation of extended differential-linear
+approximation of n-bit modulo addition with k inputs, i.e., k . This paper reduces the
+computational complexity of ordinary differential-linear correlation of 2 to one-eighth of
+[NSLL22]. Note that Definition 6 used two additions. Moreover, we investigate the case
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+9
+
+where the initial carries of two additions analyzed are a, b ∈ {0, 1, ..., k − 1}, respectively.
+We replace the two functions S used in formula 2 by k,∗Ja and k,∗Jb . For clarity, we
+present the definition of EDL correlation for modulo additions.
+Definition 6. Let k > 1 be an integer and (α0 , ..., αk−1 , λ0 , λ1 ) be an extended DL
+approximation of nk with initial carries a, b ∈ {0, . . . , k − 1}. Here α0 , ..., αk−1 ∈ Fn2 and
+λ0 , λ1 ∈ Fn2 are the input differences and output masks, respectively. Then the extended
+differential-linear correlation is defined as
+0
+
+Cor ∗Ja (α , ..., α
+
+k−1
+
+∗Jb
+
+1
+, λ , λ ) = kn
+2
+0
+
+X
+
+1
+
+(−1)
+
+λ0 ·k,∗Ja (x0 ,x1 ,...,xk−1 )⊕
+λ1 ·k,∗Jb (x0 ⊕α0 ,x1 ⊕α1 ,...,xk−1 ⊕αk−1 )
+
+.
+
+xi ∈Fn
+2 ,0≤i<k
+
+Theorem 1. Let k > 1 be a fixed integer and (α0 , ..., αk−1 , λ0 , λ1 ) be an extended DL
+approximation of nk with initial carries a, b ∈ {0, . . . , k − 1}. Denote the carry and residue
+functions by
+F : Fk2 × {0, ..., k − 1} → {0, ..., k − 1}, F (x, y) = F loor((HW (x) + y)/2),
+R : Fk2 × {0, ..., k − 1} → {0, 1}, R(x, y) = (HW (x) + y) mod 2,
+respectively. Let l = k 2 , L be the row vector of dimension l with all entries equal to 1, and
+C be the column vector of dimension l with a single 1 at the (a × k + b)-th row and zero
+otherwise. Let A0 , ..., A2k+2 −1 be the l × l matrices and are defined as
+1
+[#{x ∈ Fk2 : Λ0 · R(x, e) ⊕ Λ1 · R(x ⊕ δ, f ) = 0, F (x, e) = c}
+2k
+− #{x ∈ Fk2 : Λ0 · R(x, e) ⊕ Λ1 · R(x ⊕ δ, f ) = 1, F (x ⊕ δ, f ) = d}]
+
+(Ar )c×k+d,e×k+f =
+
+for Λ0 , Λ1 , δ 0 , . . . , δ k−1 ∈ F2 and each c, d, e, f ∈ {0, 1, ..., k − 1}, where r = Λ0 2k+1 +
+k−1
+P j j
+δ 2 and δ = δ 0 kδ 1 . . . kδ k−1 . Let z = zn−1 k...kz1 kz0 be defined as zi =
+Λ1 2k +
+j=0
+
+λ0i 2k+1 + λ1i 2k +
+
+k−1
+P
+j=0
+
+αij 2j . Then the correlation can be computed as
+
+Cor ∗Ja (α0 , ..., αk−1 , λ0 , λ1 ) = LAzn−1 . . . Az1 Az0 C.
+∗Jb
+
+Proof. Let the inputs of two n-bit modulo additions be (x0 , . . . , xk−1 ) and (y 0 , . . . , y k−1 ),
+respectively. For 0 ≤ i < n, there hold that xi , y i ∈ Fn2 and y i = xi ⊕ αi . We set the least
+significant carry (initial carry) c00 = a and c10 = b. Then the carries c0i , c1i and the sums
+s0i , s1i with i = 0, ..., n − 1 are defined as follows
+s0i = R(x0i kx1i ...xk−1
+, c0i ), c0i+1 = F (x0i kx1i ...xk−1
+, c0i ),
+i
+i
+s1i = R(yi0 kyi1 ...yik−1 , c1i ), c1i+1 = F (yi0 kyi1 ...yik−1 , c1i ).
+For j = 1, ..., n, let
+j−1
+
+bj = ⊕ (λ0i · s0i ⊕ λ1i · s1i ).
+i=0
+
+Let P (z, j) be the column vector
+P (z, j)c×k+d = Pr[bj = 0, c0j = c, c1j = d] − Pr[bj = 1, c0j = c, c1j = d]
+for j = 1, ..., n and 0 ≤ c, d < k. For P (z, 1), by the definition of Ar , we have
+P (z, 1) = Az0 C.
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+10
+
+Let M (z, j) be the l × l matrix defined as
+M (z, j)c×k+d,e×k+f = Pr[λ0j · s0j ⊕ λ1j · s1j = 0, c0j+1 = c, c1j+1 = d|c0j = e, c1j = f ]
+− Pr[λ0j · s0j ⊕ λ1j · s1j = 1, c0j+1 = c, c1j+1 = d|c0j = e, c1j = f ],
+for j ∈ {0, ..., n − 1}.
+We denote (c0j , c1j ) and (c0j−1 , c1j−1 ) by G and H, respectively. Then P (z, j)c×k+d for
+j > 1 can be computed as
+p(z, j)c×k+d = Pr[bj = 0, G = (c, d)] − Pr[bj = 1, G = (c, d)]
+=
+
+1
+X
+
+h
+
+(−1) Pr[bj = h, G = (c, d)]
+
+h=0
+
+=
+
+1
+X
+
+(−1)
+
+h=0
+
+=
+
+1
+X
+
+1
+X X
+
+h
+
+(−1)
+
+1
+X X
+
+h
+
+h=0
+
+X
+
+(−1)
+
+h=0
+
+1
+X X
+
+h
+
+0
+
+1
+
+1
+
+0
+
+0
+
+1
+
+1
+
+Pr[λj−1 sj−1 ⊕ λj−1 sj−1 = h ⊕ v, G = (c, d)|H = (e, f )] Pr[bj−1 = v, H = (e, f )]
+
+0⩽e,f <k v=0
+
+1
+X X
+
+=
+
+0
+
+Pr[λj−1 sj−1 ⊕ λj−1 sj−1 = h ⊕ v, G = (c, d)|bj−1 = v, H = (e, f )] Pr[bj−1 = v, H = (e, f )]
+
+0⩽e,f <k v=0
+
+1
+
+=
+
+Pr[bj = h, G = (c, d)|bj−1 = v, H = (e, f )] Pr[bj−1 = v, H = (e, f )]
+
+0⩽e,f <k v=0
+
+Pr[bj−1 = v, H = (e, f )]
+
+0⩽e,f <k v=0
+
+t=h⊕v
+
+=
+
+=
+
+X
+
+h
+
+0
+
+0
+
+1
+
+1
+
+(−1) Pr[λj−1 sj−1 ⊕ λj−1 sj−1 = h ⊕ v, G = (c, d)|H = (e, f )]
+
+h=0
+
+" 1
+X X
+0⩽e,f <k
+
+1
+X
+
+(−1)
+
+t
+
+0
+0
+1
+1
+Pr[λj−1 sj−1 ⊕ λj−1 sj−1 = t, G = (c, d)|H = (e, f )]
+
+t=0
+
+# " 1
+X
+×
+
+#
+v
+
+(−1) Pr[bj−1 = v, H = (e, f )]
+
+v=0
+
+M (z, j − 1)c×k+d,e×k+f × P (z, j − 1)e×k+f
+
+0⩽e,f <k
+
+Then we have
+P (z, j) = M (z, j − 1)P (z, j − 1).
+On the other hand, we have
+X
+LP (z, n) =
+(Pr[bn = 0, c0n = c, c1n = d] − Pr[bn = 1, c0n = c, c1n = d])
+0≤c,d<k
+
+= Pr[bn = 0] − Pr[bn = 1] = Cor ∗Ja (α0 , ..., αk−1 , λ0 , λ1 ).
+∗Jb
+
+Since Azi = M (z, i), it follows that
+Cor ∗Ja (α0 , ..., αk−1 , λ0 , λ1 ) = LAzn−1 . . . Az1 Az0 C.
+∗Jb
+
+Note that the functions F and R are the carry and residue functions for the basic
+school-book method for additions with k binary inputs and one input carry. And e, f and
+c, d are the input carries and the output carries of 1k,cJe and 1k,dJf . Under fixed input
+differences and output masks, the (Ar )c×k+d,e×k+f is the differential-linear correlation of
+1k,cJe and 1k,dJf .
+This correlation of an extended differential-linear trail of addition modulo 2n with k
+inputs can thus be computed by doing matrix multiplication n times and a sum operation.
+For a fixed k, this is a linear-time algorithm to compute the correlation of extended DL
+trails for nk .
+Next, we investigate the case where k = 2 and λ0 = λ1 to further reduce the computational complexity.
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+11
+
+Lemma 2. Let the input differences and output mask of two 1-bit modulo additions, 2,∗Je
+and 2,∗Jf , be α0 , α1 ∈ F2 and λ ∈ F2 , respectively. Here e, f ∈ F2 . Let the inputs of two
+modulo additions are (x0 , x1 ) and (y 0 , y 1 ), respectively. Denote the sums, input carries and
+output carries of two 12 by s0 , s1 , c00 , c10 and c01 , c11 , respectively. We set c, d, e, f, u, w ∈ F2 .
+Let M (α0 , α1 , λ) be the 4 × 4 matrix defined as
+0
+
+1
+
+M (α , α , λ)c×2+d,e×2+f =
+
+1
+X
+
+(−1)v Pr[λ · (s0 ⊕ s1 ) = v, c01 = c, c11 = d|c00 = e, c10 = f ],
+
+v=0
+
+and N (α0 , α1 , λ) be the 2 × 2 matrix defined as
+1
+X
+(−1)v Pr[λ · (s0 ⊕ s1 ) = v, c01 ⊕ c11 = u|c00 ⊕ c10 = w].
+
+N (αj0 , αj1 , λj )u,w =
+
+v=0
+
+When w = e ⊕ f , for fixed e, f, u and w, there holds
+X
+
+M (α0 , α1 , λ)c×2+d,e×2+f = N (α0 , α1 , λ)u,w .
+
+c,d∈F2
+c⊕d=u
+
+Proof. Computing all matrices M and N under all (α0 , α1 , λ) ∈ F32 gives the proof.
+Theorem 2. Let (α0 , α1 , λ) be an ordinary DL approximation of n2 with initial carries
+a, b ∈ F2 . Denote the carry and residue functions by
+F : F22 × {0, 1} → {0, 1}, F (x, y) = F loor((HW (x) + y)/2),
+R : F22 × {0, 1} → {0, 1}, R(x, y) = (HW (x) + y) mod 2,
+respectively. Let L be [1, 1], and C be the column vector of dimension 2 with a single 1 at
+the (a ⊕ b)-th row and zero otherwise. Let B0 , ..., B7 be the 2 × 2 matrices and are defined
+as
+1
+[#{(x, e) ∈ F22 × F2 : Λ · (R(x, e) ⊕ R(x ⊕ δ, e ⊕ w)) = 0, F (x, e) ⊕ F (x ⊕ δ, e ⊕ w) = u}
+23
+− #{(x, e) ∈ F22 × F2 : Λ · (R(x, e) ⊕ R(x ⊕ δ, e ⊕ w)) = 1, F (x, e) ⊕ F (x ⊕ δ, e ⊕ w) = u}]
+
+(Br )u,w =
+
+for Λ, δ 0 , δ 1 , u, w ∈ F2 , where r = Λ×4+
+
+1
+P
+
+δ j ×2j and δ = δ 0 kδ 1 . Let z = zn−1 k...kz1 kz0
+
+j=0
+
+be defined as zi = λi × 4 +
+as
+
+1
+P
+j=0
+
+αij × 2j for 0 ≤ i < n. Then the correlation can be computed
+
+Cor(α0 , α1 , λ, a, b) = LBzn−1 . . . Bz1 Bz0 C.
+Proof. For simplicity, the notations bj , M (z, j) and P (z, j) in the proof of Theorem 1 are
+used here.
+Let N (z, j) be the 2 × 2 matrix defined by
+N (z, j)u,w = Pr[λj · (s0j ⊕ s1j ) = 0, c0j+1 ⊕ c1j+1 = u|c0j ⊕ c1j = w]
+− Pr[λj · (s0j ⊕ s1j ) = 1, c0j+1 ⊕ c1j+1 = u|c0j ⊕ c1j = w],
+for j ∈ {0, ..., n − 1}, and Q(z, j) be the column vector
+Q(z, j)u = Pr[bj = 0, c0j ⊕ c1j = u] − Pr[bj = 1, c0j ⊕ c1j = u]
+
+12
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+for j = 1, ..., n and u ∈ F2 . For Q(z, 1), according to the definition of Br and Lemma 2,
+we have
+
+T
+X
+X
+
+
+Q(z, 1) = 
+M (α0 , α1 , λ)c×2+d,e×2+f ,
+M (α0 , α1 , λ)c×2+d,e×2+f 
+c,d∈F2
+c⊕d=0
+
+c,d∈F2
+c⊕d=1
+
+= [N (α00 , α01 , λ0 )0,e⊕f , N (α00 , α01 , λ0 )1,e⊕f ]T
+= N (z, 0)C = Bz0 C.
+Then Q(z, j)u for j > 1 and u ∈ F2 can be computed as
+X
+Q(z, j)u =
+
+P (z, j)c×2+d
+
+c,d∈F2
+c⊕d=u
+
+T hm. 1
+
+X
+
+=
+
+M (z, j − 1)c×2+d,e×2+f × P (z, j − 1)e×2+f
+
+c,d,e,f ∈F2
+c⊕d=u
+
+=
+
+X
+
+X X
+
+M (z, j − 1)c×2+d,e×2+f × P (z, j − 1)e×2+f
+
+w∈F2 c,d∈F2 e,f ∈F2
+
+c⊕d=u e⊕f =w
+
+
+=
+
+
+
+X X  X
+
+M (z, j − 1)c×2+d,e×2+f  × P (z, j − 1)e×2+f
+
+
+w∈F2 e,f ∈F2
+
+e⊕f =w
+
+c,d∈F2
+c⊕d=u
+
+
+
+X
+Lemma 2
+=
+
+
+X
+
+
+(N (z, j − 1)u,w ) × 
+P (z, j − 1)e×2+f 
+
+w∈F2
+
+=
+
+X
+
+e,f ∈F2
+e⊕f =w
+
+N (z, j − 1)u,w × Q(z, j − 1)w .
+
+w∈F2
+
+Then we have
+Q(z, j) = N (z, j − 1)Q(z, j − 1).
+On the other hand, we have
+X
+LQ(z, n) =
+(Pr[bn = 0, c0n ⊕ c1n = u] − Pr[bn = 1, c0n ⊕ c1n = u])
+u∈F2
+
+= Pr[bn = 0] − Pr[bn = 1] = Cor ∗Ja (α0 , α1 , λ).
+∗Jb
+
+According the definition of Bzi and N (z, i), we have Bzi = N (z, i) and
+Cor ∗Ja (α0 , α1 , λ) = LBzn−1 . . . Bz1 Bz0 C.
+∗Jb
+
+Compared with [NSLL22] that gives the method to compute ordinary DL correlation
+for n2 , Theorem 1 is a generalization of the method of [NSLL22], which presents the
+method to compute extended DL correlation for nk with k ≥ 2. Theorem 2 show that
+the correlation computation of ordinary DL trails of n-bit modulo additions with 2 inputs
+can be completed by a chain of 2 × 2 matrix multiplications instead of 4 × 4 matrix
+multiplications proposed by [NSLL22], which reduces the computational complexity of
+ordinary DL correlation of 2 to approximately 18 . Using Theorem 2 we get the following
+matrices for 2 .
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+
+1 2
+B0 =
+2 0
+
+1 2
+B4 =
+2 0
+
+13
+
+
+
+
+1 1 1
+1 1
+B1 = B2 =
+B3 =
+2 1 1
+2 1
+
+
+
+
+1 −1 1
+1 1
+−1
+B5 = B6 =
+B7 =
+−1
+2 −1 1
+2 1
+
+1
+1
+
+
+
+0
+2
+
+
+
+0
+−2
+
+
+
+Theorem 1 was verified by computing the correlations of all extended DL approximations
+for 4-bit modulo additions with 2 and 3 inputs, i.e., 42 and 43 . An analogous method
+was used to verify Theorem 2. See the source code provided by this paper for more details.
+Following corollaries about extended DL correlation of k will reduce the computational
+complexity in some cases.
+Corollary 1. Let n ≥ 1 be an integer and (α0 , ..., αk−1 , λ0 , λ1 ) be an extended differentiallinear approximation of n-bit modulo additions with initial carries a, b ∈ {0, 1, ..., k − 1}.
+For a fixed integer t with (n − t) ≥ 1, let (bα0 cn−t , ..., bαk−1 cn−t , bλ0 cn−t , bλ1 cn−t ) be
+a extended differential-linear approximation of (n − t)-bit modulo additions with initial
+carries a, b. If dλ0 et = dλ1 et = 0t , it holds
+Cor nk ,∗Ja (α0 , ..., αk−1 , λ0 , λ1 ) = Cor (n−t) ,∗Ja (bα0 cn−t , ..., bαk−1 cn−t , bλ0 cn−t , bλ1 cn−t ).
+k
+
+∗Jb
+
+∗Jb
+
+Proof.
+0
+
+Cor n ,∗Ja (α , ..., α
+k
+
+k−1
+
+0
+
+1
+
+,λ ,λ ) =
+
+∗Jb
+
+dλ0 et =dλ1 et =0t
+
+=
+
+1
+2k(n−t)
+
+1
+
+X
+
+2kn
+
+X
+
+(−1)
+
+λ0 ·n (x0 ,x1 ,...,xk−1 )⊕
+k
+λ1 ·n (x0 ⊕α0 ,x1 ⊕α1 ,...,xk−1 ⊕αk−1 )
+k
+
+xi ∈Fn
+,0≤i<k
+2
+
+(−1)
+
+n−t 0 1
+bλ0 cn−t ·b
+(x ,x ,...,xk−1 )cn−t ⊕
+k
+n−t 0
+bλ1 cn−t ·b
+(x ⊕α0 ,x1 ⊕α1 ,...,xk−1 ⊕αk−1 )cn−t
+k
+
+,0≤i<k
+xi ∈Fn−t
+2
+
+= Cor (n−t) ,∗Ja (bα0 cn−t , ..., bαk−1 cn−t , bλ0 cn−t , bλ1 cn−t )
+k
+
+∗Jb
+
+Corollary 1 indicates that dαi et for 0 ≤ i < k will not affect the extended DL correlation
+if dλ0 ∨ λ1 et = 0t . The following corollary can further simplify the computation of ordinary
+DL correlation of k for k ≥ 2. Corollary 2 shows that if the input differences and output
+mask satisfy a particular form, it is free to know that the ordinary DL correlation of nk is
+±1.
+Corollary 2. Let (α0 , . . . , αk−1 , λ) be an ordinary differential-linear approximation of
+nk . For a fixed integer t ∈ {0, 1, ..., n − 1}, if dλet = 0t and bαi cn−t−1 = 0n−t−1 for
+0 ≤ i < k − 1, it holds that the ordinary DL correlation Cor(α0 , . . . , αk−1 , λ) = ±1.
+Proof. Denote the two additions by s0 and s1 , respectively. If bαi cn−t−1 = 0n−t−1 for
+0 ≤ i < k − 1, there hold that
+bs0 cn−t−1 = bs1 cn−t−1 ,
+s0n−t−1 ⊕ s1n−t−1 =
+
+k−1
+X
+i=0
+
+Due to Corollary 1, we have
+
+i
+αn−t−1
+.
+
+14
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Cor(α0 , . . . , αk−1 , λ) = Cor(bα0 cn−t , . . . , bαk−1 cn−t , bλcn−t )
+X
+0
+1
+1
+(−1)bλcn−t ·(bs cn−t ⊕bs cn−t )
+= k(n−t)
+2
+(n−t)
+xi ∈F2
+
+,0≤i<k
+
+k−1
+
+=
+
+1
+
+X
+
+2k(n−t)
+
+(n−t)
+
+xi ∈F2
+
+λn−t−1 ·(
+
+(−1)
+
+P
+
+αin−t−1 )
+
+i=0
+
+,0≤i<k
+
+= ±1
+
+3.2
+
+Computing the Differential-linear Correlation of the Round Function of ARX ciphers
+
+In this section, we use the results in previous sections and Morawiecki’s technique [MPS13]
+to compute the DL correlations of round functions of ARX ciphers. For simplicity, we call
+Morawiecki’s technique as the correlation propagation technique of difference bits.
+To apply Morawiecki’s technique for evaluating the DL correlations, we studied how
+to compute the extended DL correlation of the building block S(x0 , x1 , ..., xk−1 ) =
+(k (x0 , x1 , ..., xk−1 ), x1 , x2 , ..., xk−1 ) for k ≥ 2 with the knowledge of Pr[xji ⊕ yij = 1]
+for all 0 ≤ i < n and 0 ≤ j < k. We remark that a similar method can be used to
+compute the extended rotational DL correlation of the building block S(x0 , x1 , ..., xk−1 ).
+Let (α0 , ..., αk−1 ) be the input differences of an DL approximation of S(x0 , x1 , ..., xk−1 ). In
+Morawiecki’s technique, the prerequisite is that the events αji = 1 are mutually independent
+for all 0 ≤ j < n and 0 ≤ i < k [LSL21, NSLL22].
+Theorem 3. Let k > 1 be a fixed integer and (α0 , ..., αk−1 , λ0 , λ1 ) be an extended DL
+approximation of nk . Let Pr[αji = 1] = pij for all i ∈ {0, ..., k − 1} and j ∈ {0, ..., n − 1}.
+The events αji = 1 are mutually independent for all 0 ≤ j < n and 0 ≤ i < k. Let l = k 2 ,
+L be the row vector of dimension l with all entries equal to 1, and C be the column vector
+of dimension l with a single 1 at the 0-th row and zero otherwise. Then the correlation,
+denoted by Cor(α0 , ..., αk−1 , λ0 , λ1 ), can be computed as
+Cor(α0 , ..., αk−1 , λ0 , λ1 ) = LHn−1 . . . H1 H0 C,
+where Hi is a l × l matrix and is defined as
+X
+
+Hi =
+
+Y
+
+h
+
+i
+(1 − βj ) − (−1)βj pji Aλ0i 2k+1 +λ1i 2k +β
+
+β∈{0,1,...,2k −1} j∈{0,1,..,k−1}
+β=βk−1 k...β1 kβ0
+
+Proof. Note that z = zn−1 k...kz1 kz0 be the word associated with one trail, where zi =
+k−1
+P j j
+λ0i 2k+1 + λ1i 2k +
+αi 2 . Due to that the events αji = 1 are mutually independent for all
+j=0
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+15
+
+0 ≤ j < n and 0 ≤ i < k, we have
+Cor(α0 , ..., αk−1 , λ0 , λ1 )
+
+X
+
+=
+
+Pr[InputDif f. = (α0 , ..., αk−1 )]Cor(α0 , ..., αk−1 , λ0 , λ1 )
+
+(α0 ,...,αk−1 )∈Fkn
+2
+
+Y
+
+X
+
+=
+
+h
+
+Y
+
+i
+
+j
+
+(1 − αij ) − (−1)αi pji × Cor(α0 , ..., αk−1 , λ0 , λ1 )
+
+i∈{0,...,n−1} j∈{0,1,..,k−1}
+(α0 ,...,αk−1 )∈Fkn
+2
+
+X
+
+=
+
+Y
+
+L
+
+(α0 ,...,αk−1 )∈Fkn
+2
+
+Y
+
+h
+
+j
+
+i
+
+(1 − αij ) − (−1)αi pji Azi C
+
+i∈{0,...,n−1} j∈{0,1,..,k−1}
+
+
+
+
+=L
+
+Y
+
+X
+
+Y
+
+
+i=∈{0,...,n−1}
+
+h
+
+j
+βi
+
+i
+
+(1 − βij ) − (−1) pji Aλ0 2k+1 +λ1 2k +β  C.
+i
+
+i
+
+β∈{0,1,...,2k −1} j∈{0,1,..,k−1}
+
+Corollary 3. Let (α0 , α1 , λ0 , λ1 ) be an extended differential-linear approximation of n2
+with initial carries a, b ∈ F2 . Let Pr[αji = 1] = pij for all i ∈ {0, 1} and j ∈ {0, ..., n − 1}.
+The events αji = 1 are mutually independent for all 0 ≤ j < n and 0 ≤ i < 2. Let
+h = HIndex(λ0 ∨ λ1 ). Then the correlation, denoted by Cor(α0 , α1 , λ0 , λ1 ), will be 0 if
+p0h = 0.5 or p1h = 0.5.
+Proof. According to Corollary 1, the most significant (n − h − 1) bits of α0 , α1 , λ0 and λ1
+do not affect the Cor(α0 , α1 , λ0 , λ1 ).
+For p0h = 0.5, according to Theorem 3, it holds that
+i
+X
+Y h
+Hh =
+(1 − βj ) − (−1)βj pjh Aλ0h 23 +λ1h 22 +β
+β∈{0,1,2,3} j∈{0,1}
+
+= 0.5 × p1h × (Aλ0h 23 +λ1h 22 +0 + Aλ0h 23 +λ1h 22 +1 )+
+0.5 × (1 − p1h ) × (Aλ0h 23 +λ1h 22 +2 + Aλ0h 23 +λ1h 22 +3 ).
+Let L (resp. L̄) be the row vector of dimension 4 with all entries equal to 1 (resp. 0).
+When (λ0 ∨ λ1 )h = 1, according to the matrices Azi with zi ≥ 4 in Appendix A, it holds
+that
+LHh = 0.5 × p1h × L(Aλ0h 23 +λ1h 22 +0 + Aλ0h 23 +λ1h 22 +1 )+
+0.5 × (1 − p1h ) × L(Aλ0h 23 +λ1h 22 +2 + Aλ0h 23 +λ1h 22 +3 )
+.
+= 0.5 × p1h × L̄ + 0.5 × (1 − p1h ) × L̄
+= L̄
+Thus, it holds that
+Cor(α0 , α1 , λ0 , λ1 ) = LHn−1 . . . H1 H0 C = LHh . . . H1 H0 C = L̄Hh−1 . . . H1 H0 C = 0.
+Similarly, one can derive the conclusion for p1h = 0.5, and we omit the details.
+Theorem 3 only considers the DL cryptanalysis of modulo additions. Next, we will study
+the computation of extended DL correlation of a general function S(x0 , x1 , ..., xk−1 ) =
+(k (x0 , x1 , ..., xk−1 ), x1 , x2 , ..., xk−1 ), which is a basic building block of ARX ciphers.
+Lemma 3. Let (α0 , α1 , ..., αk−1 , λ0 , λ1 ) be one extended differential-linear approximation of S(x0 , x1 , ..., xk−1 ) = (k (x0 , x1 , ..., xk−1 ), x1 , x2 , ..., xk−1 ) with xi , αj ∈ Fn2 for
+
+16
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+0
+1
+0 ≤ i, j < k and λ0 , λ1 ∈ Fkn
+2 . Here bλ ckn−n = bλ ckn−n . Then the correlation
+0
+1
+k−1
+0
+1
+CorS (α , α , ..., α
+, λ , λ ) can be computed as
+"n−1
+#
+Y
+k−1
+1
+1
+1
+1
+(λ
+,λ
+,...,λ
+)·(α
+,...,α
+)
+i
+i
+i
+CorS (α0 , α1 , ..., αk−1 , λ0 , λ1 ) = L
+(−1) i+(k−2)n i+(k−3)n
+Azi C,
+i=0
+
+where
+zi = λ0i+(k−1)n 2k+1 + λ1i+(k−1)n 2k +
+
+k−1
+X
+
+αij 2j .
+
+j=0
+
+Proof. Let the inputs of those two S be (x , . . . , x
+) and (y 0 , . . . , y k−1 ), respectively.
+i
+i
+i
+0
+k−1
+Let y = x ⊕ α for 0 ≤ i < k. Denote k (x , ..., x
+) and k (y 0 , ..., y k−1 ) by s0 and s1 ,
+respectively. Then we have
+0
+
+k−1
+
+CorS (α0 , α1 , ..., αk−1 , λ0 , λ1 )
+X
+1
+λ0 ·S(x0 ,...,xk−1 )⊕λ1 ·S(y 0 ,...,y k−1 )
+= kn
+(−1)
+2
+n
+i
+x ∈F2 ,0⩽i<k
+
+=
+
+X
+1
+kn
+2
+n
+i
+
+dλ0 en ·s0 ⊕dλ1 en ·s1 ⊕bλ1 ckn−n ·(α1 ,...,αk−1 )
+
+(−1)
+
+x ∈F2 ,0≤i<k
+
+= (−1)
+
+bλ1 ckn−n ·(α1 ,...,αk−1 )
+
+× Cornk (α0 , α1 , ..., αk−1 , dλ0 en , dλ1 en ).
+
+Here Cornk (α0 , α1 , ..., αk−1 , dλ0 en , dλ1 en ) is the correlation of DL approximation
+(α , α1 , ..., αk−1 , dλ0 en , dλ1 en ) of nk . Applying Theorem 1 to Cornk (α0 , α1 , ..., αk−1 , dλ0 en , dλ1 en )
+gives the proof.
+0
+
+Lemma 3 studied the extended differential-linear cryptanalysis of S under fixed input
+differences (α0 , ..., αk−1 ). Next, Lemma 3 and Corollary 1 lead to the following generalization of Theorem 3, where the events αji = 1 are mutually independent for all 0 ≤ j < n
+and 0 ≤ i < k.
+Corollary 4. Let (α0 , ..., αk−1 , λ0 , λ1 ) be one extended differential-linear approximation of
+S(x0 , ..., xk−1 ) = (k (x0 , ..., xk−1 ), x1 , x2 , ..., xk−1 ) with xi , αj ∈ Fn2 for 0 ≤ i, j < k and
+0
+1
+i
+i
+λ0 , λ1 ∈ Fkn
+2 . Here bλ ckn−n = bλ ckn−n . Let Pr[αj = 1] = pj for all i ∈ {0, ..., k − 1}
+i
+and j ∈ {0, ..., n − 1}. The events αj = 1 are mutually independent for all 0 ≤ j < n
+and 0 ≤ i < k. For a fixed integer t with (n − t) ≥ 1, let dλ0 et = dλ1 et = 0t . Then the
+correlation CorS (α0 , ..., αk−1 , λ0 , λ1 ) can be computed as
+k−1
+
+0
+
+CorS (α , ..., α
+
+k−1
+
+0
+
+⊕ (λ1n×(k−j)−1 ,...,λ1n×(k−j)−t )·dαj et
+
+1
+
+, λ , λ ) = LHn−t−1 . . . H1 H0 C × (−1) j=1
+
+where Hi is a k 2 × k 2 matrix for 0 ≤ i < n − t and is defined as
+"
+Q
+(λ1
+,λ1
+,...,λ1
+X
+i )·bβck−1
+(−1) i+(k−2)n i+(k−3)n
+×
+
+j∈{0,1,..,k−1}
+
+Hi =
+
+β∈{0,1,...,2k −1}
+
+×Aλ0
+
+i+(k−1)n
+
+2k+1 +λ1
+
+i+(k−1)n
+
+(1 − βj ) − (−1)βj pji
+
+
+
+,
+
+#
+
+2k +β
+
+Proof. Applying Theorem 3, Lemma 3 and Corollary 1 give the proof.
+
+4
+
+Automatic Search for Differential-linear Trails of ARX
+Ciphers
+
+This section intends to search ordinary DL trails of ARX ciphers with existing solvers.
+The solver used in this paper is Gurobi. First, we study how to compute the correlation
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+17
+
+of DL trails of k with current existing solver, which is the foundation of our automatic
+search of DL trails in ARX ciphers. Second, in ARX ciphers, we use a single DL trail
+under some explicit conditions to give a good estimate of the correlation. Then, we further
+simplify the correlation calculation of DL trails in ARX ciphers to ensure that the search
+of differential-linear trails can be solved by the solver.
+
+4.1
+
+The Transformation from Matrix Multiplication Chain to MIQCP
+
+This section study that how to compute an arbitrary matrix multiplication chain with
+current existing solver. Taking differential cryptanalysis and linear cryptanalysis as
+examples, the differential probability and the linear approximation correlation of k for
+k ≥ 2 can be computed by using a chain of matrix multiplications[LM01, Wal03, NW06].
+However, at FSE 2016, Fu et al. [FWG+ 16] used a Boolean function and a compact finite
+automaton to compute the differential probability and the linear approximation correlation
+of 2 , respectively. To our knowledge, there is no good method to solve the problem that
+using existing solvers to compute an arbitrary matrix multiplication chain, and it is still
+an open problem to directly model differential propagation and linear approximation of
+k for k > 2 with current existing solvers. For example, in the automatic search of linear
+approximations of 3 , the usual method is to split 3 into two 2 , and these two 2 are
+modeled separately with existing solvers. Thus, the final estimation is approximate but
+not accurate. In this section, we focus on transforming an arbitrary matrix multiplication
+chain into a Mixed Integer Quadratically-Constrained Programs (MIQCP), which can be
+handled by current existing solvers.
+Next, we take the correlation computation of an ordinary DL approximation of 2
+(Theorem 2) as an example to introduce our method. The notations of the proof of Theorem
+2 is used here. There are three steps to transform an arbitrary matrix multiplication chain
+into a MIQCP.
+Step 1: Convert all entries of matrices to integers.
+First, it is trivial to have
+Cor ∗Ja (α0 , α1 , λ) =
+∗Jb
+
+1
+LBz0 n−1 . . . Bz0 1 Bz0 0 C,
+2n
+
+where Bz0 i = 2 × Bzi for all 0 ≤ i < n. Let Q0 (z, i) = 2j × Q(z, i). Q0 (z, i) and Bz0 i are
+used as intermediate dummy variables in the MIQCP model.
+Step 2: Model the relationship between all entries of matrices, input differences and output masks.
+1
+P
+All entries of Bz0 i are determined by zi , where zi = λi × 4 +
+αij × 2j . Let Bz0 i [x, y]
+j=0
+
+be the entry of matrix Bz0 i in row x and column y. It is necessary to describe all possible
+(Bz0 i [x, y], λi , αi0 , αi1 ) patterns for all (x, y) ∈ F22 and 0 ≤ zi < 8. A convex hull of a finite
+set P [z, i, x, y] = {(Bz0 i [x, y], λi , αi0 , αi1 ) : λi , αi0 , αi1 ∈ F2 } is the smallest convex set that
+contains P [z, i, x, y], denoted by Conv(P [z, i, x, y]). There are two methods to model the
+relationship according to whether Conv(P [z, i, x, y]) = P [z, i, x, y] or not.
+Case 1. P [z, i, x, y] = Conv(P [z, i, x, y]) As described in [SHW+ 14], using the inequality_generator() function in the sage.geometry polyhedron class of the SAGE Computer Algebra System can generate the linear inequalities to describe all points in Conv(P [z, i, x, y]).
+For binary vectors, [SHW+ 14] presented a method to exclude one arbitrary point without
+influence other points. Lemma 4 models an arbitrary subset of Fn2 with finite inequalities.
+Lemma 4 ([SHW+ 14]). For any subset X ⊆ Fn2 , denote one point of X by (x0 , . . . , xn−2 , xn−1 ) ∈
+X. For a given point δ = (δ0 , δ1 , ..., δn−1 ) ∈ Fn2 and δ ∈
+/ X, then all points of X but δ
+Pn−1
+satisfy i=0 [δi + (−1)δi xi ] ≥ 1.
+
+18
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Theorem 4 ([BJ72, SHW+ 14]). Assume that x ∈ Fn2 and Conv(X) is the convex hull of
+a set X ⊆ Fn2 . Then X = Conv(X).
+Theorem 4 showed that for X ⊆ Fn2 , it holds that Conv(X) = X. However, since the
+values of Bz0 i [x, y] are integers, not binaries, convex hull Conv(P [z, i, x, y]) may contain
+redundant points apart from P [z, i, x, y].
+Case 2. P [z, i, x, y] $ Conv(P [z, i, x, y]) If P [z, i, x, y] $ Conv(P [z, i, x, y]), we will
+use the following method to describe all possible (Bz0 i [x, y], λi , αi0 , αi1 ) patterns accurately.
+Lemma 5. Let P be a subset of integer set Z and be denoted as P = {p0 , ..., pt−1 : pi ∈ Z}.
+For any subset X ⊆ {P × Fn−1
+}, denote a point of X by (y, xt , xt+1 , . . . , xn+t−2 ). For a
+2
+given point δ = (δ0 , δ1 , ..., δn−1 ) ∈
+/ X, where δ0 ∈ P and δi ∈ F2 for 0 < i < n, let ∆ ∈ Ft2
+Pt−1
+Pt−1
+be the one-hot code decoding (t-bit vector) of δ0 , i.e., δ0 = i=0 [∆i × pi ] and i=0 ∆i = 1.
+Let x0 , x1 , . . . , xt−1 be the intermediate dummy bit variables. Then all points of X but δ
+satisfy
+ Pt−1
+Pn−1
+(−1)∆i xi ] + i=1 [δi + (−1)δi xi+t−1 ] ≥ 1
+i=0 [∆i +P
+Pt−1
+.
+t−1
+i=0 xi = 1,
+i=0 [xi × pi ] = y
+Proof. Here (x0 , x1 , ..., xt−1 ) is the one-hot code format of y, and each y has a unique
+bit vector (x0 , x1 , ..., xt−1 ). Only excluding the point δ from P × Fn−1
+is converted to
+2
+excluding the point (∆0 , ∆1 , . . . , ∆t−1 , δ1 , ..., δn−1 ) from Fn+t−1
+.
+Then,
+using
+Lemma 4
+2
+gives the proof.
+
+Using above method, the relationship between all entries of matrices, input differences
+and output masks can be accurately described without any redundant points.
+Step 3: Compute Q0 (z, i) for 1 ≤ i ≤ n step by step.
+Since the highest algebraic degree of the equation supported by Gurobi is 2, we use
+the method of introducing intermediate variables Q0 (z, i) and Bz0 i to complete the matrix
+multiplication chain step by step. We have Cor ∗Ja (α0 , α1 , λ) = 21n LQ0 (z, n), and Q0 (z, i)
+∗Jb
+can be computed by adding the following equation to the MIQCP model.
+Q0 (z, i + 1)[x] =
+
+X
+
+Bz0 i [x, y]Q0 (z, i)[y] f or all x ∈ F2 , 0 ≤ i < n
+
+y∈F2
+
+Ordinary Differential-linear Model of n2 . For the n-bit modular addition operation n2 , we use α and β to stand for the input differences and denote the output mask as λ.
+0
+Let B00 , B10 . . . Bn−1
+be 2 × 2 integer matrices and Q00 , Q01 . . . Q0n be 2-dimensional integer
+column vectors. We denote the integer of matrix Bi0 in row x and column y (resp. the
+integer of Q0i in row x) by Bi0 [x, y] (resp. Q0i [x]). Then the correlation of DL approximation,
+i.e., Cor(α, β, λ), can be computed as
+Cor(α, β, λ) = (Q0n [0] + Q0n [1])/2n
+if and only the values of α, β, λ validate all the assertions listed below.
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+19
+
+Q00 [0] = 1, Q00 [1] = 0
+−1 ≤ Bi0 [0, 0] ≤ 2, −1 ≤ Bi0 [0, 1] ≤ 1
+
+
+
+−1 ≤ Bi0 [1, 0] ≤ 1, −2 ≤ Bi0 [1, 1] ≤ 2
+
+
+i+1
+0
+i+1
+i+1
+0
+i+1 
+
+−2
+≤ Qi+1 [0] ≤ 2 , −2
+≤ Qi+1 [1] ≤ 2
+
+
+
+
+
+−Bi0 [0, 0] − βi ≥ −2
+Bi0 [0, 0] − 2αi − 2βi ≥ −3
+Bi0 [0, 0] + αi + βi + 2λi ≥ 2
+Bi0 [0, 0] + 3αi + 3βi ≥ 2
+−Bi0 [0, 0] + 2αi − 3βi − 2λi ≥ −4
+−Bi0 [0, 0] − 3αi + 2βi − 2λi ≥ −4
+−Bi0 [0, 1] − αi − βi ≥ −2
+Bi0 [0, 1] − 2αi + βi ≥ −1
+Bi0 [0, 1] + αi − 2βi ≥ −1
+Bi0 [0, 1] + αi + 2λi ≥ 1
+−Bi0 [0, 1] + 2αi + 2βi − 2λi ≥ −1
+Bi0 [1, 0] + αi + βi ≥ 0
+2Bi0 [1, 0] − αi − βi + 3λi ≥ 0
+Bi0 [1, 0] − 2αi − 2βi ≥ −3
+−Bi0 [1, 0] − αi + 2βi − 2λi ≥ −2
+−2Bi0 [1, 0] + αi + βi − λi ≥ −1
+−Bi0 [1, 0] + 2αi − βi − 2λi ≥ −2
+−Bi0 [1, 1] + 2αi + 2βi − 2λi ≥ −1
+Bi0 [1, 1] + 3αi − 2βi ≥ −1
+Bi0 [1, 1] + βi + 2λi ≥ 1
+Bi0 [1, 1] − 2αi + 3βi ≥ −1
+−2Bi0 [1, 1] + αi + βi − λi ≥ −2
+−Bi0 [1, 1] − 3αi − 3βi − 4λi ≥ −8
+Bi0 [1, 1] − αi − βi + 4λi ≥ 0
+Q0i+1 [0] = Bi0 [0, 0] × Q0i [0] + Bi0 [0, 1] × Q0i [1]
+Q0i+1 [1] = Bi0 [1, 0] × Q0i [0] + Bi0 [1, 1] × Q0i [1]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+0≤i<n
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+To be clear, the above is the implementation of ordinary DL model of additions n2 in
+Gurobi. Moreover, we provide a Gurobi sample at
+https://
+for computing the correlations of ordinary DL approximations of modulo additions with
+arbitrary output linear masks.
+In addition, there is a problem in implementing above method with Gurobi. Since
+in Gurobi [Gur22] the range of integer variables is from −231 to 231 , the DL correlation
+of modulo 2n addition for n ≥ 32 is unable to be handled. In this paper, to solve this
+problem, we used a fixed coefficient to scale the final DL correlation, which will ensure
+that all variables used do not exceed the range specified by Gurobi.
+For instance, if x1 = x2 × x3 and variable x1 exceeds the range specified by Gurobi, we
+will use
+x01 = x02 × x03
+in MIQCP model, where x02 = x2 /100 and x03 = x3 /100. Here 100 can be changed to other
+fixed numbers, as long as variable x01 does not exceed the range. In conclusion, this is
+caused by the Gurobi itself rather than our method, and we will leave this issue for future
+research.
+
+20
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Discussion. Liu et al. [LSL21] first proposed to use quadratic constraint programming(QCP) to compute the DL correlations of additions with output linear masks of
+Hamming weight one. This paper proposes a method based on MIQCP to automatically
+compute the DL correlations of additions with arbitrary output masks, which forms the
+foundation of our automatic search of DL trails in ARX ciphers.
+At this point, the computation of ordinary DL correlation of 2 is transformed to
+MIQCP, which can be further handled by the existing solver Gurobi. We remark that a
+similar method can be used to transform an arbitrary matrix multiplication chain into
+MIQCP. It is noted that this technology has great potential, e.g., if using the above method
+in the automatic searching for linear trails of ARX ciphers based on 3 , the solver can
+accurately give the linear approximation correlation of 3 , rather than splitting 3 into
+two 2 and obtaining a less accurate value.
+
+4.2
+
+Automatic Searching for DL Trails of DLCT in ARX ciphers
+
+Recall that the cipher E is divided into three subciphers E0 , Em , and E1 such that
+E = E1 ◦ Em ◦ E0 . Our method of automatically searching for DL trails of Em is shown
+in Figure 2. In the following, we provide some methods to further reduce the complexity.
+Besides Corollary 1 and 2, we focus on the following ideas:
+First, though the method to compute an arbitrary matrix multiplication chain is
+presented in Section 4.1, the computational complexity remains high. For computing
+DL correlation of ARX ciphers, Liu et al. [LSL21] first proposed to apply Morawiecki
+et al.’s method on rotational cryptanalysis [MPS13] to several rounds of round function.
+To reduce complexity, we applied Morawiecki et al.’s method to several rounds of round
+function as well. The core idea of Morawiecki et al.’s method is that given the independency
+assumptions on the neighbouring bits, the probability that each difference bit of each
+round is 1 can be determined iteratively. The following conclusions are used in this paper.
+We refer to [LSL21] for more details.
+Proposition 1 (XOR-rule [LSL21]). For a fixed integer t ≥ 0, let a, b, a0 and b0 be
+n–bit vectors with Pr[ai−t =
+6 a0i ] = pi and Pr[bi−t 6= b0i ] = qi . Given the independency
+assumptions on the neighbouring bits, we have
+Pr[(a ⊕ b)i−t 6= (a0 ⊕ b0 )i ] = pi + qi − 2pi qi .
+Theorem 5 (-rule for DL [LSL21]). Let x, y, x0 and y 0 be n-bit string, such that
+Pr[xi 6= x0i ] = pi and Pr[yi =
+6 yi0 ] = qi . Given the independency assumptions on the
+neighbouring bits, the differential-linear probability for modular addition can be computed
+as
+Pr[(x  y)i 6= (x0  y 0 )i ] = pi + qi − 2pi qi − 2pi si − 2qi si + 4pi qi si ,
+where s0 = 0 and
+si+1 = pi qi si −
+
+pi + qi + si
+pi qi + pi si + qi si
++
+, i ≤ n − 1.
+2
+2
+
+Compared to Theorem 2, Theorem 5 is more inaccurate but less complex. For serval
+rounds of ARX ciphers, [LSL21, NSLL22] pointed out that the theoretical estimations of
+this method are close to the experimental results. In fact, the independency assumption
+is not strictly valid. Liu et al. [LSL21] pointed out that when using Morawiecki et al.’s
+method, "the probabilities will rapidly collapse to 12 for all one-bit output masks after a
+few iterative evaluations of the round function", which may give inaccurate analysis results
+and ignore some valuable DL trails. In order to trade off the complexity against accuracy,
+this method is applied to at most three rounds of ARX ciphers in this paper.
+Second, due to the need to exhaust the input differences, Theorem 3 and Corollary 4
+are difficult to implement directly with the existing solver. In this paper, we use a single
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+21
+
+DL trail under some explicit conditions to estimate the DL correlation of 2 when given
+the independency assumptions on the neighbouring bits.
+Assumption 3 (The estimation of DL correlation of 2 ). Let the input differences
+and output mask of an ordinary DL approximation of 2 be α0 , α1 ∈ Fn2 and λ ∈ Fn2 ,
+respectively. Let Pr[αji = 1] = pij for all i ∈ {0, 1} and j ∈ {0, ..., n − 1}. The events αji = 1
+are mutually independent for all 0 ≤ j < n and 0 ≤ i < 2. Denote the DL correlation
+of 2 for fixed input differences α0 , α1 and output mask λ by Cor(α0 , α1 , λ). Denote
+the probability of the input differences being α0 and α1 by pα0 ,α1 . Then the overall DL
+correlation, denoted by Cor, can be estimated by
+X
+
+Cor =
+
+pα0 ,α1 × Cor(α0 , α1 , λ)
+
+α0 ,α1 ∈Fn
+2
+
+≈
+
+ 0
+ 1
+0c
+1c
+max
+(p
+×
+Cor(
+α
+,
+α h+1 , bλch+1 )),
+bα
+,bα
+h+1
+h+1
+h+1
+n
+0
+1
+
+α ,α ∈F2
+
+where
+h = HIndex(λ),
+|pjh − 0.5| =
+6 0 f or j ∈ {0, 1},
+pbα0 ch+1 ,bα1 ch+1 =
+
+h
+Y
+
+p0i ×
+
+i=0
+
+h
+Y
+
+p1i .
+
+i=0
+
+The core idea of estimating a DL approximation by one DL trail is that the largest
+approximately represents the whole. In Morawiecki et al.’s method, pbα0 ch+1 ,bα1 ch+1 is
+easy to compute when given the independency assumptions on the neighbouring bits. Let
+h = HIndex(λ). According to Corollary 1, the highest (n − h − 1) bits of α0 , α1 and λ
+do not affect the DL correlation. According to Corollary 3, |pjh − 0.5| 6= 0 ensures that
+Cor 6= 0. This method can further reduce the computational complexity of DL correlation
+when using existing solver.
+Assumption 4 (The estimation of DL correlation of round function S(x0 , x1 ) = (2 (x0 , x1 ), x1 )).
+Let the input differences and output mask of one ordinary DL approximation be α0 , α1 ∈ Fn2
+i
+i
+and λ ∈ F2n
+2 , respectively. Let Pr[αj = 1] = pj for all i ∈ {0, 1} and j ∈ {0, ..., n − 1}.
+The events αji = 1 are mutually independent for all 0 ≤ j < n and 0 ≤ i < 2. For fixed
+input differences α0 , α1 and output mask λ, denote the DL correlation of S and 2 by
+CorS (α0 , α1 , λ) and Cor2 (α0 , α1 , λ), respectively. Denote the probability of the input
+differences being α0 and α1 by pα0 ,α1 . Then the overall DL correlation, denoted by Cor,
+can be estimated by
+
+X
+
+Cor =
+
+pα0 ,α1 × CorS (α0 , α1 , λ)
+
+α0 ,α1 ∈Fn
+2
+
+
+Lemma1
+
+≈
+
+
+X
+
+
+α0 ,α1 ∈Fn
+2
+
+pα0 ,α1 × Cor2 (α0 , α1 , λ) ×
+
+n−1
+Y
+
+(1 − 2p1j )
+
+j=0
+λj 6=0
+
+n−1
+Y
+ 0
+ 1
+0c
+1c
+≈ 0max
+(p
+×
+Cor
+(
+α
+,
+α
+,
+bλc
+))
+×
+(1 − 2p1j ),
+
+bα
+,bα
+2
+h+1
+h+1
+h+1
+h+1
+h+1
+n
+1
+α ,α ∈F2
+
+where
+
+j=0
+λj 6=0
+
+22
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+h = HIndex(λ),
+|pjh − 0.5| =
+6 0 f or j ∈ {0, 1},
+pbα0 ch+1 ,bα1 ch+1 =
+
+h
+Y
+
+p0i ×
+
+i=0
+
+h
+Y
+
+p1i .
+
+i=0
+
+An analogous method can be used to estimate the DL correlation of round function
+S(x0 , x1 ) = (2 (x0 , x1 )), x1 ), as showed in Proposition 4. Here Piling-up Lemma and
+Proposition 3 are used to reduce complexity and get rid of the exhaustion of input
+differences.
+
+Search by the solver
+
+Recall that the cipher E is divided into three subciphers E0 , Em , and E1 such that
+E = E1 ◦ Em ◦ E0 . We have presented a method to automatically search a good DL
+trail of Em , as depicted in Figure 2. Combining our method with the automatic search
+methods for Differential and linear trails of ARX ciphers [FWG+ 16], one will naturally
+get an automated search method for DL trails of ARX ciphers.
+
+Correlation Propagation
+of Diff. Bits
+
+Several
+Rounds
+
+Computing DL
+Correlation with
+MIQCP
+
+1 Rounds
+
+Figure 2: Our method for automatically searching a good DL trail of Em . We applied
+Morawiecki et al.’s method [MPS13, LSL21] to several rounds of round function and
+combined Morawiecki et al.’s method with the method in Section 4.1 to compute the
+correlation of an ordinary DL trail of Em .
+
+To search a (b + 1)-round DL trail of Em , we applied Morawiecki et al.’s technique and
+MIQCP to b-round and 1-round ARX ciphers, respectively. By prepending an a-round
+differential and concatenating a c-round linear trail, the above (b + 1)-round DL trail
+of Em is extended to (a + b + 1 + c) rounds. For clarity, the configuration of the above
+(a + b + 1 + c)-round DL trail is denoted by a + b + 1 + c. In this paper, configuration and
+the number of rounds are abbreviated as Conf . and R.
+One trick for obtaining good DL trails. As the number of rounds increases, it
+becomes increasingly difficult to find a good DL trail. The rule of thumb to obtain a good
+DL trail is to extend the optimal differential trail for a certain number of rounds by a
+short-round DL trail or extend one good DL trial by a short-round differential/linear trail.
+For the runtime of the searching algorithm, we spent about several hours on one personal
+laptop computer (8-core, AMD CPU Ryzen7 4800H, 2.9 GHz). Note that we aim to only
+find better trails than the previous ones, but we cannot guarantee they are the best trails.
+We leave it as a future work with acceleration techniques.
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+5
+
+23
+
+Applications to ARX Primitives
+
+In this section, we apply the method of automatically searching for DL trails to the ARX
+primitives Alzette and SPECK. All results are verified experimentally (some in segments).
+
+5.1
+
+Cryptanalysis of 64-bit ARX-box Alzette
+
+Alzette [BBCdS+ 20] is a 64-bit ARX-based S-box designed by Beierle at al., which is
+suitable for a larger number of platform architectures. It is the main building block of
+Sparkle-suite [BBdS+ 20], one of NIST lightweight crypto standardization finalists. Alzette
+32
+32
+is parameterized by a constant c ∈ F32
+2 and is defined as a permutation of F2 × F2 for
+each c. The algorithm evaluated in this paper is depicted in Figure 3.
+
+Figure 3: The Alzette instance
+
+Table 4: The (rotational) differential-linear distinguishers for round-reduced Alzette, where
+the constants used are 0xB7E15162 and 0x38B4DA56.
+R
+
+Conf .
+
+Input Diff.
+
+Output Mask
+
+8
+8
+9
+10
+
+2+3+1+2
+4+3+1+1
+4+3+1+2
+
+(80020100,00010080)
+(80020100,00010080)
+(80020100,00010080)
+(80020502,00010280)
+
+(80000000,00008000)
+(c0010181,01800001)
+(80600080,60008000)
+(03810005,80020180)
+
+Correlation
+Theory
+Exp.1
+−2−8.24 −2−5.50
+2−4.14
+2−4.06
+−10.08
+−2
+−2−7.60
+2−11.00
+2−10.48
+
+Ref.
+[NSLL22]
+Our
+
+1 The number of samples is 230 .
+
+For Alzette, the DL trails searched are shown in Table 4. The experimental correlations given in Table 4 are obtained with 230 random input pairs with the predefined input differences. For 8, 9, 10 rounds of our DL trials in Table 4, the prepo2−round,2−2
+
+sitioned differential trails are (80020100, 00010080) −−−−−−−−→ (00000000, 00010000),
+4−round,2−6
+
+4−round,2−8
+
+(80020100, 00010080) −−−−−−−−→ (01010000, 00030101) and (80020502, 00010280) −−−−−−−−→
+(0x00000402, 04020004), respectively. The gap between the theoretical estimation and the
+experimental result for 9-round ARX-box Alzette may come from two aspects: (1) It is
+due to the accumulated effect of many single DL trails with same input differences and
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+24
+
+output mask. (2) Morawiecki et al.’s method itself has a marginal error in precision, which
+is pointed out in [LSL21, NSLL22]. We will leave this issue for future research.
+
+5.2
+
+Cryptanalysis of SPECK
+
+SPECK [BSS+ 13] is a lightweight iterative cipher designed by the US National Security
+Agency. In this work, we focus on the versions with 32/48/64-bit block sizes, whose round
+functions are depicted in Figure 4.
+
+Figure 4: The SPECK instance
+
+Table 5: The differential-linear distinguishers for round-reduced SPECK32/48/64.
+
+SPECK32
+
+SPECK48
+
+R
+
+Conf .
+
+Input Diff.
+
+10
+10
+10 4
+112
+112
+114
+11
+
+5+2+1+2
+6+2+1+2
+6+2+1+2
+6+2+1+2
+
+11
+
+6+2+1+2
+
+12
+
+6+3+1+2
+
+(0a20,4205)
+(0211,0a04)
+(0211,0a04)
+(8020,4101)
+(0a20,4205)
+(8020,4101)
+(020082,120200)
+(92400040,
+40104200)
+(12029282,
+02020282)
+
+SPECK64
+
+Intermediate
+Diff.1
+(8000,840a)
+(0040,0000)
+(8000,840a)
+(8000,840a)
+(0040,0000)
+(80a000,85a420)
+(80008004,
+84008020)
+(01202000,
+08202000)
+
+Output
+Mask
+(5820,4020)
+(5820,4020)
+(5820,4020)
+(7020,6020)
+(7020,6020)
+(7020,6020)
+(08a805,098804)
+(4100400c,
+4c004000)
+(61804028,
+68004020)
+
+Correlation
+Theory
+Exp.
+−15.23
+2
+2−13.90
+−13.37
+−2
+−2−11.58
+−2−8.58
+−2−19.37 −2−17.09
+−2−18.37 −2−16.68
+−2−12.09
+−2−20.46 −2−17.55
+
+Ref.
+[NSLL22]
+
+Our
+
+Our
+
+2−22.13
+
+2−19.47
+
+Our
+
+226.93
+
+-
+
+Our
+
+1 The output difference of the prepositioned differential trail.
+2 We random chose 28 master keys and compute the average DL correlation by going though the full plaintext space. For random permutation,
+
+the experimental correlation should be about ±2−20 . This information leakage can be used in the distinction between 11-round SPECK32 and
+random functions, if given the encrypted ciphertext under multiple random keys. Moreover, given sufficient neutral bits of top short-round
+differential, it can be converted into a new valid distinguisher.
+3 The sample sizes for 11-round DL trail on SPECK32 and SPECK48 are 242 and 246 , respectively.
+4 Distinguishers combining DL trails with the neutral bit technique, denoted by DL(NB). To compare with the DL trails without using NBs, we
+1
+regard the correlations of DL(NB) as p 2 rq 2 , since the data complexity required is O(pr−2 q −4 ).
+
+For SPECK, the DL trails searched are shown in Table 5. Unless otherwise noted, the
+size of the statistical samples is 230 . Here the SPECK32 with a 64-bit key is considered
+32
+40
+as a vectorial Boolean function E : F96
+samples to count the
+2 → F2 . Thus, we used 2
+11-round DL correlation of SPECK32 when the theoretical correlation is −2−17.37 .
+DL distinguishers combined with neutral bit technique. All DL(NB)s used
+in this paper are listed in Table 6. For SPECK32, we divide the 10-round DL trail
+(0x0211_0a04, 0x5820_4020) into a 2-round differential (0x0211_0a04, 0x0040_0000) with
+theoretical probability 2−6 and a DL trail (0x0040_0000, 0x5820_4020) with a correlation
+of about −2−5.58 . Thus, if given sufficient neutral bits (i.e., at least 5.58 × 2 ≈ 12 bits),
+the DL(NB) will be valid and the data required is O(25.58×2+6 ). Table 7 presented 14
+neutral bits (bit-sets) of the 2-round differential (0x0211_0a04, 0x0040_0000). In this
+case, we regard the correlation of this DL(NB) is about −2−8.58 .
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+25
+
+Table 6: DL distinguishers combined with sufficient neutral bits for round-reduced
+SPECK32. To compare with the DL trails without using NBs, we regard the corre1
+lations of DL(NB) as p 2 rq 2 , since the data complexity required is O(pr−2 q −4 ).
+R1
+
+SPECK32
+
+1+9
+1+10
+2+8
+3+8
+3+8
+3+8
+3+8
+
+Input Diff.
+(2050,2040)
+(2a10,0004)
+(0211,0a04)
+(8020,4101)
+(8060,4101)
+(8021,4101)
+(8061,4101)
+
+Intermediate
+Diff.2
+(8000,0100)
+(2050,2040)
+(0040,0000)
+(0040,0000)
+(0040,0000)
+(0040,0000)
+(0040,0000)
+
+Output
+Mask
+(3854,3844)
+(3854,3844)
+(5820,4020)
+(7020,6020)
+(7020,6020)
+(7020,6020)
+(7020,6020)
+
+Prob.
+−2
+
+2
+2−4
+2−6
+2−12
+2−12
+2−12
+2−12
+
+1
+
+Cor.
+
+p 2 rq2
+
+−10
+
+−11
+
+−2
+−2−12
+−2−5.58
+−2−5.09
+−2−5.09
+−2−5.09
+−2−5.09
+
+−2
+−2−14
+−2−8.58
+−2−12.09
+−2−12.09
+−2−12.09
+−2−12.09
+
+Ref.
+[NSLL22]
+
+Our
+
+1 a + b indicates a DL(NB) combining a a-round differential and a b-round DL trail.
+2 The output difference of the prepositioned differential trail.
+3 P rob. = Theoretical probability of the prepended short-round differential. Cor. = Theoretical correlation of the bottom DL trail,
+1
+
+which is equal to the experimental correlation of the whole DL trail divided by P rob. Here p 2 rq 2 =
+
+√
+
+P rob. × Cor.
+
+4 DL(NB) is valid only if sufficient NB is given. See Table 7 and Table 9 for the NBs we used.
+
+For the 11-round DL trail (0x0a20_4205, 0x7020_6020), we divide it into a 3-round
+differential (0x0a20_4205, 0x0040_0000) with theoretical probability 2−11 and a 8-round
+DL trail (0x0040_0000, 0x7020_6020) with a correlation of about −2−5.682 . However,
+the NBs/SNBSs of the short-round differential are very scarce. We leave the search of
+NBs/SNBSs of 3-round differential (0x0a20_4205, 0x0040_0000) for future research.
+Similarly, we divide the 11-round DL trail (0x8020_4101, 0x7020_6020) into a 3-round
+differential (0x8020_4101, 0x0040_0000) with theoretical probability 2−12 and a 8-round
+DL trail (0x0040_0000, 0x7020_6020) with a correlation of about −2−5.09 . When requiring
+the output difference is 0x0040_0000, there are four sub-optimal 3-round differentials with
+probability 2−12 , as shown in Table 8. It means that there are another three DL trails
+with correlations of about −2−17.09 . Table 9 presented 13 neutral bits (bit-sets) of the
+four differentials of Table 8. If given sufficient neutral bits (i.e., at least 5.09 × 2 ≈ 11
+bits), the DL(NB) will be valid. In this case, to satisfy the conditions for two CSNBSs, we
+need to guess two bits of the first round key, which determine the form of the plaintext
+pairs. Thus, the data complexity required is O(25.09×2+12+2 ). We regard the correlations
+12+2
+of these four DL(NB)s are about −2−(5.09+ 2 ) = −2−12.09 . For the validity verification
+of DL(NB), see the source code provided by this paper.
+
+5.3
+
+Improved Differential-linear Theoretical Attack of SPECK32
+
+This section introduces the general framework of DL attack combined with neutral bit
+technology. we presented the lowest time-complexity attacks against 12-14 rounds of
+SPECK32 to date.
+We call a ciphertext structure for many pairs of ciphertext generated by a pair of
+plaintext using neutral bits(bit-sets). Note that for every neutral bit (bit-set) used, the
+number of ciphertexts in a ciphertext structure doubles.
+Bao et al.[BGL+ 23] presented a re-pairing ciphertext method to reduce the data
+complexity. Algorithm 1 is a sample using two differences ∆1 and ∆2 . ∆N B = ∆1 ⊕∆2 is the
+difference corresponding to one neutral bit(-set)s. The plaintext is denoted by p. Once two
+pairs of input plaintexts (p, p⊕∆1 ),(p⊕∆N B , p⊕∆1 ⊕∆N B ) are generated for the differential
+using ∆1 as input, one can re-pair the inputs as (p, p ⊕ ∆1 ⊕ ∆N B ),(p ⊕ ∆N B , p ⊕ ∆1 ) and
+obtain a pair of plaintexts for the differential using ∆2 as input, which means that one
+pair of ciphertexts account for one query rather than two queries. This is the case where
+2 In fact, when requiring the output difference is 0x0040_0000, there are two optimal 3-round differentials
+with probability 2−11 , i.e., (0x0a20_4205, 0x0040_0000), (0x0a60_4205, 0x0040_0000). It means that
+the correlation of 11-round DL trail (0x0a60_4205, 0x7020_6020) is about −2−16.68 .
+
+26
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+we used DL(NB) (0x8020_4101, 0x7020_6020) and DL(NB) (0x8060_4101, 0x7020_6020)
+to recover key in this paper.
+The parameters for DL attack combined with neutral bit technology are denoted as
+follows. The set of neutral bit(-set)s is denoted by N Bs.
+1. nkg is the number of possible values for the guessed bit of k.
+2. ncts is the number of ciphertext structures used in one attack, which is usually
+several times the reciprocal of top short-round differential probability.
+3. nb is the number of ciphertext pairs in each ciphertext structure and nb = 2|N Bs| .
+The attack procedure is as follows.
+1. Use Algorithm 1 to generate ncts ciphertext structures with size of nb .
+2. For each of guessed key gk0 , gk1 . . . gkngk −1 , one need to decrypt these ncts ciphertext
+structures. Then use the decrypted data to calculate the correlation of each ciphertext
+structure. For each guessed key, the maximum correlation of all ciphertext structures can
+be regarded as the score of the current key.
+3. Sort all guessed key by the corresponding score, and the right key is expected to be
+in the first place.
+Algorithm 1: Generate ciphertext structures using the neutral bit(-set)s of differential propagation [BGL+ 23]: The following is an example of using two input differences
+∆1 and ∆2 , which uses the re-pairing ciphertext method to reduce the data complexity
+by half. Range(n) represents a set of nonnegative integers less than n. Random(a, b)
+returns a random integer between a and b. Here nb = 2|N Bs| .
+Input: Number of ciphertext structures used in one attack ncts , a set of neutral
+bit(-set)s NBs, two input differences ∆1 and ∆2 , ∆NB = ∆1 ⊕ ∆2 , ∆NB is
+the difference corresponding to NBs[−1].
+Output: CT S—a 3-D array of ciphertexts, in which CT S[i][j][0 : 1] and CT S[i][:][:]
+represent one pair of ciphertexts and one ciphertext structure respectively.
+1 P := a array of size ncts /2 × nb × 2;
+2 CT S := a array of size ncts × nb × 2;
+32
+3 P [i][0][0] ← Random(0, 2
+− 1), for 0 ≤ i < ncts /2 ;
+4 for 0 ≤ i < |NBs| do
+5
+Dif f ← ⊕ ej . Here ej = 0x1 ≪ j and NBs[i] is a set of indices.;
+j∈NBs[i]
+
+6
+
+P [g][k + 2i ][0] ← P [g][k][0] ⊕ Dif f , for g ∈ Range(ncts /2) and k ∈ Range(2i );
+
+P [i][j][1] ← P [i][j][0] ⊕ ∆1 , for i ∈ Range(ncts /2) and j ∈ Range(nb );
+CT S[i][j][k] ← Encrypt(P [i][j][k]), for all j, k and i ∈ Range(ncts /2);
+9 CT S[ncts /2 : ncts − 1][:][:] ← CT S[0 : ncts /2 − 1][:][:];
+10 CT S[i][j][1] ↔ CT S[i][nb /2 + j][1], for ncts /2 ≤ i < ncts , j ∈ Range(nb /2);
+11 return CT S;
+7
+
+8
+
+12-round SPECK32 key recovery attack. We use the DL(NB) (0x0211_0a04, 0x5820_4020)
+to mount a 12-round SPECK32 key recovery attack. We note that for SPECK, since no
+key participates in any operation before the first nonlinear operation, any differential can
+be extended by one round at no cost. For 12-round SPECK32, the last round key is denote
+by rk11 . We target to recover 15 bits of round key rk11 after the distinguisher, since only
+brk11 c15 can affect the correlation. Concrete parameters and the complexity are as follows.
+nkg = 215 ,
+
+ncts = 26 ,
+
+nb = 212
+
+The data complexity is ncts × nb × 2 = 219 . Here the data complexity for generating a
+pair of ciphertext is 2. The time complexity is nkg × ncts × nb × 2 = 234 .
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+27
+
+13-round SPECK32 key recovery attack. By exhausting additional 16 bits of
+round key, we can use the above 12-round SPECK32 key recovery attack to attack 13-round
+SPECK32. The data complexity and time complexity are 219 and 250 , respectively.
+Next, we use the DL(NB) (0x8020_4101, 0x7020_6020) and the DL(NB) (0x8060_4101, 0x7020_6020)
+to mount a 13-round SPECK32 key recovery attack. For 13-round SPECK32, the last
+round key is denote by rk12 . Only brk12 c15 can affect the correlation. Denote the
+random data pairs with difference ∆in and the first round key by (x̃kỹ, x̃0 kỹ 0 ) and
+rk0 , respectively Note that the input of cipher E are DecryptOneRound(x̃kỹ, 0) and
+DecryptOneRound(x̃0 kỹ 0 , 0), which ensures that the difference after one round is ∆in .
+Here we use the first 11 NBsin Table 8. As noted by [BGL+ 23], to satisfy the conditions
+
+ x̃[7] = rk0 [7]
+x̃[15] ⊕ ỹ[8] = rk0 [15] ⊕ rk0 [8] , and the conditions for two
+
+for comforming pairs, i.e.,
+
+
+
+
+(
+
+x̃[0] ⊕ ỹ[9] = rk0 [0] ⊕ rk0 [9]
+x̃[12] ⊕ ỹ[5] ⊕ 1 = rk0 [12] ⊕ rk0 [5]
+, we need to guess five bits of rk0 , i.e.,
+ỹ[1] = rk0 [1]
+
+CSNBSs, i.e.,
+(
+rk0 [7], rk0 [15] ⊕ rk0 [8], rk0 [0] ⊕ rk0 [9]
+rk0 [12] ⊕ rk0 [5], rk0 [1]
+
+. Concrete parameters and the complexity are as
+
+follows.
+nkg = 215+5 = 220 ,
+
+ncts = 212−3 = 29 ,
+
+nb = 211
+
+[BGL+ 23] pointed out that for each linear condition in Table 8, once it is fulfilled, the
+probability of the differential increases by a factor of 2. We generate the random pairs
+satisfying three conditions in Table 8. Thus, ncts is 212−3 = 29 instead of 212 .
+Since all generated ciphertext structures are determined by the guesses of
+(
+rk0 [7], rk0 [15] ⊕ rk0 [8], rk0 [0] ⊕ rk0 [9]
+,
+rk0 [12] ⊕ rk0 [5], rk0 [1]
+the data complexity is 25 × ncts × nb = 225 . Note that if Algorithm 1 is used, the data
+complexity for generating a pair of ciphertext is 1. The time complexity is nkg × ncts ×
+nb × 2 = 241 .
+However, [BGL+ 23] pointed out that these two prepended classical differentials, i.e.,
+(0x8020_4101, 0x0040_0000) and (0x8060_4101, 0x0040_0000), are vaild to keys fulfilling
+rk2 [12] 6= rk2 [11]. Here rk2 is the third round key for SPECK32. Thus, the presented
+attack works for 263 keys.
+14-round SPECK32 key recovery attack. By exhausting additional 16 bits of
+round key, we can use the 13-round SPECK32 key recovery attack to attack 14-round
+SPECK32. The data complexity and time complexity are 225 and 257 , respectively. All
+results are listed in Table 2.
+
+6
+
+Conclusion and Open Problems
+
+We present a method to compute the extended (rotational) DL correlation of k for k ≥ 2,
+where two output linear masks of the cipher pairs can be different. And we present an
+automated method for evaluating the DL correlations of ARX ciphers, which partially
+solve the open problem proposed by Niu et al. at CRYPTO 2022. The automated method
+is applied to some ARX primitives, and improved results are obtained. To the best of
+our knowledge, this method finds the best differential-linear distinguishers for these ARX
+primitives at present. Finally, we would like to give some open problems deserving further
+investigations.
+
+28
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+First, it is possible to use an analogous automated method to evaluate DL correlation
+for other non-ARX ciphers, as long as an automated search method for good DL trails
+of DLCT is found. The method provided by this paper may be a good template, which
+combines the correlation propagation technology of difference bits with some theories of
+DL cryptanalysis for specific ciphers. Secondly, some acceleration techniques need to be
+studied to find better differential-linear charcateristics on longer rounds. Acceleration
+technologies in the search of differential/linear characteristics, such as the idea of less
+variables, Matsui’ bounding condition, and divide-and-conquer approach, may be helpful.
+
+References
+[AFK+ 08]
+
+Jean-Philippe Aumasson, Simon Fischer, Shahram Khazaei, Willi Meier,
+and Christian Rechberger. New features of latin dances: analysis of salsa,
+chacha, and rumba. In International Workshop on Fast Software Encryption,
+pages 470–488. Springer, 2008.
+
+[BBCdS+ 20] Christof Beierle, Alex Biryukov, Luan Cardoso dos Santos, Johann
+Großschädl, Léo Perrin, Aleksei Udovenko, Vesselin Velichkov, and Qingju
+Wang. Alzette: A 64-bit arx-box. In Annual International Cryptology
+Conference, pages 419–448. Springer, 2020.
+[BBdS+ 20]
+
+Christof Beierle, Alex Biryukov, Luan Cardoso dos Santos, Johann
+Großschädl, Léo Perrin, Aleksei Udovenko, Vesselin Velichkov, and Qingju
+Wang. Lightweight aead and hashing using the sparkle permutation family.
+IACR Transactions on Symmetric Cryptology, pages 208–261, 2020.
+
+[BC04]
+
+Eli Biham and Rafi Chen. Near-collisions of sha-0. In Advances in Cryptology–
+CRYPTO 2004: 24th Annual International Cryptology Conference, Santa
+Barbara, California, USA, August 15-19, 2004. Proceedings 24, pages 290–
+305. Springer, 2004.
+
+[BdST+ 22]
+
+Alex Biryukov, Luan Cardoso dos Santos, Je Sen Teh, Aleksei Udovenko, and
+Vesselin Velichkov. Meet-in-the-filter and dynamic counting with applications
+to speck. Cryptology ePrint Archive, 2022.
+
+[BGG+ 23]
+
+Emanuele Bellini, David Gerault, Juan Grados, Rusydi Makarim, and
+Thomas Peyrin. Fully automated differential-linear attacks against arx
+ciphers. Cryptology ePrint Archive, Paper 2023/181, 2023. https:
+//eprint.iacr.org/2023/181.
+
+[BGL+ 23]
+
+Zhenzhen Bao, Jian Guo, Meicheng Liu, Li Ma, and Yi Tu. Enhancing
+differential-neural cryptanalysis. In Advances in Cryptology–ASIACRYPT
+2022: 28th International Conference on the Theory and Application of
+Cryptology and Information Security, Taipei, Taiwan, December 5–9, 2022,
+Proceedings, Part I, pages 318–347. Springer, 2023.
+
+[BJ72]
+
+Egon Balas and Robert Jeroslow. Canonical cuts on the unit hypercube.
+SIAM Journal on Applied Mathematics, 23(1):61–69, 1972.
+
+[BLN17]
+
+Céline Blondeau, Gregor Leander, and Kaisa Nyberg. Differential-linear
+cryptanalysis revisited. Journal of Cryptology, 30(3):859–888, 2017.
+
+[BLT20]
+
+Christof Beierle, Gregor Leander, and Yosuke Todo. Improved differentiallinear attacks with applications to arx ciphers. In Annual International
+Cryptology Conference, pages 329–358. Springer, 2020.
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+29
+
+[BODKW19] Achiya Bar-On, Orr Dunkelman, Nathan Keller, and Ariel Weizman. Dlct:
+a new tool for differential-linear cryptanalysis. In Annual International
+Conference on the Theory and Applications of Cryptographic Techniques,
+pages 313–342. Springer, 2019.
+[BSS+ 13]
+
+Ray Beaulieu, Douglas Shors, Jason Smith, Stefan Treatman-Clark, Bryan
+Weeks, and Louis Wingers. The simon and speck families of lightweight
+block ciphers. cryptology eprint archive, 2013.
+
+[CY21]
+
+Yi Chen and Hongbo Yu. Bridging machine learning and cryptanalysis via
+edlct. Cryptology ePrint Archive, 2021.
+
+[FWG+ 16]
+
+Kai Fu, Meiqin Wang, Yinghua Guo, Siwei Sun, and Lei Hu. Milp-based
+automatic search algorithms for differential and linear trails for speck. In International Conference on Fast Software Encryption, pages 268–288. Springer,
+2016.
+
+[Gur22]
+
+Gurobi Optimization, LLC. Gurobi Optimizer Reference Manual, 2022.
+
+[LDWRA17] Yunwen Liu, Glenn De Witte, Adrián Ranea, and Tomer Ashur. Rotationalxor cryptanalysis of reduced-round speck. IACR Transactions on Symmetric
+Cryptology, pages 24–36, 2017.
+[LH94]
+
+Susan K Langford and Martin E Hellman. Differential-linear cryptanalysis.
+In Annual International Cryptology Conference, pages 17–25. Springer, 1994.
+
+[LLL21]
+
+Meicheng Liu, Xiaojuan Lu, and Dongdai Lin. Differential-linear cryptanalysis from an algebraic perspective. In Annual International Cryptology
+Conference, pages 247–277. Springer, 2021.
+
+[LM01]
+
+Helger Lipmaa and Shiho Moriai. Efficient algorithms for computing differential properties of addition. In International Workshop on Fast Software
+Encryption, pages 336–350. Springer, 2001.
+
+[LSL21]
+
+Yunwen Liu, Siwei Sun, and Chao Li. Rotational cryptanalysis from
+a differential-linear perspective. In Annual International Conference on
+the Theory and Applications of Cryptographic Techniques, pages 741–770.
+Springer, 2021.
+
+[Mat93]
+
+Mitsuru Matsui. Linear cryptanalysis method for des cipher. In Workshop on
+the Theory and Application of of Cryptographic Techniques, pages 386–397.
+Springer, 1993.
+
+[MPS13]
+
+Paweł Morawiecki, Josef Pieprzyk, and Marian Srebrny. Rotational cryptanalysis of round-reduced keccak. In International Workshop on Fast Software
+Encryption, pages 241–262. Springer, 2013.
+
+[NSLL22]
+
+Zhongfeng Niu, Siwei Sun, Yunwen Liu, and Chao Li. Rotational differentiallinear distinguishers of arx ciphers with arbitrary output linear masks.
+Cryptology ePrint Archive, 2022.
+
+[NW06]
+
+Kaisa Nyberg and Johan Wallén. Improved linear distinguishers for snow
+2.0. In International Workshop on Fast Software Encryption, pages 144–162.
+Springer, 2006.
+
+30
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+[SHW+ 14]
+
+Siwei Sun, Lei Hu, Meiqin Wang, Peng Wang, Kexin Qiao, Xiaoshuang Ma,
+Danping Shi, Ling Song, and Kai Fu. Towards finding the best characteristics
+of some bit-oriented block ciphers and automatic enumeration of (related-key)
+differential and linear characteristics with predefined properties. Cryptology
+ePrint Archive, 2014.
+
+[SWW21]
+
+Ling Sun, Wei Wang, and Meiqin Wang. Accelerating the search of differential
+and linear characteristics with the sat method. IACR Transactions on
+Symmetric Cryptology, pages 269–315, 2021.
+
+[Wal03]
+
+Johan Wallén. On the differential and linear properties of addition. 2003.
+
+[ZWW22]
+
+Liu Zhang, Zilong Wang, and Boyang Wang. Improving differential-neural
+cryptanalysis with inception blocks. Cryptology ePrint Archive, 2022.
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+31
+
+Supplementary Materials
+
+A
+
+The Matrices A8λ0 +4λ1 +2α1 +α0 of 2 for All (λ0 , λ1 , α1 , α0 ) ∈
+F42
+
+
+
+
+3 1 1 1
+2 1 1
+
+ 1 2 0
+1
+1
+0
+2
+0
+0
+
+A0 = 
+A1 = A2 = 
+4 0 0 2 0 
+4 1 0 2
+1 1 1 3
+0 1 1
+
+
+
+−1 −1 1 −1
+0 −1
+
+ 1
+1
+1
+0
+2
+0
+0
+0
+ A = A6 = 
+A4 = 
+0 −2 0  5
+4 0
+4  −1 0
+1 −1 1
+1
+0
+1
+
+
+
+−1 1 −1 −1
+0 −1
+
+ −1 0
+1
+1
+0
+−2
+0
+0
+ A = A10 = 
+A8 = 
+0
+2
+0  9
+0
+4 0
+4 1
+1
+1 −1 1
+0
+1
+
+
+
+3 −1 −1 1
+−2 1
+
+ −1 2
+1
+1
+0
+−2
+0
+0
+ A13 = A14 = 
+A12 = 
+4  0 0 −2 0 
+4  −1 0
+1 −1 −1 3
+0 1
+
+B
+
+
+0
+1 
+
+1 
+2
+
+
+
+
+2 0 0 0
+1 1 3 1 1 
+
+A3 = 
+4 1 1 3 1 
+0 0 0 2
+
+
+
+−1 0
+−2 0
+0
+0
+
+0
+1 
+1
+1 −1 
+ A7 = 1  1
+
+
+
+0 −1
+1 −1 −1 −1 
+4
+1
+0
+0
+0
+0
+2
+
+
+
+−1 0
+−2 0
+0
+0
+
+
+0 −1 
+ A11 = 1  1 −1 −1 −1 
+
+
+0
+1
+1
+1
+1 −1 
+4
+1
+0
+0
+0
+0
+2
+
+
+
+1 0
+2 0
+0 0
+
+
+0 −1 
+ A15 = 1  1 −3 −1 1 
+
+
+2 −1
+4 1 −1 −3 1 
+1 −2
+0 0
+0 2
+
+Extended Rotational Differential-Linear Correlation of
+k
+
+Definition 7. Let k > 1 be a fixed integer. Let the input differences and output masks
+of two n-bit modulo additions, k,∗Ja and k,∗Jb , be α0 , ..., αk−1 ∈ Fn2 and λ0 , λ1 ∈ Fn2 ,
+respectively. Then the extended rotational differential-linear correlation can be computed as
+
+0
+
+Cor ∗Ja (t, α , ..., α
+∗Jb
+
+k−1
+
+1
+, λ , λ ) = kn
+2
+0
+
+X
+
+1
+
+(−1)
+
+λ0 ·(k,∗Ja (x0 ,x1 ,...,xk−1 )≪t)
+⊕λ1 ·k,∗Jb (y 0 ,y 1 ,...,y k−1 )
+
+.
+
+(3)
+
+(xi ≪t)⊕αi =y i
+xi ∈Fn ,0≤i<k
+2
+
+Lemma 6. The extended rotational differential-linear correlation of k with rotational
+offset t, rotational difference α0 , ..., αk−1 , linear masks (λ0 , λ1 ), and fixed least significant
+carries a, b ∈ {0, ..., k − 1} can be computed as
+X
+
+Cor ∗Ja (t, α0 , ..., αk−1 , λ0 , λ1 ) =
+
+
+
+
+
+Cor uJa (dα0 en−t , ..., dαk−1 en−t , bλ0 cn−t , bλ1 cn−t )
+∗Jv
+
+∗Jb
+
+u,v∈{0,...,k−1}
+
+
+
+× Cor ∗Ju (bα0 ct , ..., bαk−1 ct , dλ0 et , dλ1 et )
+vJb
+
+where u, v, a, b ∈ {0, ..., k − 1}.
+
+
+
+32
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Proof.
+Cor ∗Ja (t, α0 , ..., αk−1 , λ0 , λ1 )
+∗Jb
+X
+0 0
+1 1
+1
+= kn
+(−1)λ ·s ⊕λ ·s
+2
+n
+i
+x ∈F2 ,0≤i<k
+
+1
+= kn
+2
+=
+=
+=
+
+1
+2kn
+1
+2kn
+
+X
+
+0 n−t
+
+·ds0 en−t ⊕dλ1 en−t ·ds1 en−t
+
+0 n−t
+
+·s2 ⊕dλ1 en−t ·s3
+
+(−1)bλ c ·s ⊕bλ c ·s
+
+0 n−t
+
+·s2 ⊕dλ1 en−t ·s6
+
+(−1)bλ c ·s ⊕bλ c ·s
+
+(−1)dλ e
+
+0 t
+
+0 t
+
+1 t
+
+1 t
+
+(−1)bλ c ·bs c ⊕bλ c ·bs c ,
+
+xi ∈Fn
+2 ,0≤i<k
+
+X
+
+(−1)dλ e
+
+0 t
+
+4
+
+1 t
+
+5
+
+0 t
+
+4
+
+1 t
+
+7
+
+xi ∈Fn
+2 ,0≤i<k
+
+X
+
+(−1)dλ e
+
+xi ∈Fn
+2 ,0≤i<k
+
+X
+0 n−t 2
+1 n−t 6
+0 t 4
+1 t 7
+1
+(−1)dλ e ·s ⊕dλ e ·s (−1)bλ c ·s ⊕bλ c ·s
+kn
+2 u,v∈{0,...,k−1}
+xi ∈Fn ,0≤i<k
+2
+
+
+X
+
+=
+
+u,v∈{0,...,k−1}
+
+ 1
+
+ 2k(n−t)
+
+
+X
+
+=
+
+
+X
+
+0 n−t
+
+(−1)dλ e
+
+
+
+  1
+
+ ×  2kt
+
+
+
+·s2 ⊕dλ1 en−t ·s8 
+
+c,d∈{0,...,k−1}
+xi ∈Fn ,0≤i<k
+2
+
+Cor uJa (dα0 en−t , ..., dαk−1 en−t , dλ0 en−t , dλ1 en−t )
+
+X
+c,d∈{0,...,k−1}
+xi ∈Fn ,0≤i<k
+2
+
+0 t 9
+1 t 7
+(−1)bλ c ·s ⊕bλ c ·s 
+
+
+
+
+∗Jv
+
+u,v∈{0,...,k−1}
+
+
+
+× Cor ∗Ju (bα0 ct , ..., bαk−1 ct , bλ0 ct , bλ1 ct )
+vJb
+
+where
+s0 = k,∗Ja (x0 , ..., xk−1 ) ≪ t,
+s1 = k,∗Jb (x0 ≪ t ⊕ α0 , ..., xk−1 ≪ t ⊕ αk−1 ),
+s2 = k,uJa (bx0 cn−t , ..., bxk−1 cn−t ),
+s3 = k,∗Jv (dx0 ≪ t ⊕ α0 en−t , ..., dxk−1 ≪ t ⊕ αk−1 en−t ),
+s4 = k,∗Ju (dx0 et , ..., dxk−1 et ),
+s5 = k,vJb (bx0 ≪ t ⊕ α0 ct , ..., bxk−1 ≪ t ⊕ αk−1 ct ),
+s6 = k,∗Jv (bx0 ⊕ (α0 ≫ t)cn−t , ..., bxk−1 ⊕ (αk−1 ≫ t)cn−t ),
+s7 = k,vJb (dx0 ⊕ (α0 ≫ t)et , ..., dxk−1 ⊕ (αk−1 ≫ t)et ),
+s8 = k,cJv (bx0 ⊕ (α0 ≫ t)cn−t , ..., bxk−1 ⊕ (αk−1 ≫ t)cn−t ),
+s9 = k,dJu (dx0 et , ..., dxk−1 et ),
+u, v, a, b, c, d ∈ {0, ..., k − 1},
+u = ĉ(s2 ), v = ĉ(s5 ) = ĉ(s7 ),
+c = ĉ(s8 ), d = ĉ(s9 ).
+
+Next, we use a matrix multiplication chain to compute the extended DL correlation of
+k for k ≥ 2.
+Theorem 6. Let k > 1 be a fixed integer and l = k × k. Let (t, α0 , ..., αk−1 , λ0 , λ1 ) be an
+extended rotational differential-linear trail of nk,∗Ja and nk,∗Jb for a, b ∈ {0, 1, ..., k − 1}.
+
+Guangqiu Lv , Chenhui Jin and Ting Cui
+
+33
+
+Let z = zn−1 , ..., z1 , z0 be the word associated with the trail, where zi = λ0i 2k+1 + λ1i 2k +
+k−1
+P j j
+αi 2 . Then the correlation can be computed as
+j=0
+
+"
+0
+
+Cor ∗Ja (t, α , ..., α
+
+k−1
+
+0
+
+#
+
+X
+
+Y
+
+0≤v,j<k
+
+0≤i<t
+
+1
+
+,λ ,λ ) =
+
+Azi
+
+∗Jb
+
+"
+
+#!
+Y
+
+H(b)
+
+Azi
+
+.
+
+t≤i<n
+
+jk+v,ak+v
+
+where H(b) is a l × l matrix with H(b)u×k+b,u×k+i = 1 for all 0 ≤ u, i < k and zero
+otherwise.
+Proof. Let C(x, y) is a column vector of dimension l with a single 1 in (x × k + y)-th row
+and zero otherwise. Let L(∗, v) is a row vector of dimension l with a 1 in (i × k + v)-th
+column for all 0 ≤ i < k and zero otherwise. Let L(u, ∗) is a row vector of dimension l
+with a 1 in (u × k + i)-th column for all 0 ≤ i < k and zero otherwise.
+According to Lemma 6, we have
+
+X 
+Cor ∗Ja (t, α0 , ..., αk−1 , λ0 , λ1 ) =
+
+Cor uJa (dα0 en−t , ..., dαk−1 en−t , dλ0 en−t , dλ1 en−t )
+
+∗Jb
+
+∗Jv
+
+0≤u,v<k
+
+
+
+
+
+× Cor ∗Ju (bα0 ct , ..., bαk−1 ct , bλ0 ct , bλ1 ct )
+vJb
+
+"
+=
+
+X
+
+X
+
+L(∗, v)
+
+0≤v<k 0≤u<k
+
+#
+Y
+
+=
+
+×
+
+Azi
+
+"
+
+L(u, ∗)
+
+Y
+
+0≤v,j<k
+
+0≤i<t
+
+Azi
+
+Azi
+
+!
+C(a, v)
+
+H(b)
+
+Azi
+
+!
+C(a, v)
+
+t≤i<n
+
+#
+
+X
+
+#
+Y
+
+0≤i<t
+
+"
+
+C
+
+C(u, b)
+
+#
+Y
+t≤i<n
+
+#
+Y
+
+L(∗, v)
+
+0≤v<k
+
+=
+
+Azi
+
+"
+
+0≤i<t
+
+"
+X
+
+!
+
+"
+H(b)
+
+#!
+Y
+
+Azi
+
+t≤i<n
+
+.
+jk+v,ak+v
+
+Neutral Bit-sets Used in Key Recovery Attacks
+
+Based on one pair of plaintext with one differential established, neutral bit-sets (NB) are
+mainly used to generate more plaintext pairs with the differential trail established. In this
+study, 2-round differential (0x0211_0a04, 0x0040_0000) is used in the 10-round DL trail
+we presented. Reference [BGL+ 23] presents the probabilistic Simultaneous-neutral bit-sets
+(SNBS) for 2-round differential trail (0x0211_0a04,0x0040_0000) of SPECK32, as shown
+in Table 7.
+Table 7: (Probabilistic) SNBS’s for 2-round differential trail (0x0211_0a04,0x0040_0000)
+of SPECK32/64.
+NB
+[20]
+[6,29]
+
+Pr.
+1
+0.91
+
+NB
+[21]
+[23]
+
+Pr.
+1
+0.812
+
+NB
+[22]
+[30]
+
+Pr.
+1
+0.809
+
+NB
+[9,16]
+[7]
+
+Pr.
+1
+0.806
+
+NB
+[2,11,25]
+[0]
+
+Pr.
+1
+0.754
+
+NB
+[14]
+[11,27]
+
+Pr.
+0.965
+0.736
+
+NB
+[15]
+[8]
+
+Pr.
+0.938
+0.664
+
+When requiring the output difference is 0x0040_0000, there are two optimal 3-round differentials with probability 2−11 , i.e., (0x0a20_4205, 0x0040_0000), (0x0a60_4205, 0x0040_0000).
+However, the NBs/SNBSs of these two differentials are very scarce. There are four suboptimal 3-round differentials with probability 2−12 . Table 8 presents these four differential
+and three sufficient conditions to conform the differentials.
+
+34
+
+A MIQCP-Based Automatic Search Algorithm for Differential-Linear Trails of ARX
+Ciphers
+
+Table 8: Three sufficient conditions conform the 3-round sub-optimal differentials with
+output difference 0x0040_0000 [BGL+ 23]. Let the result after 1-round encryption of
+SPECK32 be (x, y). Here c = ((x ≫ 7)  y) ⊕ ((x ≫ 7) ⊕ y). [BGL+ 23] pointed that for
+each linear condition, once it is fulfilled, the probability of the differential increases by a
+factor of 2.
+InputDiff .
+Round 1
+Round 2
+Round 3
+x[7]
+x[5] ⊕ y[14]
+x[15] ⊕ y[8]
+
+0x8020_4101
+
+0
+1
+0
+x[0] ⊕ y[9] = 0
+
+0x8060_4101 0x8021_4101
+0x0201_0604
+0x1800_0010
+0x0040_0000
+0
+0
+0
+1
+0
+1
+x[0] ⊕ y[9] = 0
+c[9] ⊕ y[9] = 0
+
+0x8061_4101
+
+0
+0
+1
+c[9] ⊕ y[9] = 0
+
+Table 9: Neutral bit/bit-sets for 3-round differentials (0x8020_4101, 0x0040_0000),
+(0x8060_4101,
+0x0040_0000),
+(0x8021_4101,
+0x0040_0000),
+(0x8061_4101,
+0x0040_0000) of SPECK32 [BGL+ 23].
+NB
+[22]
+[20]
+[13]
+[12,19]
+[14,21]
+[6,29]
+[30]
+[0,8,31]
+[5,28]
+[15,24]
+[4,27,29]
+[6,11,12,18]
+
+0x8020_4101
+Pre.2 Post.3
+0.995
+1.000
+0.986
+1.000
+0.986
+1.000
+0.986
+1.000
+0.855
+0.860
+0.901
+0.902
+0.803
+0.818
+0.855
+0.859
+0.495
+1.000
+0.482
+1.000
+0.672
+0.916
+0.445
+0.903
+
+0x8060_4101
+Pre.
+Post.
+0.995
+1.000
+0.997
+1.000
+0.989
+1.000
+0.995
+1.000
+0.874
+0.871
+0.898
+0.893
+0.818
+0.860
+0.858
+0.881
+0.495
+1.000
+0.542
+1.000
+0.648
+0.905
+0.456
+0.906
+
+0x8021_4101
+Pre.
+Post.
+0.996
+1.000
+0.996
+1.000
+0.988
+1.000
+0.993
+1.000
+0.881
+0.873
+0.721
+0.706
+0.442
+0.442
+0.000
+0.000
+0.481
+1.000
+0.498
+1.000
+0.535
+0.736
+0.333
+0.701
+
+0x8061_4101
+Pre.
+Post.
+0.997
+1.000
+0.995
+1.000
+0.992
+1.000
+0.986
+1.000
+0.881
+0.876
+0.721
+0.723
+0.412
+0.407
+0.000
+0.000
+0.469
+1.000
+0.496
+1.000
+0.536
+0.718
+0.382
+0.726
+
+Condition1
+x[12] ⊕ y[5] = 1
+y[1] = 0
+x[11] ⊕ y[4] = 1
+x[2] ⊕ y[11] = 0
+
+1 A condition at the end of a row is specific to the bit-set at the same row. ’-’ means that there is no condition for the
+
+corresponding bit-set.
+2 Pre.: probability obtained using 1000 correct pairs without imposing the conditions.
+3 Post.: probability obtained using 1000 correct pairs and imposing all conditions in the last column.
+
+

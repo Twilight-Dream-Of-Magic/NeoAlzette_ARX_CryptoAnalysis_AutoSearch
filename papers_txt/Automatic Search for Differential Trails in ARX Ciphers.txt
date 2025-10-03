@@ -1,0 +1,2827 @@
+Automatic Search for Differential Trails in ARX Ciphers
+(extended version)
+Alex Biryukov and Vesselin Velichkov
+Laboratory of Algorithmics, Cryptology and Security (LACS)
+University of Luxembourg
+{Alex.Biryukov,Vesselin.Velichkov}@uni.lu
+
+Abstract. We propose a tool 1 for automatic search for differential trails in ARX ciphers. By introducing the
+concept of a partial difference distribution table (pDDT) we extend Matsui’s algorithm, originally proposed for
+DES-like ciphers, to the class of ARX ciphers. To the best of our knowledge this is the first application of
+Matsui’s algorithm to ciphers that do not have S-boxes. The tool is applied to the block ciphers TEA, XTEA,
+SPECK and RAIDEN. For RAIDEN we find an iterative characteristic on all 32 rounds that can be used to
+break the full cipher using standard differential cryptanalysis. This is the first cryptanalysis of the cipher in
+a non-related key setting. Differential trails on 9, 10 and 13 rounds are found for SPECK32, SPECK48 and
+SPECK64 respectively. The 13 round trail covers half of the total number of rounds. These are the first public
+results on the security analysis of SPECK. For TEA multiple full (i.e. not truncated) differential trails are
+reported for the first time, while for XTEA we confirm the previous best known trail reported by Hong et al. .
+We also show closed formulas for computing the exact additive differential probabilities of the left and right
+shift operations.
+Keywords: symmetric-key, differential trail, tools for cryptanalysis, automatic search, ARX, TEA, XTEA,
+SPECK, RAIDEN
+
+1
+
+Introduction
+
+A broad class of symmetric-key cryptographic algorithms are designed by combining a small set of simple
+operations such as modular addition, bit rotation, bit shift and XOR. Although such designs have been
+proposed as early as the 1980s, only recently the term ARX (from Addition, Rotation, XOR) was adopted
+in reference to them.
+Some of the more notable examples of ARX algorithms, ordered chronologically by the year of proposal
+are: the block cipher FEAL [37] (1987), the hash functions MD4 [34] (1990) and MD5 [35] (1992), the
+block ciphers TEA [40] (1994), RC5 [36] (1994), XTEA [30] (1997), XXTEA [31] (1998) and HIGHT [15]
+(2006), the stream cipher Salsa20 [4] (2008), the SHA-3 [28] finalists Skein [13] and BLAKE [2] (2011) and
+the recently proposed hash function for short messages SipHash [1] (2012).
+By combining linear (XOR, bit shift, bit rotation) and non-linear (modular addition) operations, and
+iterating them over multiple rounds, ARX algorithms achieve strong resistance against standard cryptanalysis techniques such as linear [24] and differential [5] cryptanalysis. Additionally, due to the simplicity
+of the underlying operations, they are typically very fast in software.
+Although ARX designs have many advantages and have been widely used for many years now, the
+methods for their rigorous security analysis are lagging behind. This is especially true when compared to
+algorithms such as AES [9] and DES [29]. The latter were designed using fundamentally different principles,
+based on the combination of linear transformations and non-linear substitution tables or S-boxes.
+1
+
+The source code of the tool is publicly available as part of a larger toolkit for the analysis of ARX at the following address:
+https://github.com/vesselinux/yaarx .
+
+Since a typical S-box operates on 8 or 4-bit words, it is easy to efficiently evaluate its differential (resp.
+linear) properties by computing its difference distribution table (DDT) (resp. linear approximation table
+(LAT)). In contrast, ARX algorithms use modular addition as a source of non-linearity, rather than Sboxes. Constructing a DDT or a LAT for this operation for n-bit words would require 23n × 4 bytes of
+memory and would clearly be infeasible for a typical word size of 32 bits.
+In this paper we demonstrate that although the computation of a full DDT for ARX is infeasible, it
+is still possible to efficiently compute a partial DDT containing (a fraction of) all differentials that have
+probability above a fixed threshold. This is possible due to the fact that the probabilities of XOR (resp.
+ADD) differentials through the modular addition (resp. XOR) operation are monotonously decreasing with
+the bit size of the word.
+Based on the concept of partial DDT-s we develop a method for automatic search for differential trails
+in ARX ciphers. It is based on Matsui’s branch-and-bound algorithm [23], originally proposed for S-box
+based ciphers. While other methods for automatic search for differential trails in ARX designs exist in
+literature [12, 25, 20] they have been exclusively applied to the analysis of hash functions where the key
+(the message) is known and can be freely chosen. With the proposed algorithm we address the more general
+setting of searching for trails in block ciphers, where the key is fixed and unknown to the attacker.
+Beside the idea of using partial DDT-s another fundamental concept at the heart of the proposed
+algorithm is what we refer to as the highways and country roads analogy. If we liken the problem of finding
+high probability differential trails in a cipher to the problem of finding fast routes between two cities on
+a road map, then differentials that have high probability (w.r.t. a fixed threshold) can be thought of as
+highways and conversely differentials with low probability can be viewed as slow roads or country roads.
+To further extend the analogy, a differential trail for n rounds represents a route between points 1 and n
+composed of some number of highways and country roads. A search for high probability trails is analogous
+to searching for a route in which the number of highways is maximized while the number of country roads
+is minimized.
+The differentials from the pDDT are the highways on the road map from the above analogy. Beside those
+highways, the proposed search algorithm explores also a certain number of country roads (low probability
+differentials). While the list of highways is computed offline prior to the start of the search, the list of country
+roads is computed on-demand for each input difference to an intermediate round that is encountered during
+the search. Of all possible country roads that can be taken at a given point (note that there may be a
+huge number of them), the algorithm considers only the ones that lead back on a highway. If such are not
+found, then the shortest country road is taken (resp. the maximum probability transition). This strategy
+prevents the number of explored routes from exploding and at the same time keeps the total probability
+of the resulting trail high.
+Due to the fact that it uses a partial, rather than the full DDT, our algorithm is not guaranteed to find
+the best differential trail. However experiments 2 on small word sizes of 11, 14 and 16 bits show that the
+probabilities of the found trails are within a factor of at most 2−3 from the probability of the best one.
+We demonstrate the proposed tool on block ciphers TEA [40], XTEA [30], SPECK [3] and RAIDEN [32].
+Beside being good representatives of the ARX class of algorithms, these ciphers are of interest also due to
+the fact that results on full (i.e. not truncated) differential trails on them either do not exist (as is the case
+for TEA, RAIDEN and SPECK) or are scarce (in the case of XTEA). For TEA specifically, in [16, Sect. 1]
+the authors admit that it is difficult to find a good differential characteristic.
+2
+
+For 11 and 14 bits 50 experiments were performed, while for 16 bits 20 experiments were performed. In each experiment a
+new fixed key was chosen uniformly at random. More details are provided in Appendix A.2.
+
+By applying our tool, we are able to find multiple differential characteristics for TEA. They cover
+between 15 and 18 rounds, depending on the value of the key and have probabilities ≈ 2−60 . The 18 round
+trail, in particular, has probability ≈ 2−63 for approx. 2116 (≈ 0.1%) of all keys. To put those results
+in perspective, we note that the best differential attack on TEA covers 17 rounds and is based on an
+impossible differential [8] while the best attack overall applies zero-correlation cryptanalysis and is on 23
+rounds but requires the full codebook [6]. For XTEA, we confirm the best previously known full differential
+trail based on XOR differences [16], but this time it was found in a fully automatic way.
+For RAIDEN an iterative characteristic on 3 rounds with probability 2−4 is reported. When iterated
+over all 32 rounds a characteristic with probability 2−42 on the full cipher is constructed that can be used
+to fully break RAIDEN using standard differential cryptanalysis. This is the first analysis of the cipher in
+a non-related key setting.
+We also present results on versions of the recently proposed block cipher SPECK [3] with word sizes 16,
+24 and 32 bits resp. SPECK32, SPECK48 and SPECK64. For SPECK64 the best trail found by the tool
+covers half of the total number of rounds (13 out of 26) and has probability 2−58 . The best found trails for
+16 and 24 bits cover resp. 9 and 10 rounds out of 22/23 with probabilities resp. 2−31 and 2−45 .
+Table 1. Maximum number of rounds covered by single (truncated) differential trails used in existing differential attacks on
+TEA, XTEA, SPECK and RAIDEN compared to the best found trails reported in this paper.
+Cipher
+
+Type of
+Trail
+
+#Rounds
+Covered
+
+#Rounds
+Total
+
+Ref.
+
+TEA
+
+Trunc.
+Trunc.
+Trunc.
+Full
+
+5
+7
+8
+18
+
+64
+
+[26]
+[8]
+[16, 6]
+Sect. 8
+
+XTEA
+
+Trunc.
+Trunc.
+Trunc.
+Full
+Full
+
+6
+7
+8
+14
+14
+
+64
+
+[26]
+[8]
+[16, 6]
+[16]
+Sect. 8
+
+SPECK32
+SPECK48
+SPECK64
+
+Full
+Full
+Full
+
+9
+10
+13
+
+22
+22/23
+26/27
+
+Sect. 8
+Sect. 8
+Sect. 8
+
+RAIDEN
+
+Full
+
+32
+
+32
+
+Sect. 8
+
+In Table 1 we provide a comparison between the number of rounds covered by single (truncated)
+differential trails used in existing attacks (where applicable) on TEA, XTEA, SPECK and RAIDEN to the
+number of rounds covered by the trails found with the tool.
+An additional contribution is that the paper is the first to report closed formulas for computing the
+exact additive differential probabilities of the left and right shift operations. These formulas are derived in a
+similar way as the ones for computing the DP of left and right rotation reported by Daum [11, Sect. 4.1.3].
+Note that Fouque et al. [14] have previously analyzed the propagation of additive differences through the
+shift operations, but not the corresponding differential probabilities.
+The outline is as follows. In Sect. 4 we define partial difference distribution tables (pDDT) and present
+an efficient method for their computation. Our extension of Matsui’s algorithm using pDDT, referred to
+as threshold search, is presented in Sect. 5. It is followed by the description of a general methodology for
+
+automatic search for differential trails in ARX ciphers with Feistel structure in Sect. 6. A brief description
+of block ciphers TEA, XTEA, SPECK and RAIDEN is given in Sect. 7. In Sect. 8 we apply our methods
+to search for differential trails in the studied ciphers and we show the most relevant experimental results.
+Finally, in Sect. 9 are discussed general problems and limitations arising when studying differential trails in
+ARX ciphers. Sect. 10 concludes the paper. Proofs of all theorems and propositions and more experimental
+results are provided in Appendix.
+A few words on notation: with x[i] is denoted the i-th bit of x; x[i : j] represents the sequence of bits
+x[j], x[j + 1], . . . , x[i] : j ≤ i where x[0] is the least-significant bit (LSB); xn denotes the n-bit word x
+(equivalent to x[n − 1 : 0], but more concise); #A denotes the number of elements in the set A and x|y is
+the concatenation of the bit strings x and y.
+
+2
+
+The Differential Probabilities of ADD and XOR
+
+In this section we recall the definitions of the differential probabilities of the operations XOR and modular
+addition. Before we begin – a brief remark on notation: in the same way as XOR is used to denote both the
+XOR operation and an XOR difference, we use ADD to denote both the modular addition operation and an
+additive difference.
+Definition 1. Let α, β and γ be fixed n-bit XOR differences. The XOR differential probability (DP) of addition
+modulo 2n (xdp+ ) is the probability with which α and β propagate to γ through the ADD operation, computed
+over all pairs of n-bit inputs (x, y):
+xdp+ (α, β → γ) = 2−2n · #{(x, y) : ((x ⊕ α) + (y ⊕ β)) ⊕ (x + y) = γ} .
+
+(1)
+
+The dual of xdp+ is the probability adp⊕ and is defined analogously:
+Definition 2. Let α, β and γ be fixed n-bit ADD differences. The additive DP of XOR (adp⊕ ) is the probability
+with which α and β propagate to γ through the XOR operation, computed over all pairs of n-bit inputs (x, y):
+adp⊕ (α, β → γ) = 2−2n · #{(x, y) : ((x + α) ⊕ (y + β)) − (x + y) = γ} .
+
+(2)
+
+The probabilities xdp+ and adp⊕ have been studied in [21] and [22] respectively, where methods for
+their efficient computation have been proposed. In [21] is also described an efficient algorithm for the
+computation of xdp+ maximized over all output differences: maxγ xdp+ (α, β → γ). In [27] the methods for
+the computation of xdp+ and adp⊕ are further generalized using the concept of S-functions. Finally, in [39,
+Appendix C, Algorithm 1] a general algorithm for computing the maximum probability output difference
+for certain types of differences and operations is described. It is applicable to both maxγ xdp+ (α, β → γ)
+and maxγ adp⊕ (α, β → γ).
+
+3
+
+The Additive DP of Left and Right Shift
+
+Definition 3. For fixed input and output ADD differences resp. α and β, the additive differential probability
+of the operation right bit shift (RSH) by r positions is defined over all n-bit (n ≥ r) inputs x as:
+adp≫r (α → β) = 2−n · #{x : ((x + α) ≫ r) − (x ≫ r) = β} .
+
+(3)
+
+Analogously, the additive differential probability of the operation left bit shift (LSH) by r positions is
+defined as in (3) after replacing ≫ r with ≪ r.
+
+Theorem 1. The LSH operation is linear with respect to ADD differences i.e. ((x + α) ≪ r) − (x ≪ r) =
+(α ≪ r), where x, α and r are as in Definition 3. It follows that
+(
+1 , if (β = α ≪ r) ,
+≪r
+adp (α → β) =
+.
+(4)
+0 , otherwise .
+Proof. Appendix E.2.
+In contrast to LSH, the RSH operation is not linear w.r.t. ADD differences. The following theorem provides
+expressions for the computation of adp≫r .
+Theorem 2. Let α be a fixed n-bit input ADD difference to an RSH operation with shift constant r ≤ n.
+Then there are exactly four possibilities for the output difference β. The four differences together with their
+corresponding probabilities computed over all n-bit inputs are:
+
+
+2−n (2n−r − αL )(2r − αR ) , β = (α ≫ r) ,
+
+
+
+2−n α (2r − α ) ,
+β = (α ≫ r) − 2n−r ,
+L
+R
+,
+(5)
+adp≫r (α → β) =
+
+2−n αR (2n−r − αL − 1) ,
+β = (α ≫ r) + 1 ,
+
+
+
+2−n (α + 1)α ,
+β = (α ≫ r) − 2n−r + 1 .
+L
+R
+where αL and αR denote respectively the (n − r) most-significant (MS) bits and the r least-significant (LS)
+bits of α so that: α = αL 2r +αR and additions and subtractions are performed modulo 2n . If α : β = βi = βj
+for some 0 ≤ i 6= j < 4 then adp≫r (α → β) = adp≫r (α → βi ) + adp≫r (α → βj ).
+Proof. Appendix E.3.
+
+4
+
+Partial Difference Distribution Tables
+
+In this section as well as in the rest of the paper with xdp+ and adp⊕ are denoted respectively the XOR
+differential probability (DP) of addition modulo 2n and the additive DP of XOR. Similarly, the additive
+differential probability of the operations right bit shift (RSH) and left bit shift (LSH) are denoted resp. with
+adp≫r and adp≪r . Due to space constrains the formal definition and details on the efficient computation
+of those probabilities are given in Appendix 2 and Appendix 3.
+Definition 4. A partial difference distribution table (pDDT) D for the ADD (resp. XOR) operation
+is a DDT that contains all XOR (resp. ADD) differentials (α, β → γ) whose probabilities are larger than or
+equal to a pre-defined threshold pthres :
+(α, β, γ) ∈ D ⇐⇒ DP(α, β → γ) ≥ pthres .
+
+(6)
+
+If a DDT contains only a fraction of all differentials that have probability above a pre-defined threshold, it
+is an incomplete pDDT.
+The following proposition is crucial for the efficient computation of a pDDT:
+Proposition 1. The DP of ADD and XOR (resp. xdp+ and adp⊕ ) are monotonously decreasing with the
+word size n of the differences α, β, γ:
+pn ≤ . . . ≤ pk ≤ pk−1 ≤ . . . ≤ p1 ≤ p0 ,
+
+(7)
+
+where pk = DP(αk , βk → γk ), n ≥ k ≥ 1, p0 = 1, and xk denotes the k LSB-s of the difference x i.e.
+xk = x[k − 1 : 0].
+
+Proof. Appendix E.1.
+For xdp+ , the proposition follows from the following result by Lipmaa et al. [21]: xdp+ (α, β → γ) =
+2− i=0 ¬eq(α[i],β[i],γ[i]) , where eq(α[i], β[i], γ[i]) = 1 ⇐⇒ α[i] = β[i] = γ[i]. Proposition 1 is also true for
+adp⊕ .
+Due to Proposition 1 a recursive procedure for computing a pDDT for a given probability threshold
+pthres can be defined as follows. Starting at the least-significant (LS) bit position k = 0 recursively assign
+values to bits α[k], β[k] and γ[k]. At every bit position k : n > k ≥ 0 check if the probability of the
+partially constructed (k + 1)-bit differential is still bigger than the threshold i.e. check if pk = DP(αk , βk →
+γk ) ≥ pthres holds. If yes, then proceed to the next bit position, otherwise backtrack and assign other
+values to (α[k], β[k], γ[k]). This process is repeated recursively until k = n, at which point the differential
+(αn , βn → γn ) is added to the pDDT together with its probability pn . A pseudo-code of the described
+procedure is listed in Algorithm 1. The initial values are: k = 0, p0 = 1 and α0 = β0 = γ0 = ∅.
+Pn−2
+
+Algorithm 1 Computation of a pDDT for ADD and XOR.
+Input: n, pthres , k, pk , αk , βk , γk .
+Output: pDDT D: (α, β, γ) ∈ D : DP(α, β → γ) ≥ pthres .
+1: procedure compute pddt(n, pthres , k, pk , αk , βk , γk ) do
+2:
+if n = k then
+3:
+Add (α, β, γ) ← (αk , βk , γk ) to D
+4:
+return
+5:
+for x, y, z ∈ {0, 1} do
+6:
+αk+1 ← x|αk , βk+1 ← y|βk , γk+1 ← z|γk .
+7:
+pk+1 = DP(αk+1 , βk+1 → γk+1 )
+8:
+if pk+1 ≥ pthres then
+9:
+compute pddt(n, pthres , k + 1, pk+1 , αk+1 , βk+1 , γk+1 )
+
+The correctness of Algorithm 1 follows directly from Proposition 1. After successful termination the
+computed pDDT contains all differentials with probability equal to or larger than the threshold. The
+complexity of Algorithm 1 depends on the value of the threshold pthres . Some timings for both ADD and
+XOR differences for different thresholds are provided in Table 2. As can be seen from the data in the table
+it is infeasible to compute pDDT-s for XOR differences for values of the threshold pthres ≤ 0.01 = 2−6.64 ,
+while for ADD differences this is still possible, but requires significant time (more than 17 hours).
+Table 2. Timings on the computation of pDDT for ADD and XOR on 32-bit words using Algorithm 1. Target machine: Intel R
+CoreTM i7-2600, 3.40GHz CPU, 8GB RAM.
+ADD
+
+XOR
+
+pthres
+
+#elements in pDDT
+
+Time
+
+#elements in pDDT
+
+Time
+
+0.1
+0.07
+0.05
+0.01
+
+252 940
+361 420
+3 038 668
+2 715 532 204
+
+36 sec.
+37 sec.
+5.35 min.
+17.46 hours
+
+3 951 388
+3 951 388
+167 065 948
+≥ 72 589 325 174
+
+1.23 min.
+2.29 min.
+44.36 min.
+≥ 29 days
+
+5
+
+Threshold Search
+
+In his paper from 1994 [23] Matsui proposed a practical algorithm for searching for the best differential
+trail (and linear approximation) for the DES block cipher. The algorithm performs a recursive search
+for differential trails over a given number of rounds n ≥ 1. From knowledge of the best probabilities
+B1 , B2 , . . . , Bn−1 for the first (n − 1) rounds and an initial estimate B n for the probability for n rounds
+it derives the best probability Bn for n rounds. For the estimate the following must hold: B n ≤ Bn . As
+already noted, Matsui’s algorithm is applicable to block ciphers that have S-boxes. In this section we extend
+it to the case of ciphers without S-boxes such as ARX by applying the concept of pDDT. We describe the
+extended algorithm next. Its description in pseudo-code is listed in Algorithm 2.
+In addition to Matsui’s notation for the probability of the best n-round trail Bn and of its estimate
+bn to denote the probability of the best found trail for n rounds: B n ≤ B
+bn ≤ Bn . Given
+B n we introduce B
+a pDDT H of size m, an estimation for the best n-round probability B n with its corresponding n-round
+b1 , B
+b2 , . . . , B
+bn−1 of the best found trails for the first n − 1 rounds,
+differential trail T and the probabilities B
+bn ≥ B n .
+Algorithm 2 outputs an n-round trail Tb that has probability B
+Similarly to Matsui’s algorithm, Algorithm 2 operates by recursively extending a trail for i rounds to
+(i + 1) rounds, beginning with i = 1 and terminating at i = n. The recursion at level i continues to level
+(i+1) only if the probability of the constructed i-round trail multiplied by the probability of the best found
+bn−i ≥ B n . For i = n the last equation is equivalent
+trail for (n − i) rounds is at least B n i.e. if p1 p2 . . . pi B
+bn ≥ B n . If the latter holds, the initial estimate is updated with the new: B n ← B
+bn and
+to: p1 p2 . . . pn = B
+b
+the corresponding trail is also updated accordingly: T n ← Tn .
+During the search process Algorithm 2 explores multiple differential trails. It is important to stress that
+the differentials that compose those trails are not restricted to the entries from the initial pDDT H. The
+latter represent only the starting point of the first two rounds of the search, as in those rounds both the
+input and the output differences of the round transformation can be freely chosen (due to the specifics of
+the Feistel structure). From the third round onwards, excluding the last round, beside the entries in H the
+algorithm explores also an additional set of low-probability differentials stored in a temporary pDDT C
+and sharing the same input difference.
+The table C is computed on demand for each input difference to an intermediate round (any round
+other than the first two and the last) encountered during the search. All entries in C additionally satisfy
+the following two conditions: (1) Their probabilities are such that they can still improve the probability
+of the best found trail for the given number of rounds i.e. if (αr , βr , pr ) is an entry in C for round r, then
+bn−r ); (2) Their structure is such that they guarantee that the input difference for
+pr ≥ B n /(p1 p2 · · · pr−1 B
+the next round αr+1 = αr−1 + βr will have a matching entry in H. While the need for condition (1) is
+self-evident, condition (2) is necessary in order to prevent the exploding of the size of C while at the same
+time keeping the probability of the resulting trail high. The meaning of the tables H and C is further
+clarified with the following analogy.
+Example 1 (The Highways and Country Roads Analogy). The two tables H and C employed in the search
+performed by Algorithm 2 can be thought of as lists of highways and country roads on a map. The
+differentials contained in H have high probabilities w.r.t. to the fixed probability threshold and correspond
+therefore to fast roads such as highways. Analogously, the differentials in C have low probabilities and can
+be seen as slow roads or country roads. To continue this analogy, the problem of finding a high probability
+differential trail for n rounds can be seen as a problem of finding a fast route between points 1 and n on the
+map. Clearly such a route must be composed of as many highways as possible. Condition (2), mentioned
+above, essentially guarantees that any country road that we may take in our search for a fast route will
+
+bring us back on a highway. Note that it is possible that the fastest route contains two or more country
+roads in sequence. While such a case will be missed by Algorithm 2, it may be accounted for by lowering
+the initial probability threshold.
+Algorithm 2 terminates when the initial estimate B n can not be further improved. The complexity of Alb1 , B
+b2 , . . . , B
+bn−1
+gorithm 2 depends on the following factors: (1) the closeness of the best found probabilities B
+for the first (n − 1) rounds to the actual best probabilities, (2) the tightness of the initial estimate B n and
+(3) the number of elements m in H. The latter is determined by the probability threshold used to compute
+H.
+
+Algorithm 2 Matsui Search for Differential Trails Using pDDT (Threshold Search).
+b = (B
+b 1, B
+b 2, . . . , B
+b n−1 ): probs. of best found trails for the first
+Input: n: number of rounds; r: current round; H: pDDT; B
+(n−1) rounds; Bn ≤ Bn : initial estimate; T = (T1 , . . . , Tn ): trail for n rounds with prob. B n ; pthres : probability threshold.
+b n, T
+b = (T
+b 1, . . . , T
+b n ): trail for n rounds with prob. B
+bn : B n ≤ B
+bn ≤ Bn .
+Output: B
+b
+1: procedure threshold search(n, r, H, B, B n , T ) do
+// Process rounds 1 and 2
+2:
+3:
+if ((r = 1) ∨ (r = 2)) ∧ (r 6= n) then
+4:
+for all (α, β, p) in H do
+bn−r
+bn ← p1 · · · pr B
+5:
+pr ← p, B
+b
+6:
+if Bn ≥ B n then
+7:
+αr ← α, βr ← β, add Tbr ← (αr , βr , pr ) to Tb
+b B n , Tb)
+8:
+call threshold search(n, r + 1, H, B,
+// Process intermediate rounds
+9:
+10:
+if (r > 2) ∧ (r 6= n) then
+bn−r )
+11:
+αr ← (αr−2 + βr−1 ); pr,min ← B n /(p1 p2 · · · pr−1 B
+12:
+C ← ∅ // Initialize the country roads table
+13:
+for all βr : (pr (αr → βr ) ≥ pr,min ) ∧ ((αr−1 + βr ) = γ ∈ H) do
+14:
+add (αr , βr , pr ) to C // Update country roads table
+15:
+if C = ∅ then
+16:
+(βr , pr ) ← pr = maxβ p(αr → β); add (αr , βr , pr ) to C
+17:
+for all (α, β, p) : α = αr in H and all (α, β, p) ∈ C do
+bn−r
+bn ← p1 p2 . . . pr B
+18:
+pr ← p, B
+bn ≥ B n then
+19:
+if B
+20:
+βr ← β, add Tbr ← (αr , βr , pr ) to Tb
+b B n , Tb)
+21:
+call threshold search(n, r + 1, H, B,
+// Process last round
+22:
+23:
+if (r = n) then
+24:
+αr ← (αr−2 + βr−1 )
+25:
+if (αr in H) then
+26:
+(βr , pr ) ← pr = maxβ∈H p(αr → β) // Select the max. from the highway table
+27:
+else
+28:
+(βr , pr ) ← pr = maxβ p(αr → β) // Compute the max.
+29:
+if pr ≥ pthres then
+30:
+add (αr , βr , pr ) to H
+bn ← p1 p2 . . . pn
+31:
+pn ← pr , B
+bn ≥ B n then
+32:
+if B
+33:
+αn ← αr , βn ← β, add Tbn ← (αn , βn , pn ) to Tb
+bn , T ← Tb
+34:
+Bn ← B
+b
+b
+35:
+Bn ← B n , T ← T // Update the target bound and the best found trail
+bn , Tb
+36:
+return B
+
+6
+
+General Methodology for Automatic Search for Differential Trails in ARX
+
+We describe a general methodology for the automatic search for differential trails in ARX algorithms. In
+our analysis we restrict ourselves to Feistel ciphers, although the proposed method is applicable to other
+ARX designs as well.
+Let F be the round function (the F-function) of a Feistel cipher E, designed by combining a number of
+ARX operations, such as XOR, ADD, bit shift and bit rotation. To search for differential trails for multiple
+rounds of E perform the following steps:
+1. Derive an expression for computing the differential probability (DP) of F for given input and output
+difference. The computation may be an approximation obtained as the multiplication of the DP of the
+components of F .
+2. Compute a pDDT for F . It can be an incomplete pDDT obtained e.g. by merging the separate pDDT-s
+of the different components of F .
+3. Execute the threshold search algorithm described in Sect.5 with the (incomplete) pDDT computed in
+Step. 2 as input.
+In the following sections we apply the proposed methodology to automatically search for differential
+trails in several ARX-based block ciphers.
+
+7
+
+Description of TEA, XTEA, SPECK and RAIDEN
+
+The Tiny Encryption Algorithm (TEA) is a block cipher designed by Wheeler and Needham and presented
+at FSE 1994 [40]. It has a Feistel structure composed of 64 rounds. Each round operates on 64-bit blocks
+divided into two 32-bit words Li , Ri : 0 ≤ i ≤ 64, so that P = L0 |R0 is the plaintext and C = L64 |R64
+is the ciphertext. TEA has 128-bit key K composed of four 32-bit words: K = K3 |K2 |K1 |K0 . The key
+schedule is such that the same two key words are used at every second round i.e. K0 , K1 are used in all odd
+rounds and K2 , K3 are used in all even rounds. Additionally, thirty-two 32-bit constants δr : 1 ≤ r < 32
+(the δ constants) are defined. A different δ constant is used at every second round. The round function F
+of TEA takes as input a 32-bit value x, two 32-bit key words k0 , k1 and a round constant δ and produces
+a 32-bit output F (x). For fixed δ, k0 and k1 , F is defined as:
+(δ, k0 , k1 ) : F (x) = ((x ≪ 4) + k0 ) ⊕ (x + δ) ⊕ ((x ≫ 5) + k1 ) .
+
+(8)
+
+For fixed round keys Kj , Kj+1 : j ∈ {0, 2} and round constant δr , round i of TEA (1 ≤ i < 64) is described
+as: Li+1 = Ri , Ri+1 = Li + F (Ri ).
+XTEA is an extended version of TEA proposed in [30] by the same designers. It was designed in order
+to address two weaknesses of TEA pointed by Kelsey et al. [18]: (1) a related-key attack on the full TEA
+and (2) the fact that the effective key size of TEA is 126, rather than 128 bits. The structure of XTEA is
+very similar to the one of TEA: 64-round Feistel network operating on 64-bit blocks using a 128-bit key.
+The main difference is in the key schedule: at every round XTEA uses one rather than two 32-bit key
+words from the original key according to a new non-periodic key schedule. Additionally, the number of δ
+constants is increased from 32 to 64 and thus a different constant is used at every round. The F-function
+of XTEA is also slightly modified and for a fixed round key k and round constant δ is defined as:
+(δ, k) : F (x) = (δ + k) ⊕ (x + ((x ≪ 4) ⊕ (x ≫ 5))) .
+
+(9)
+
+k0
+
+k
+≪4
+
+δ
+
+δ
+x
+
+F (x)
+
+≪4
+x
+
+F (x)
+≫5
+
+≫5
+k1
+Fig. 1. The F-functions of TEA (left) and XTEA (right).
+
+The F-functions of TEA and XTEA are depicted in Fig. 1.
+In [32] Polimón et al. have proposed a variant of TEA called RAIDEN. It has been designed by applying
+genetic programming algorithms to automatically evolve a highly non-linear round function. The latter is
+composed of the same operations as TEA (arranged in different order) but is more efficient and has better
+mixing properties as measured by its avalanche effect. As a result RAIDEN is claimed to be competitive
+to TEA in terms of security. It has 32 rounds and its round function is:
+Fk (x) = ((k + x) ≪ 9) ⊕ (k − x) ⊕ ((k + x) ≫ 14) .
+
+(10)
+
+The key k in (10) is updated every second round according to a new key schedule and therefore every two
+consecutive rounds use the same key. The main differences with TEA are that in (10) the round constant
+δ is discarded, the shift constants are changed and the shift operations are moved after the key addition
+(see Fig. 2, left). For more details on the RAIDEN cipher we refer the reader to [32]. The only previous
+security result for RAIDEN is a related-key attack reported in [17].
+Most recently, in June 2013, a new family of ARX-based lightweight block ciphers SPECK [3] was
+proposed by researchers from the National Security Agency (NSA) of the USA. Its design bears strong
+similarity to Threefish – the block cipher used in the hash function Skein [13]. The round function of
+SPECK under a fixed round key k is defined on inputs x and y as
+Fk (x, y) = (fk (x, y), fk (x, y) ⊕ (y ≪ t2 )) ,
+
+(11)
+
+where the function fk (·, ·) is defined as fk (x, y) = ((x ≫ t1 ) + y) ⊕ k. The rotation constants t1 and t2
+are equal to 7 and 2 resp. for word size n = 16 bits and to 8 and 3 for all other word sizes: 24, 32, 48 and
+64. Note that although SPECK is not a Feistel cipher itself, it can be represented as a composition of two
+Feistel maps as described in [3]. At the time of this writing we are not aware of any published results on
+the security analysis of SPECK. The round functions of RAIDEN and SPECK are shown in Fig. 2.
+In Table 1 are listed the maximum number of rounds covered by differential trail/s used in published
+differential attacks on TEA, XTEA, RAIDEN and SPECK. These results are compared with the best trails
+found using our method.
+
+8
+
+Automatic Search for Differential Trails
+
+We apply the steps from Sect. 6 to search for differential trails for multiple rounds of the block ciphers
+described in Sect. 7. We analyze TEA, RAIDEN and SPECK w.r.t. ADD differences and XTEA w.r.t. XOR
+
+y
+
+x
+k
+≫ 7/8
+≪9
+k
+x
+
+F (x)
+
+k
+
+≪ 2/3
+
+≫ 14
+k
+Fig. 2. The F-functions of RAIDEN (left) and SPECK (right).
+
+differences. Additive differences are more appropriate for the differential analysis of the former (as opposed
+to XOR differences) due to two reasons. First, the round keys and round constants are ADD-ed. Second, the
+number of ADD vs. XOR operations in one round is larger and therefore more components are linear w.r.t.
+ADD than to XOR. Similarly, XTEA is more suitably analyzed with XOR differences since the round keys are
+XOR-ed.
+In Table 3 (left) is shown the best found ADD differential trail for 18 rounds of TEA with probability
+2−62.6 and on the right side is shown the best found XOR trail for 14 rounds of XTEA with probability
+2−60.76 confirming a previous result by Hong et al. [16]. Note that while the rule that a country road must
+be followed by a highway is strictly respected in the trail for TEA, this is not the case for XTEA. For
+example transitions 6 and 7 in the trail for XTEA have prob. resp. 2−5.35 and 2−5.36 both of which are
+below the threshold pthres = 2−4.32 . In those cases no country road that leads back on a highway was found
+and so the shortest country road was taken (resp. the maximum probability transition for the given input
+difference was computed: lines 15–16 of Algorithm 2).
+The top line of Table 3 shows the fixed values of the keys for which the two trails were found and
+for which their probabilities were experimentally verified. The reason to perform the search for a fixed
+key rather than averaged over all keys is the fact that for TEA the assumption of independent round
+keys, commonly made in differential cryptanalysis, does not hold. This is a consequence of the simple key
+schedule of the cipher according to which the same round keys are re-used every second round. Thus a trail
+that has very good probability computed as an average over all keys, may in fact have zero probability for
+many or even all keys. This problem is further discussed in Sect. 9.
+The mentioned effect is not so strong for XTEA due to the slightly more complex key schedule of the
+latter. In XTEA, the round keys are re-used according to a non-periodic schedule and, more importantly,
+a round constant that is different for every round, is added to the key before it is applied to the state (see
+Fig. 1). In this way the round keys are randomized in every round and thus the traditional differential
+analysis with probabilities computed as an average over all keys is more appropriate for XTEA.
+A major consequence of the key dependency effect discussed above is that while the 14 round trail for
+XTEA from Table 3 can directly be used in a key-recovery attack, as has indeed been already done in [16],
+it is not straightforward to do so for the 18 round trail for TEA. The reason is that this trail is valid only
+for a fraction of all keys. We have estimated the size of this fraction to be approx. 0.098% ≈ 0.1%, which
+is equal to 2116 weak keys (note that the effective key size of TEA is 126 bits [18]). The size of the weak
+key class was computed by observing that only the 9 LS bits of K2 and the 3 LS bits of K3 influence the
+
+Table 3. Differential trails for TEA and XTEA. The leftmost key word is K0 , the next is K1 , etc. #hways lists the number
+of elements in the pDDT (the highways).
+TEA
+key
+
+P
+
+11CAD84E 96168E6B 704A8B1C 57BBE5D3
+
+r
+
+β
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+
+F
+0
+F
+0
+FFFFFFF1
+0
+FFFFFFF1
+2
+F
+0
+FFFFFFF1
+FFFFFFFE
+F
+0
+11
+0
+FFFFFFEF
+0
+
+r log2 pr
+
+log2 pthres
+#hways
+Time:
+
+XTEA
+
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+
+E15C838 DC8DBE76 B3BB0110 FFBB0440
+
+α
+
+log2 p
+
+β
+
+FFFFFFFF
+0
+FFFFFFFF
+F
+FFFFFFFF
+0
+FFFFFFFF
+FFFFFFF1
+1
+0
+1
+FFFFFFF1
+FFFFFFFF
+0
+FFFFFFFF
+11
+FFFFFFFF
+0
+
+−3.62
+−0.00
+−2.87
+−7.90
+−3.60
+−0.00
+−2.78
+−8.66
+−3.57
+−0.00
+−2.87
+−7.90
+−3.59
+−0.00
+−2.79
+−8.83
+−3.61
+−0.00
+
+0
+80402010
+80402010
+0
+80402010
+80402010
+0
+80402010
+80402010
+0
+80402010
+80402010
+0
+80402010
+
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+
+α
+
+log2 p
+
+80402010
+0
+80402010
+80402010
+0
+80402010
+80402010
+0
+80402010
+80402010
+0
+80402010
+80402010
+0
+
+−4.61
+−3.01
+−5.48
+−3.30
+−3.01
+−5.35
+−5.36
+−2.99
+−5.45
+−5.42
+−2.99
+−5.38
+−5.40
+−2.99
+
+−62.6
+
+−60.76
+
+−4.32
+68
+21.36 min.
+
+−4.32
+474
+315 min.
+
+probability of the trail. By fixing those 12 bits to the corresponding bits of the key values in Table 3 (resp.
+0x11C and 0x3), we have experimentally verified that for any assignment of the remaning 116 bits of the
+key the 18 round trail has probability ≈ 2−63 . Note that other assignments of the relevant 12 bits may also
+be possible and therefore the size of the weak key class may be actually bigger.
+While the fixed-key trails for TEA found by the threshold search algorithm may have limited use for an
+attacker due to the reasons discussed above, they already provide very useful information for a designer.
+By running Algorithm 2 for many fixed keys we saw that the best found trails typically cover between 15
+and 17 rounds and in more rare cases 18 rounds. If this information has been available to the designers of
+TEA at the time of the design, they may have considered reducing the total number of rounds from 64 to
+32 or less. Similarly, the threshold search algorithm can be used in order to estimate the security of new
+ARX designs and to help to select the appropriate number of rounds accordingly.
+Comparisons of the trails found with the tool to the actual best trails on TEA with reduced word size
+of 11 and 16 bits are shown in Appendix A.2.
+After applying the threshold search to RAIDEN the best characteristic that was found is iterative with
+period 3 with probability 2−4 (shown in Table 4). By iterating it for 32 rounds we construct a charactersistic
+with probability 2−42 . The latter can be used in a standard differential attack on the full cipher under a
+non related-key setting. Note that in contrast to TEA, the probabilities of the reported differentials for
+
+RAIDEN are independent of the round key due to the fact that the shift operations are moved after the
+key addition.
+
+Table 4. Three round iterative characteristic for RAIDEN beginning at round i.
+
+P
+
+r
+
+β
+
+i
+i+1
+i+2
+...
+
+0
+7FFFFF00
+80000100
+...
+
+←
+←
+←
+←
+
+α
+
+log2 p
+
+0
+7FFFFF00
+7FFFFF00
+0
+
+−0
+−2
+−2
+−0
+−4
+
+r log2 pr
+
+We applied the threshold search algorithm using XOR differences to three instances of block cipher
+SPECK with 16, 24 and 32 bit word sizes respectively. The best trail found for the 32-bit version covers
+half of the rounds (13 out of 26) and has probability 2−58 while the best found trails for 16 and 24 bits
+cover resp. 9 and 10 rounds out of 22/23 and have probabilities resp. 2−31 and 2−45 . All trails are shown
+in Table 5.
+
+Table 5. Differential trails for Speck32, Speck48 and Speck64. #hways lists the number of elements in the pDDT (the
+highways).
+Speck32
+
+P
+
+Speck48
+
+Speck64
+
+r
+
+∆L
+
+∆R
+
+log2 p
+
+∆L
+
+∆R
+
+log2 p
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+
+A60
+211
+2800
+40
+8000
+8100
+8000
+850A
+802A
+A8
+
+4205
+A04
+10
+0
+8000
+8102
+840A
+9520
+D4A8
+520B
+
+−0
+−5
+−4
+−2
+−0
+−1
+−2
+−4
+−6
+−7
+
+88A
+424000
+202
+10
+80
+480
+802080
+A480
+888020
+240480
+800082
+
+484008
+4042
+20012
+100080
+800480
+2084
+8124A0
+98184
+C48C00
+6486
+8324B2
+
+−0
+−5
+−4
+−3
+−2
+−2
+−3
+−6
+−7
+−7
+−6
+
+r log2 pr
+
+log2 pthres
+#hways
+Time:
+
+∆L
+
+∆R
+
+802490 10800004
+80808020 4808000
+24000080 40080
+80200080 80000480
+802480 800084
+808080A0 84808480
+24000400 42004
+202000
+12020
+10000
+80100
+80000
+480800
+480000 2084000
+2080800 124A0800
+12480008 80184008
+880A0808 88C8084C
+
+log2 p
+−0
+−5
+−5
+−3
+−4
+−5
+−6
+−4
+−3
+−2
+−3
+−4
+−7
+−7
+
+−31
+
+−45
+
+−58
+
+−5.00
+230
+≈ 240 min.
+
+−5.00
+230
+≈ 400 min.
+
+−5.00
+230
+≈ 500 min.
+
+9
+
+Difficulties, Limitations and Common Problems
+
+In this section we discuss the common problems and difficulties encountered when studying differential
+trails in ARX ciphers. This discussion is also naturally related to the limitations of the methodology
+proposed in Sect. 6. Although below we often use the TEA block cipher as an example, our observations
+are general and are therefore applicable to a broader class of ARX algorithms.
+9.1
+
+Accuracy of the Approximation of the DP of F
+
+The first step in the methodology presented in Sect. 6 is to derive an expression for computing the DP of
+the F-function of the target cipher. Since it is often difficult to efficiently compute the exact probability,
+this expression would usually be an approximation obtained as the multiplication of the DP of the separate
+components of F. The probability computed in this way will often deviate from the actual value due to the
+dependency between the inputs of the different components. Indeed, this phenomenon is well-known and
+has been studied before e.g. in [38].
+To illustrate the above effect, consider the three inputs to the XOR operation in the TEA F-function.
+These are (k0 + (x ≪ 4)), (δ + x), and (k1 + (x ≫ 5)) (see Fig. 1) and since they are obtained from the
+same initial input x, they are clearly not independent. Yet, when we compute the DP of the XOR with three
+inputs (adp3⊕ ) we implicitly assume independence of the inputs. Consequently the resulting approximation
+will not be an accurate estimation of the DP of F (eadpF ) for all input and output differences α, β. More
+deatils on this as well as on the computation of adp3⊕ and eadpF are provided in Appendix B.
+The mentioned problem can be addressed with experimental re-adjustment of the probability by evaluating the F-function over a number of random chosen input pairs satisfying the input difference.
+9.2
+
+Dependency of the DP of F on the Round Keys
+
+Another difficulty arises from the fact that in some cases the DP of the F-function is dependent on the value
+of the round key(s). Ciphers for which this is the case are not key-alternating ciphers (cf. [10, Definition 2])
+and are typically harder to analyze.
+As noted in [9, § 5.7] an important advantage of key-alternating ciphers is that the study of their
+differential and linear trails can be conducted independently of the value of the round key. In contrast, for
+a non-key-alternating cipher a trail that has high probability for one key may have a significantly lower
+(even zero) probability for another. Such ciphers violate the hypothesis of stochastic equivalence, according
+to which: for virtually all values of the cipher key, the probability of a differential trail can be approximated
+by the expected value of the probability of the differential trail, averaged over all possible values of the cipher
+key [9, § 8.7.2].
+The block cipher TEA is an example of a non-key-alternating cipher. The DP of its F-function is keydependent w.r.t. both XOR and ADD differences. This behavior is particularly counter-intuitive in the case
+of ADD differences, in view of the fact that the round keys are ADD-ed (rather than XOR-ed) to the state and
+hence one wouldn’t expect them to influence the additive DP of F. In practice it does and the explanation
+is provided below.
+In a differential cryptanalysis setting, the LSH (resp. RSH) operation in TEA reduces the number of
+possible input pairs to the modular addition with key k0 (resp. key k1 ) from 2n to 2n−4 (resp. 2n−5 ). When
+computing the DP of the subsequent XOR with three inputs (adp3⊕ ), the number of right pairs for two of
+the inputs is counted over the reduced sets while the inputs still have size n bits due to the addition with
+the n-bit key word. We elaborate further on this below.
+
+Consider the trivial case in which the left (resp. right) bit shift operation is omitted. Then the addition
+of key k0 (resp. k1 ) to the set of n-bit inputs results in an output set of n-bit elements that is a permuted
+version of the input set. The additive DP of the XOR operation in this case will be computed over the same
+set of 2n pairs irrespective of the actual value of the key.
+When a bit shift by 4 (resp. 5) positions is applied on the input to the key addition, the latter acts
+not as a permutation but rather as a re-mapping of one set of L (n − 4)-bit (resp. (n − 5)-bit) elements to
+another set of L n-bit elements, where L ≤ 2n−4 (resp. L ≤ 2n−5 ). The nature of this re-mapping depends
+on the actual value of the key. Consequently, the probability of the XOR operation with 3 inputs will be
+computed over different reduced sets of 2n−4 (resp. 2n−5 ) elements depending on the value of the key k0
+(resp. k1 ). This effect is further illustrated with an example in Appendix D.2
+Note that the discussed key dependency effect is not present in block cipher RAIDEN where the key
+addition is positioned before the shift operations. As a result the DP of the XOR operation is not key
+dependent in this case.
+A solution to the problem of key-dependency of the DP of the F-function is to search for differential
+trails with probabilities computed for (multiple) fixed keys rather than for trails with probabilities averaged
+over all keys. As discussed in Sect. 8, this is the approach that we took in the analysis of TEA.
+9.3
+
+Dependency Between the Round Keys
+
+In differential cryptanalysis of keyed primitives it is common practice to assume that the round keys are
+independent [19]. This is known as making the hypothesis of independent round keys [10].
+Citing from [9, § 8.7.2]: the hypothesis states that the expected probability of a differential trail, averaged
+over all possible values of the cipher key, can be approximated by the expected probability of the differential
+trail, averaged over all independently specified round key values.
+In ciphers with weak key schedule such as TEA the hypothesis of independent round keys does not
+hold. As a consequence, obtaining an accurate estimation of the expected probabilities of differential trails
+in such ciphers is difficult.
+A possible solution to the dependent round keys problem is to analyze the cipher with respect to a set
+of randomly chosen fixed keys and consider the minimum probability, among all keys within the set (rather
+than the expected probabilities averaged over all keys). The reason to select the minimum probability is
+to guarantee that the resulting differential trail is possible (i.e. has non-zero probability) for every key in
+the set. More details on this are provided in Appendix B.3.
+9.4
+
+Influence of the Round Constants
+
+Fixed constants are commonly used in the design of symmetric-key primitives in order to destroy similarities
+between the rounds. Since they are typically added to the state by applying the same operation as for the
+round keys, it is generally assumed that constants influence neither the probabilities nor the structure of
+differential trails and hence can be safely ignored. Surprisingly, this assumption does not hold for TEA and
+possibly for other ARX constructions as well.
+The fixed round constants of TEA (the δ constants) influence both the probabilities and the structure
+of differential trails. They influence the probabilities as an indirect consequence of the key-dependency
+effect discussed in Sect. 9.3. On the one hand, as noted, the DP of F depends on the value of the two round
+keys added resp. to two of the three inputs of the XOR (cf. Fig. 1 (left)). On the other, the third input, to
+which a δ constant is added, is dependent on the other two inputs (since all three are produced from the
+same initial input x) and hence indirectly also influences the DP of F.
+
+As to the influence of round constants on the structure of differential trails, after modifying TEA to
+use the same δ constant at every round, for many keys the best found trail after several rounds eventually
+becomes iterative with period 2 and of the form (α → 0), (0 → 0), (α → 0), . . . . The difference that
+maximizes the probability of the differential (α → 0) is α = 0xF and has probability 2−8 for exactly
+6 · 259 ≈ 261.6 keys (approx. 10% of all keys). We use the two-round iterative trail (0xF → 0), (0 → 0)
+to construct a trail over 15 rounds with probability 2−56 . We also find a 4-round iterative pattern with
+probability < 2−15 which holds for a smaller number of keys. It is used to construct a trail with probability
+2−61.36 on 18 rounds of the modified TEA. For more detailed discussion of these results ref. Appendix D.3.
+
+10
+
+Conclusions
+
+In this paper we proposed the first extension of Matsui’s algorithm for automatic search for differential
+trails, originally proposed for S-box based ciphers, to the class of ARX ciphers. We used the block ciphers
+TEA, XTEA, RAIDEN and SPECK as a testbed for demonstrating the practical application of this method.
+Using the proposed algorithm, the first full (i.e. not truncated) differential trails for block cipher TEA
+were found. The best one covers 18 rounds which is one round more than the best differential attack
+on TEA (17 rounds) and significantly improves the best previously known truncated trail which is on 8
+rounds. Trails on 9, 10 and 13 rounds of SPECK32, SPECK48 and SPECK64 resp. were also reported.
+They represent the first public security analysis of the cipher. For RAIDEN, a trail on all 32 rounds was
+shown that can be used to break the full cipher. The best trail for XTEA found by the tool confirms the
+previous known best trail, but this time it was found in a fully automatic way.
+
+11
+
+Open Problems
+
+Some open problems for future work are listed next.
+1. Design a constant time algorithm for the computation of the fixed-key differential probability adpF(k0 ,k1 ,δ)
+of the TEA F-function . The algorithm proposed in this paper (described in detail in Appendix D) is
+worse-time exponential in the word size and its complexity is inversely proportional to the probability of
+the given differential. If a more efficient algorithm exists, it can be used in the place of the re-adjustment
+procedure discussed in Sect. 9.1 and will therefore significantly improve the efficiency of the current
+search algorithm for TEA.
+2. Address the problem that it is infeasible to compute a full pDDT beyond a certain probability thresholds: 0.01 for ADD differences and 0.05 for XOR differences (cf. Table 2). A possible solution would be
+to start the search with an incomplete pDDT and update it dynamically with the missing highways
+during the process of the search.
+3. Compute a bound on how far the probabilities of the best found trails can be from the actual best trail
+in terms of the fixed probability threshold.
+Acknowledgments. We thank our colleagues from the laboratory of algorithmics, cryptology and security
+(LACS) at the university of Luxembourg for the useful discussions, and especially Yann Le Corre for his
+help with visualizing the experimental data. We further thank the anonymous reviewers for their time and
+helpful comments. Some of the experiments presented in this paper were carried out using the HPC facility
+of the University of Luxembourg.
+
+References
+1. J.-P. Aumasson and D. J. Bernstein. SipHash: a fast short-input PRF. IACR Cryptology ePrint Archive, 2012:351, 2012.
+2. J.-P. Aumasson, L. Henzen, W. Meier, and R. C.-W. Phan. SHA-3 proposal BLAKE. Submission to the NIST SHA-3
+Competition (Round 2), 2008.
+3. R. Beaulieu, D. Shors, J. Smith, S. Treatman-Clark, B. Weeks, and L. Wingers. The SIMON and SPECK Families of
+Lightweight Block Ciphers. Cryptology ePrint Archive, Report 2013/404, 2013. http://eprint.iacr.org/.
+4. D. J. Bernstein. The Salsa20 Family of Stream Ciphers. In M. J. B. Robshaw and O. Billet, editors, The eSTREAM
+Finalists, volume 4986 of LNCS, pages 84–97. Springer, 2008.
+5. E. Biham and A. Shamir. Differential Cryptanalysis of DES-like Cryptosystems. J. Cryptology, 4(1):3–72, 1991.
+6. A. Bogdanov and M. Wang. Zero Correlation Linear Cryptanalysis with Reduced Data Complexity. In Canteaut [7],
+pages 29–48.
+7. A. Canteaut, editor. Fast Software Encryption - 19th International Workshop, FSE 2012, Washington, DC, USA, March
+19-21, 2012. Revised Selected Papers, volume 7549 of Lecture Notes in Computer Science. Springer, 2012.
+8. J. Chen, M. Wang, and B. Preneel. Impossible Differential Cryptanalysis of the Lightweight Block Ciphers TEA, XTEA
+and HIGHT. In A. Mitrokotsa and S. Vaudenay, editors, AFRICACRYPT, volume 7374 of Lecture Notes in Computer
+Science, pages 117–137. Springer, 2012.
+9. J. Daemen and V. Rijmen. The Design of Rijndael: AES - The Advanced Encryption Standard. Springer, 2002.
+10. J. Daemen and V. Rijmen. Probability distributions of Correlation and Differentials in Block Ciphers. IACR Cryptology
+ePrint Archive, 2005:212, 2005.
+11. M. Daum. Cryptanalysis of Hash Functions of the MD4-Family. PhD thesis, Ruhr-Universität Bochum, 2005.
+12. C. De Cannière and C. Rechberger. Finding SHA-1 Characteristics: General Results and Applications. In X. Lai and
+K. Chen, editors, ASIACRYPT, volume 4284 of Lecture Notes in Computer Science, pages 1–20. Springer, 2006.
+13. N. Ferguson, S. Lucks, B. Schneier, D. Whiting, M. Bellare, T. Kohno, J. Callas, and J. Walker. The Skein Hash Function
+Family. Submission to the NIST SHA-3 Competition (Round 2), 2009.
+14. P.-A. Fouque, G. Leurent, and P. Q. Nguyen. Automatic Search of Differential Path in MD4. IACR Cryptology ePrint
+Archive, 2007:206, 2007.
+15. D. Hong, J. Sung, S. Hong, J. Lim, S. Lee, B. Koo, C. Lee, D. Chang, J. Lee, K. Jeong, H. Kim, J. Kim, and S. Chee.
+Hight: A new block cipher suitable for low-resource device. In L. Goubin and M. Matsui, editors, CHES, volume 4249 of
+Lecture Notes in Computer Science, pages 46–59. Springer, 2006.
+16. S. Hong, D. Hong, Y. Ko, D. Chang, W. Lee, and S. Lee. Differential Cryptanalysis of TEA and XTEA. In J. I. Lim and
+D. H. Lee, editors, ICISC, volume 2971 of Lecture Notes in Computer Science, pages 402–417. Springer, 2003.
+17. M. Karroumi and C. Malherbe. Related-key cryptanalysis of raiden. In Network and Service Security, 2009. N2S ’09.
+International Conference on, pages 1–5, 2009.
+18. J. Kelsey, B. Schneier, and D. Wagner. Related-key cryptanalysis of 3-WAY, Biham-DES, CAST, DES-X, NewDES, RC2,
+and TEA. In Y. Han, T. Okamoto, and S. Qing, editors, ICICS, volume 1334 of Lecture Notes in Computer Science, pages
+233–246. Springer, 1997.
+19. X. Lai and J. L. Massey. Markov ciphers and differentail cryptanalysis. In D. W. Davies, editor, EUROCRYPT, volume
+547 of Lecture Notes in Computer Science, pages 17–38. Springer, 1991.
+20. G. Leurent. Construction of Differential Characteristics in ARX Designs - Application to Skein. IACR Cryptology ePrint
+Archive, 2012:668, 2012.
+21. H. Lipmaa and S. Moriai. Efficient Algorithms for Computing Differential Properties of Addition. In M. Matsui, editor,
+FSE, volume 2355 of LNCS, pages 336–350. Springer, 2001.
+22. H. Lipmaa, J. Wallén, and P. Dumas. On the Additive Differential Probability of Exclusive-Or. In B. K. Roy and W. Meier,
+editors, FSE, volume 3017 of LNCS, pages 317–331. Springer, 2004.
+23. M. Matsui. On Correlation Between the Order of S-boxes and the Strength of DES. In A. D. Santis, editor, EUROCRYPT,
+volume 950 of Lecture Notes in Computer Science, pages 366–375. Springer, 1994.
+24. M. Matsui and A. Yamagishi. A New Method for Known Plaintext Attack of FEAL Cipher. In EUROCRYPT, pages
+81–91, 1992.
+25. F. Mendel, T. Nad, and M. Schläffer. Finding SHA-2 Characteristics: Searching through a Minefield of Contradictions.
+In D. H. Lee and X. Wang, editors, ASIACRYPT, volume 7073 of Lecture Notes in Computer Science, pages 288–307.
+Springer, 2011.
+26. D. Moon, K. Hwang, W. Lee, S. Lee, and J. Lim. Impossible Differential Cryptanalysis of Reduced Round XTEA and
+TEA. In J. Daemen and V. Rijmen, editors, FSE, volume 2365 of Lecture Notes in Computer Science, pages 49–60.
+Springer, 2002.
+
+27. N. Mouha, V. Velichkov, C. De Cannière, and B. Preneel. The Differential Analysis of S-Functions. In A. Biryukov,
+G. Gong, and D. R. Stinson, editors, Selected Areas in Cryptography, volume 6544 of Lecture Notes in Computer Science,
+pages 36–56. Springer, 2010.
+28. National Institute of Standards and Technology. Announcing Request for Candidate Algorithm Nominations for a New
+Cryptographic Hash Algorithm (SHA-3) Family. Federal Register, 27(212):62212–62220, November 2007. Available:
+http://csrc.nist.gov/groups/ST/hash/documents/FR_Notice_Nov07.pdf (2008/10/17).
+29. National Institute of Standards, U.S. Department of Commerce. FIPS 47: Data Encryption Standard, 1977.
+30. R. M. Needham and D. J. Wheeler. TEA extensions. Computer Laboratory, Cambridge University, England, 1997.
+http://www.movable-type.co.uk/scripts/xtea.pdf.
+31. R. M. Needham and D. J. Wheeler. Correction to XTEA. Technical report, University of Cambridge, Oct. 1998.
+32. J. Polimón, J. C. H. Castro, J. M. Estévez-Tapiador, and A. Ribagorda. Automated design of a lightweight block cipher
+with Genetic Programming. KES Journal, 12(1):3–14, 2008.
+33. B. Preneel, editor. Fast Software Encryption: Second International Workshop. Leuven, Belgium, 14-16 December 1994,
+Proceedings, volume 1008 of Lecture Notes in Computer Science. Springer, 1995.
+34. R. L. Rivest. The MD4 Message Digest Algorithm. In CRYPTO, pages 303–311, 1990.
+35. R. L. Rivest. The MD5 Message-Digest Algorithm. RFC 1321, April 1992.
+36. R. L. Rivest. The RC5 Encryption Algorithm. In Preneel [33], pages 86–96.
+37. A. Shimizu and S. Miyaguchi. Fast Data Encipherment Algorithm FEAL. In EUROCRYPT, pages 267–278, 1987.
+38. V. Velichkov, N. Mouha, C. De Cannière, and B. Preneel. The Additive Differential Probability of ARX. In A. Joux,
+editor, FSE, volume 6733 of LNCS, pages 342–358. Springer, 2011.
+39. V. Velichkov, N. Mouha, and C. D. B. Preneel. UNAF: A Special Set of Additive Differences with Application to the
+Differential Analysis of ARX. In Canteaut [7], pages 287–305.
+40. D. J. Wheeler and R. M. Needham. TEA, a Tiny Encryption Algorithm. In Preneel [33], pages 363–366.
+
+A
+A.1
+
+More Experimental results
+More Differential Trails for TEA
+
+More differential trails for TEA for six different keys chosen at random are shown in Table 6.
+A.2
+
+Threshold Search on TEA with Reduced Word Size
+
+In Fig. 3, Fig. 4 and Fig. 5 are compared the probabilities of the best trails found by the threshold search
+algorithm using pDDT to the actual best trails found by applying Matsui’s search using full DDT on
+TEA with word size reduced to 11, 14 and 16 bits respectively. For 11 and 14 bits 50 experiments are
+performed and in each experiment a new fixed key is chosen uniformly at random. For 16 bits, the number
+of experiments is 20. In the experiments on 14 and 16 bits the same δ constant (equal to the initial value)
+was used in every round. The reason is that if different constants are used, then a separate DDT has to be
+computed for every round, which for 10 rounds and 14-bit words is infeasible. Also note that for 16 bits it
+takes longer to compute the full DDT-s due to their larger size (compared to the 14 bit case). The memory
+consumption is also much bigger – 320 GB of RAM are required to store all DDT-s. Due to the mentioned
+limitations, less number of experiments on 16 bits were performed.
+
+B
+
+Automatic Search for Differential Trails in TEA
+
+In this section are provided more details on the application of the general methodology outlined in Sect. 6
+to the automatic search for high probability differential trails in TEA.
+
+Table 6. TEA: ADD trails for six different keys (shown between bold lines) chosen at random; pthres = 0.05 = −4.32.
+BC3FDB33 D7AA08E 4736577E C29B8AF9 E028DF9A 8819B4C3 3AB116AF 3C50723 37527D25 EBB25BDA CD7CADB9 1768A28B
+r
+
+β
+
+←α
+
+log2 p
+
+r
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+FFFFFFF1
+0
+1
+FFFFFFFF
+0
+F
+0
+FFFFFFF1
+0
+F
+0
+FFFFFFF1
+0
+F
+FFFFFFFF
+0
+
+1
+0
+1
+1
+0
+1
+F
+1
+0
+1
+F
+1
+0
+1
+F
+0
+
+−2.94
+−0.00
+−7.99
+−8.06
+−0.00
+−2.88
+−9.07
+−3.64
+−0.00
+−2.95
+−7.88
+−3.64
+−0.00
+−2.88
+−8.03
+−0.00
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+P
+
+β
+
+←α
+
+log2 p
+
+r
+
+0
+0
+−0.00
+FFFFFFEF FFFFFFFF −3.67
+0
+FFFFFFEF −12.19
+11
+FFFFFFFF −2.81
+0
+0
+−0.00
+F
+FFFFFFFF −3.66
+2
+F
+−8.98
+FFFFFFF1
+1
+−2.89
+0
+0
+−0.00
+F
+1
+−3.60
+FFFFFFFF
+F
+−7.93
+0
+0
+−0.00
+FFFFFFFF
+F
+−7.31
+FFFFFFF1 FFFFFFFF −3.66
+0
+0
+−0.00
+FFFFFFF1 FFFFFFFF −2.87
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+←α
+
+FFFFFFF1 FFFFFFFF
+0
+0
+FFFFFFF1 FFFFFFFF
+1
+FFFFFFF1
+0
+0
+1
+FFFFFFF1
+F
+1
+0
+0
+FFFFFFF1
+1
+0
+FFFFFFF1
+F
+1
+0
+0
+FFFFFFF1
+1
+FFFFFFFF FFFFFFF1
+0
+0
+FFFFFF01 FFFFFFF1
+
+−59.6
+8 min.
+
+−59.96
+8.42 min.
+
+r log2 pr
+Time:
+
+β
+
+log2 p
+−3.62
+−0.00
+−2.82
+−7.31
+−0.00
+−9.19
+−2.90
+−0.00
+−3.65
+−7.94
+−2.83
+−0.00
+−3.63
+−7.85
+−0.00
+−5.46
+−57.21
+6.54 min.
+
+85DB3457 81B3787F C0D7FC4C 98F4BFEB 804790E1 5EDFC983 64001F29 2231A3F8 BF8ABF08 1F6E2F9F 63569045 FEB41F34
+r
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+P
+
+r log2 pr
+Time:
+
+β
+
+←α
+
+log2 p
+
+r
+
+FFFFFFF1
+1
+−2.85
+0
+0
+−0.00
+FFFFFFF1
+1
+−3.65
+FFFFFFFF FFFFFFF1 −7.42
+0
+0
+−0.00
+FFFFFFFF FFFFFFF1 −7.84
+F
+FFFFFFFF −3.57
+0
+0
+−0.00
+F
+FFFFFFFF −2.91
+2
+F
+−7.72
+FFFFFFF1
+1
+−3.68
+0
+0
+−0.00
+F
+1
+−2.96
+FFFFFFFE
+F
+−12.42
+FFFFFFF1 FFFFFFFF −3.56
+0
+0
+−0.00
+FFFFFFF1 FFFFFFFF −2.86
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+
+−61.44
+17.9 min.
+
+β
+
+←α
+
+log2 p
+
+r
+
+FFFFFFF1 FFFFFFFF −3.64
+0
+0
+−0.00
+FFFFFFF1 FFFFFFFF −2.81
+0
+FFFFFFF1 −13.00
+F
+FFFFFFFF −3.60
+0
+0
+−0.00
+FFFFFFF1 FFFFFFFF −2.86
+2
+FFFFFFF1 −9.48
+F
+1
+−3.65
+0
+0
+−0.00
+F
+1
+−2.87
+FFFFFFFE
+F
+−7.89
+FFFFFFF1 FFFFFFFF −3.63
+0
+0
+−0.00
+FFFFFFF1 FFFFFFFF −2.92
+FFFFFF01 FFFFFFF1 −5.80
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+
+−62.15
+6.44 min.
+
+β
+
+←α
+
+0
+0
+FFFFFFF1 FFFFFFFF
+FFFFFFFF FFFFFFF1
+1E
+FFFFFFFE
+1
+F
+FFFFFFF1 FFFFFFFF
+0
+0
+FFFFFFF1 FFFFFFFF
+1
+FFFFFFF1
+0
+0
+1
+FFFFFFF1
+F
+1
+0
+0
+FFFFFFEF
+1
+FFFFFFFE FFFFFFEF
+
+log2 p
+−0.00
+−3.60
+−7.91
+−3.72
+−8.13
+−3.63
+−0.00
+−2.87
+−8.05
+−0.00
+−7.71
+−2.89
+−0.00
+−3.60
+−9.61
+
+−61.71
+5.33 min.
+
+TEA Threshold Search vs. DDT: all delta, n = 11, L = 3, R = 4, thres = 0.01, 10 rounds
+-10
+DDT
+Threshold
+-12
+-14
+
+p, log2
+
+-16
+-18
+-20
+-22
+-24
+-26
+-28
+5
+
+10
+
+15
+
+20
+
+25
+30
+Experiment, index
+
+35
+
+40
+
+45
+
+50
+
+Fig. 3. Threshold Search vs. DDT Search: word size n = 11 bits.
+
+TEA Threshold Search vs. DDT: one delta, n = 14, L = 4, R = 5, thres = 0.01, 10 rounds
+-15
+DDT
+Threshold
+
+-16
+-17
+-18
+-19
+
+p, log2
+
+-20
+-21
+-22
+-23
+-24
+-25
+-26
+-27
+-28
+5
+
+10
+
+15
+
+20
+
+25
+30
+Experiment, index
+
+35
+
+40
+
+45
+
+50
+
+Fig. 4. Threshold Search vs. DDT Search: word size n = 14 bits; same δ is used in every round.
+
+TEA Threshold Search vs. DDT: one delta, n = 16, L = 4, R = 5, thres = 0.01, 10 rounds
+-24
+DDT
+Threshold
+-25
+
+-26
+
+p, log2
+
+-27
+
+-28
+
+-29
+
+-30
+
+-31
+
+-32
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+12
+Experiment, index
+
+14
+
+16
+
+18
+
+20
+
+Fig. 5. Threshold Search vs. DDT Search: word size n = 16 bits; same δ is used in every round.
+
+B.1
+
+An Approximation for the DP of F
+
+Computing the exact additive DP of F for fixed round keys and round constant (step 1 in the general
+methodology from Sect. 6) is very inefficient (ref. Appendix D.1 for details). Therefore, as an approximation,
+we use the expected DP averaged over all round keys and δ constants. It is defined as:
+eadpF (α → β) , 2−4n · #{(k0 , k1 , δ, x) : F (x + α) − F (x) = γ} .
+
+(12)
+
+The probability eadpF (12) can be efficiently computed as follows. Note that the only components of
+F that are non-linear w.r.t. ADD differences are the operations RSH and XOR (see Fig. 1 (left)). Therefore,
+for fixed input and output differences α and β resp., the expected DP of F can be expressed as the
+multiplication of the DP of RSH and XOR:
+eadpF (α → β) =
+
+3
+X
+i=0
+
+
+adp≫5 (α → γi ) · adp3⊕ ((α ≪ 4), α, γi → β) ,
+
+(13)
+
+where γ0 , γ1 , γ2 and γ3 are the four output differences after the RSH operation (cf. Theorem 2 (5)) and
+adp3⊕ denotes the additive DP of XOR with three inputs, defined analogously to (2). Equation (13) can be
+efficiently computed using (5) to compute adp≫5 and the methods described in [27] to compute adp3⊕ .
+B.2
+
+Computing a pDDT for F
+
+In this section we describe the process of constructing a pDDT based on the expected differential probability
+of the F-function of TEA (cf. (12)). This is step 2 in the general methodology from Sect. 6. We begin by
+observing that to construct a pDDT for F, it is sufficient to construct a pDDT for the operation XOR with
+three inputs.
+
+Theorem 3. Let α and β be respectively input and output ADD differences to F and let γ0 , γ1 , γ2 and γ3 be
+the four output differences after the RSH operation (cf. (13)). Let pthres ≥ 0 be a fixed probability threshold.
+Then
+∀i : 0 ≤ i < 4 : adp3⊕ ((α ≪ 4), α, γi → β) ≥ pthres =⇒ eadpF (α → β) ≥ pthres ,
+(14)
+and
+eadpF (α → β) ≥ pthres =⇒ ∃i : 0 ≤ i < 4 : adp3⊕ ((α ≪ 4), α, γi → β) ≥ pthres .
+
+(15)
+
+Proof. Appendix E.4.
+Theorem 3 implies that for a fixed threshold pthres , every entry in the pDDT of XOR with three inputs
+can be transformed into an entry in the pDDT of F (by multiplying its probability by the probabilities of
+RSH (13)). Therefore Algorithm 1 can be used to construct a pDDT for F. Note that applying the algorithm
+directly is very inefficient because for XOR with three inputs the recursion proceeds over four, rather than
+three, n-bit words. Thus for n = 32 and pthres ≤ 0.01 the computation becomes quickly infeasible (cf.
+Table 2). However, the fact that the three inputs to the XOR operation in F are strongly dependent can
+be used to improve the efficiency. The improvement is at the expense of a small fraction of differentials
+that are missing from the pDDT, which results in an incomplete pDDT. More details on this process are
+provided in Appendix D.4.
+B.3
+
+Search for Differential Trails
+
+After constructing a pDDT for F as described in Sect. B.2, it is straightforward to apply Algorithm 2 to
+search for differential trails in TEA. Before doing so, however, one final detail has to be addressed. Note that
+since in TEA the same key is used every second round, in our analysis we can not assume that the round keys
+are independent. Therefore the expected probability of a differential trail can not be accurately estimated
+by multiplying the expected differential probabilities over all keys at every round computed using (13).
+Indeed, if we do so, we risk ending up with a differential trail that has high probability according to our
+estimation, but which is in fact impossible for most or all keys. Unfortunately this is exactly what will
+happen if Algorithm 2 (cf. Sect. 5) is directly applied with the pDDT of F.
+To address the problem mentioned above, we modify Algorithm 2 to perform the search for a (set of)
+fixed key/s, by adding one additional input – the value of the key/s. Whenever a differential is pulled from
+the pDDT H, it’s probability is experimentally verified against the specific value of the (set of) round
+key/s by performing one-round encryptions over 2ǫ chosen plaintexts satisfying the specific difference,
+where ǫ = c + log2 (1/pthres ) for some constant c ≥ 2. For example, for pthres = 0.01 > 2−7 , a suitable choice
+would be c = 3 so that ǫ = 3 + 7 = 10 and 2ǫ = 210 chosen plaintexts. For a set of more than one key, the
+minimum of the probabilities among all keys is computed. The reason to take the minimum rather than
+e.g. the average probability is to guarantee that the resulting trail is possible (i.e. has non-zero probability)
+for every key in the set.
+
+C
+
+Automatic Search for Differential Trails in XTEA
+
+In this section we apply the methodology described in Sect. 6 to search for XOR and ADD differential trails
+in XTEA.
+
+C.1
+
+XOR Differences
+
+Let x−1 be the input to F from the previous round. Then define F ′ as:
+(δ, k) : F ′ (x−1 , x) = x−1 + F (x) .
+
+(16)
+
+An Approximation for the DP of F ′ . The DP of F ′ is approximated as:
+′
+
+xdpF (α → β) ≈ xdp+ ((α ≪ 4) ⊕ (α ≫ 5), α → τ ) · xdp+ (τ, α−1 → β) .
+
+(17)
+
+Computing a pDDT for F ′ .
+1. Initialize an empty pDDT for F ′ : H ′ ← ∅.
+2. For a fixed threshold pthres construct an incomplete pDDT H for the first ADD operation in F ′ . This is
+done by applying Algorithm 1 for XOR differences. Note that in H are stored only those differentials for
+which the input differences ∆x and ∆y are such that: if ∆x = α then ∆y = (α ≪ 4) ⊕ (α ≫ 5).
+3. Denote p′ = xdp+ ((α ≪ 4) ⊕ (α ≫ 5), α → τ ). For each entry (α, ((α ≪ 4) ⊕ (α ≫ 5)), τ, p′ ) in H
+compute pF ′ = p′ · maxβ xdp+ (τ, α−1 → β) (cf. (17)).
+4. If pF ′ ≥ pthres add (α, β, pF ′ ) to H ′ .
+5. Return H ′ .
+Search for Differential Trails. Apply Algorithm 2 with the incomplete pDDT H ′ to search for XOR
+differential trails in XTEA.
+C.2
+
+ADD Differences
+
+An Approximation for the DP of F . Define f (x) = (x ≪ 4) ⊕ (x ≫ 5). An approximation of the DP
+of f is:
+adpf (α → τ ) ≈
+
+3
+X
+i=0
+
+
+adp≫5 (α → γi ) · adp⊕ (γi , (α ≪ 4) → τ ) ,
+
+(18)
+
+and we get the following approximation of the DP of F :
+
+adpF (α → β) ≈ adpf (α → τ ) · adp⊕ ((τ + α), 0 → β) .
+
+(19)
+
+Computing a pDDT for F .
+1. Initialize an empty pDDT for F : H ← ∅.
+2. For a fixed threshold pthres construct an incomplete pDDT Hf for f . This process is conceptually the
+same as the one described in Sect. B.2 for the F-function of TEA.
+3. Denote pf = adpf (α → τ ). For each entry (α, τ, pf ) in Hf compute pF = pf ·maxβ adp⊕ ((τ +α), 0 → β)
+(cf. (19)).
+4. If pF ≥ pthres add (α, β, pF ) to H.
+5. Return H.
+
+Search for Differential Trails. Apply Algorithm 2 with the incomplete pDDT H to search for ADD
+differential trails in XTEA.
+
+D
+D.1
+
+More Details on the Differential Properties of the TEA F-function
+Computation of the Fixed-key DP of F
+
+In this section, an algorithm for the computation of the fixed-key DP of the TEA F-function is presented.
+For fixed keys k0 , k1 , round constant δ and input and output ADD differences resp. α and β, the additive
+DP of the TEA F-function is defined over all n-bit inputs x as follows:
+adpF(k0 ,k1 ,δ) (k0 , k1 , δ : α → β) , 2−n · #{x : F (x + α) − F (x) = γ} ,
+where F is defined as in (8). Note that expression (20) is related to the expected DP of F (12) as:
+X
+eadpF = 2−3n
+adpF(k0 ,k1 ,δ) .
+
+(20)
+
+(21)
+
+k0 ,k1 ,δ
+
+From (20) it follows that computing the fixed-key probability adpF(k0 ,k1 ,δ) is equivalent to counting the
+number of values x for which y ′ − y = β, where y = F (x) and y ′ = F (x + α). We have designed an
+algorithm that performs this count in a bitwise manner. At every bit position i, a value for bit x[i] is
+assigned and next it is checked whether y ′ [i : 0] − y[i : 0] = β[i : 0] holds modulo 2i+1 . If it does then the
+algorithm recursively proceeds to bit position (i + 1), otherwise it backtracks and assigns another value
+to x[i]. When all bits of x have been successfully assigned, a counter c is incremented. This process is
+described in more detail next.
+For 0 ≤ i < n, the (i + 1)-bit words y[i : 0] and y ′ [i : 0] are computed as follows:
+y[i : 0] =((x[i − 4 : 0]) + k0 [i : 0])⊕
+
+(22)
+
+(x[i : 0] + δ[i : 0])⊕
+
+(23)
+
+(x[i + 5 : 5] + k1 [i : 0]) ,
+
+(24)
+
+y [i : 0] =(((x + α)[i − 4 : 0]) + k0 [i : 0])⊕
+
+(25)
+
+((x + α)[i : 0] + δ[i : 0])⊕
+
+(26)
+
+((x + α)[i + 5 : 5] + k1 [i : 0]) ,
+
+(27)
+
+′
+
+where x[i − 4] = 0 : i < 4 and x[i + 5] = 0 : i > ((n − 1) − 5)). Notice that for i = 3, the bits of x
+that participate in (22)–(27), namely x[3 : 0] and x[8 : 5], are non-overlapping and hence can be assigned
+independently. At bit position i = 4, the first dependency occurs: bit x[0] which has already been assigned
+and used in the computation of (23) and (26) for i < 4, at position i = 4 is again used in the computation
+of (22) and (25). To take this dependency into account the algorithm initially assigns the first 10 bits of x
+i.e. x[9 : 0]. Then it checks if (y ′ [4 : 0] − y[4 : 0] = β[4 : 0]) mod 25 . Indeed this check is possible for i = 4 ,
+because bit x[0] needed to compute (22) and (25) is known; bits x[4 : 0] needed to compute (23) and (26)
+are known; and bits x[9 : 5] needed to compute (24) and (27) are also known. If the check succeeds, the
+algorithm proceeds by recursively assigning the remaining bits of x bit by bit.
+The recursion starts at level i = 10 where bit x[10] is assigned and it is checked if (y ′ [5 : 0] − y[5 : 0] =
+β[5 : 0]) mod 26 is consistent. If yes, bit x[11] is assigned and it is checked if (y ′ [6 : 0] − y[6 : 0] = β[6 : 0])
+mod 27 , etc. In general, when x[i] is assigned, equation (y ′ [i−5 : 0]−y[i−5 : 0] = β[i−5 : 0]) mod 2(i−5)+1
+
+is evaluated. This process is repeated until the recursion reaches level i = n − 1. At this level, bits x[n − 1]
+and x[n − 1] are assigned and equation (y ′ [n − 6 : 0] − y[n − 6 : 0] = β[(n − 6 : 0]) mod 2n−5 is checked
+for consistency. Note that at this point all bits of x have been assigned (x is an n-bit word), but only the
+(n − 5) LS bits have been checked for consistency. Therefore from level i = n − 1 up to i = (n − 1) + 5
+the recursion proceeds without assigning new values at the i-th bit positions of x and only checking the
+consistency of equation (y ′ [i − 5 : 0] − y[i − 5 : 0] = β[i − 5 : 0]) mod 2i−4 . If level i = n + 4 has been
+successfully reached then it means that the constructed x is such that (y ′ − y = β) mod 2n and a counter
+c is incremented. A pseudo-code of the described procedure is listed in Algorithm. 3.
+Algorithm 3 Computation of the Fixed-key DP of the TEA F-function.
+Input: n, α, β, k0 , k1 , δ, c, x
+Output: adpF
+(k0 ,k1 ,δ) (k0 , k1 , δ : α → β)
+1: procedure assign bit(n, i, c, x) do
+2:
+if i = n + 4 then
+3:
+c=c+1
+4:
+return
+5:
+Compute y[i − 5 : 0] and y ′ [i − 5 : 0] according to eq. (22)–(27)
+6:
+if (y ′ [i − 5 : 0] − y[i − 5 : 0] = β[i − 5 : 0]) mod 2i−4 then
+7:
+if i < (n − 1) then
+8:
+for q ∈ {0, 1} do
+9:
+x[i + 1 : 0] ← q | x[i : 0]
+10:
+assign bit(n, i + 1, c, x)
+11:
+else
+12:
+assign bit(n, i + 1, c, x)
+13:
+return c
+14: procedure adp tea f(n, k0 , k1 , δ, α, β) do
+15:
+c←0
+16:
+for x[9 : 0] in {0, . . . , 210 − 1} do
+17:
+i ← 10
+18:
+c = c + assign bit(n, i, c, x)
+19:
+return p ← c 2−n
+
+Clearly Algorithm 3 is worst-case exponential since for a differential that has probability 1 all branches
+of the recursion will be explored. In general, the efficiency of the algorithm is inversely proportional to the
+probability of the differential (α → β). The reason is that low-probability differentials correspond to small
+number of values x that satisfy them, which in turn means that for many assignments of x[i] equation
+(y ′ [i : 0] − y[i : 0] = β[i : 0]) mod 2i+1 will be inconsistent. As a result the total number of recursive calls
+will be smaller.
+D.2
+
+Key-dependency of the DP of F
+
+As noted in Sect. 9, the DP of the F-function of TEA is key-dependent w.r.t. both XOR and ADD. As the
+round keys are added to the state by means of the ADD operation, for XOR differences the mentioned effect
+is not surprising. This is not so for ADD differences though. The effect for ADD differences is illustrated in
+Fig. 6 and Fig. 7, where for a small-scale version of TEA resp. with 7-bit and 10-bit word size for every
+fixed input difference (the X axis) is plotted the variation of the maximum (over all output differences)
+probabilities for all round keys (the Y axis). We analyze this key-dependency effect in more detail below.
+
+TEA F Key Dependence
+1
+Min. and Max. Prob. Output Diff. over all Keys: n = 7, d = 0x39, L = 4, R = 5
+0.9
+0.8
+0.7
+
+Probability
+
+0.6
+0.5
+0.4
+0.3
+0.2
+0.1
+0
+0
+
+8
+
+16
+
+24
+
+32
+
+40
+
+48
+
+56
+64
+72
+Input Difference
+
+80
+
+88
+
+96
+
+104
+
+112
+
+120
+
+128
+
+Fig. 6. TEA, n = 7 bits: dependency of the maximum probability output ADD difference on the value of the round key.
+
+The first thing to observe is that, although ADD differences propagate with probability 1 through the
+three modular additions in the TEA F-function (see Fig. 1) independently of the actual value of the round
+keys and the round constant, the probability of ADD differentials through F is actually highly dependent
+on the values of the keys and the constant. The reason for this counter-intuitive behavior is the following.
+In a differential cryptanalysis setting, consider an input pair (x, x + α) to F . For a fixed n-bit difference
+α, there are 2n such pairs that satisfy the difference. Observe that the LSH operation reduces the set of
+possible input pairs to the modular addition with key k0 (cf. Fig. 1 (left)) from 2n to 2n−4 . Similarly the
+RSH operation reduces the set of possible input pairs to the modular addition with key k1 from 2n to 2n−5 .
+Although the key additions will not affect the differences that the pairs in each set satisfy, they will affect
+the actual values of those pairs which on its part influences the DP of F. The latter is due to the way the
+DP of the subsequent XOR with three inputs (adp3⊕ ) is computed. To compute adp3⊕ , the number of the
+right pairs for two of the inputs are counted over the reduced sets of resp. 2n−4 and 2n−5 elements, while
+still the elements of those sets are of size n bits, because of the addition with the n-bit key word. As a
+result the reduced sets contain different elements for different values of the keys and so the probability
+adp3⊕ and, by implication, the DP of F will also be different for different keys. Note that this is not the
+case when the two sets have full size 2n (e.g. if the shift constants of LSH and RSH are set to 0). In that
+case the right pairs for the XOR will always be counted over the same set of 2n pairs (possibly re-ordered)
+irrespective of the actual value of the key. This key dependency effect is illustrated in detail by means of
+the following simple example.
+Example 2. In order to demonstrate the dependency of the DP of the TEA F-function on the value of the
+round key, we isolate a small sub-component f of F composed of an RSH, key addition and XOR. Let x and
+y be n-bit inputs, k be an n-bit key and r be a shift constant. Then define
+f (k, x, y) = (k + (x ≫ r)) ⊕ y .
+
+(28)
+
+Note that in contrast to F (8), in f the inputs x and y are independent. We define f in this way on
+purpose, so that in the following analysis we can focus exclusively on the influence of the key k, and not
+be distracted with side effects arising form dependencies between the inputs.
+For n = 3 and r = 1, let α = 2, β = 2 be fixed input differences, and let γ = 1 be fixed output
+difference. We shall compute the DP of f : adpf (k : α, β → γ) for two values of the key: k = 0 and k = 1.
+We denote the two probabilities as p0 = adpf (k = 0 : 2, 2 → 1) and p1 = adpf (k = 1 : 2, 2 → 1). Note
+that by setting k = 0 we effectively discard the key addition operation. Intuitively this should be the same
+as the case k 6= 0 since ADD differences propagate with probability 1 through addition. With the following
+example we demonstrate that this intuition is wrong.
+Let A and B be the sets of pairs that satisfy the inputs differences α and β respectively. Denote with C
+the set of output pairs after the RSH operation, and with Dk the set of output pairs after the key addition
+with key k. Note that Dk = k + C. Finally, let Ek be the set of pairs in Dk such that when combined
+element-wise with a pair from B through XOR, the result is a pair that satisfies the output difference γ:
+Ek = {Dk × B : (d, d′ ) ∈ Dk , (b, b′ ) ∈ B : ((d ⊕ b) − (d′ ⊕ b′ ))
+
+mod 2n = γ} .
+
+(29)
+
+The probability adpf can then be expressed as:
+pk = 2−n · #Ek .
+
+(30)
+
+A = B = {(2, 0), (3, 1), (4, 2), (5, 3), (6, 4), (7, 5), (0, 6), (1, 7)} .
+
+(31)
+
+Since α = β = 2,
+The output set after the RSH by 1 is
+C = {(1, 0), (1, 0), (2, 1), (2, 1), (3, 2), (3, 2), (0, 3), (0, 3)} .
+
+(32)
+
+As expected, the number of unique elements in C compared to A is reduced by 2 due to the shift by 1
+position. Note that all analysis up to this point is independent of the value of the key k. We shall now
+demonstrate how the choice of the key influences the probability.
+1. Let k = 0. Then D0 = C:
+D0 = {(1, 0), (1, 0), (2, 1), (2, 1), (3, 2), (3, 2), (0, 3), (0, 3)} ,
+
+(33)
+
+and E0 is
+E0 = {{(1, 0), (1, 0)} × {(3, 1), (5, 3), (7, 5), (1, 7)},
+{(2, 1), (2, 1)} × {(3, 1), (7, 5)},
+{(0, 3), (0, 3)} × {(3, 1), (7, 5)}} .
+
+(34)
+
+Since there are 16 elements in E0 , according to (30) p0 = 16
+64 = 0.25.
+2. Let k = 1. In this case D1 = 1 + C:
+D1 = {(2, 1), (2, 1), (3, 2), (3, 2), (4, 3), (4, 3), (1, 4), (1, 4)} .
+
+(35)
+
+Note that due to the key addition, two of the pairs in D1 do not belong to D0 : (1, 4), (4, 3), while the
+remaining two: (2, 1), (3, 2) belong to both sets. As a result the set E1 also changes with respect to E0 :
+E1 = {{(2, 1), (2, 1)} × {(3, 1), (7, 5)},
+{(4, 3), (4, 3)} × {(5, 3), (1, 7)}} .
+8
+There are 8 elements in E1 and so p1 = 64
+= 0.125 < p0 .
+
+(36)
+
+From the above example we can see that the value of the key k determines the exact way in which the set
+C will be mapped to Dk . This in turn influences the size of the set Dk × B that ultimately determines the
+final probability adpf .
+Note however that although, as a result of the key addition, the sets D0 and D1 differ with respect to
+their elements, they are still the same with respect to the differences between the values within each pair.
+Let ∆Dk be the set of ADD differences modulo 2n , satisfied by each pair in Dk . Then:
+∆D0 = {(1 − 0), (1 − 0), (2 − 1), (2 − 1), (3 − 2), (3 − 2), (0 − 3), (0 − 3)} =
+∆D1 = {(2 − 1), (2 − 1), (3 − 2), (3 − 2), (4 − 3), (4 − 3), (1 − 4), (1 − 4)} =
+∆D = {1, 1, 1, 1, 1, 1, 5, 5} .
+This example demonstrates that in certain cases (the additive DP of the TEA F-function in particular),
+the value of the key influences the differential probability, while still keeping the differences unaffected.
+D.3
+
+Influence of the δ Constants
+
+As discussed in Sect. 9.4, we modified TEA to use the same δ constant, equal to the initial value 0x9e3779b9,
+at every round. Then we applied the algorithm presented in Sect. B to search for differential trails in this
+modified version of the cipher. We noticed that for many keys, after some rounds the best found trail would
+eventually become iterative with period 2 and of the form: (α → 0), (0 → 0), (α → 0), (0 → 0), . . . etc. .
+We further investigated for what value of α the probability of the differential (α → 0) will be maximal
+for a fixed key. To do this we modified Algorithm 3 (more specifically the assign bit() procedure) to
+assign the bits not only of the value x but also of the (unknown) difference α. Note that the modified
+algorithm computes the probability of the differential (α → 0) not only for the difference that maximizes
+it but also for all other differences. Therefore it requires also more memory: at least 232 × 4 bytes to store
+all values of α. For many keys we find that the difference that maximizes the probability of the differential
+is α = 0xF and the resulting probability is ≤ 2−8 . One round key for which the probability is exactly 2−8 is
+for example 4858548F, 3FF378B3. We have computed that the exact number of such keys is 6 · 259 ≈ 261.6
+i.e. around 10% of all keys. For 32-bit words, we were not able to find any keys for which the differential
+(α → 0) has probability bigger than 2−8 for some α.
+Finally, we report the best found differential trail on the modified version of TEA using the same δ
+constant. It is based on a 4-round iterative pattern and results in a differential trail on 18 rounds with
+probability 2−61.36 . The trail is shown in Table 7.
+D.4
+
+Improving the efficiency of Algorithm 1
+
+In this section we describe in more detail the improvement of the efficiency of Algorithm 1 when used to
+construct a pDDT for F (cf. Sect. B.2). We exploit the fact that the three inputs to the XOR operation
+in F are strongly dependent. As a result many differentials that are valid when the XOR is considered in
+isolation will in fact not be possible when XOR is viewed as a component of F.
+Let α, β and γ be input differences to the XOR in F, where α is the initial input difference to F, and
+β and γ are the differences after the LSH and the RSH operations respectively. Then by Theorem 1 and
+Theorem 2, α, β and γ are subject to the following constraints:
+(α, β, γ) : (β = (α ≪ 4))∧
+(γ ∈ {(α ≫ 5), (α ≫ 5) + 1, (α ≫ 5) − 2n−5 , (α ≫ 5) − 2n−5 + 1}) .
+
+(37)
+
+Table 7. TEA, single δ: best found ADD differential trail for 18 rounds.
+
+P
+
+key
+
+E028DF9A
+
+r
+
+β
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+
+FFFFFFF1
+0
+F
+0
+FFFFFFF1
+0
+F
+0
+FFFFFFF1
+0
+F
+0
+FFFFFFF1
+0
+F
+0
+FFFFFFF1
+0
+
+r log2 pr
+
+8819B4C3 3AB116AF
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+←
+
+3C50723
+
+α
+
+p
+
+log2 p
+
+1
+0
+1
+F
+1
+0
+1
+F
+1
+0
+1
+F
+1
+0
+1
+F
+1
+0
+
+0.137390
+1
+0.135712
+0.001984
+0.133148
+1
+0.138214
+0.002533
+0.137360
+1
+0.130371
+0.001984
+0.131958
+1
+0.137543
+0.002228
+0.136597
+1
+
+−2.86
+−0.00
+−2.88
+−8.98
+−2.91
+−0.00
+−2.86
+−8.62
+−2.86
+−0.00
+−2.94
+−8.98
+−2.92
+−0.00
+−2.86
+−8.81
+−2.87
+−0.00
+−61.36
+
+Let α[i : 0], β[i : 0] and γ[i : 0] be partially constructed (i + 1)-bit differences. Then expressing (37) bitwise
+for the first (i + 1) bits we get:
+(α[i : 0], β[i : 0], γ[i : 0]) :
+((β[i : 0] = 0 : i < 4) ∨ (β[i : 0] = α[i − 4 : 0]|0000(2) : i ≥ 4))∧
+((γ[i : 0] ∈ {(α[i + 5 : 5])[i : 0], (α[i + 5 : 5] + 1)[i : 0],
+(α[i + 5 : 5] − 2n−5 )[i : 0], (α[i + 5 : 5] − 2n−5 + 1)[i : 0]} :
+5 ≤ i < 27)) .
+
+(38)
+
+Equation (38) is a necessary, but not a sufficient condition for (37). The reason is the following. Consider one
+of the partially constructed differences after RSH: (α[i + 5 : 5] − 2n−5 )[i : 0]. Note that −2n−5 = 2n − 2n−5
+mod 2n , which is a value that has only its five MS bits set (e.g. for n = 32 : −2n−5 = 232 − 227 =
+0xF8000000). Thus the term −2n−5 affects the sum (α[i + 5 : 5] − 2n−5 )[i : 0] only for i ≥ 27. Therefore,
+although a given difference may be discarded as invalid when evaluated at position i < 27 according to (38),
+for i ≥ 27 it may still turn out to be a valid difference after subtraction by 2n−5 or (2n−5 − 1).
+Condition (38) in combination with pi+1 ≥ pthres (cf. Algorithm 1) improves the efficiency of Algorithm 1
+when applied to construct a pDDT for F. Still, due to the fact that it is not a sufficient condition, as
+discussed above, not all valid differentials are present, and therefore the constructed pDDT is incomplete.
+
+E
+E.1
+
+Proofs
+Proof of Proposition 1
+
+Proof. We shall prove the proposition for adp⊕ . In this case α, β and γ are ADD differences propagating
+through the XOR operation. The proof for xdp+ is analogous.
+
+We induct over the word size n. The proposition is trivially true for the base case n = 1: p1 ≤ p0 = 1.
+Let n = k > 1. We have to prove that pk ≤ pk−1 .
+Let x and y be n-bit integers. Define Li to be the set of i-bit pairs (xi , yi ) that satisfy the differential
+(αi , βi → γi ) for the operation addition modulo 2i :
+Li = {(xi , yi ) : ((xi + αi ) ⊕ (yi + βi )) − (xi + yi ) = γi },
+
+n≥i≥1 .
+
+(39)
+
+Let li = #Li . By definition pk = lk /22k and pk−1 = lk−1 /22(k−1) (cf. (2)). Note that every element of Lk
+can be obtained from an element (xk−1 , yk−1 ) of Lk−1 by appending bits x[k − 1] and y[k − 1] to xk−1 and
+yk−1 respectively. Assume that this is not true i.e. assume:
+∃xk , yk :
+
+(xk = x[k − 1]|xk−1 , yk = y[k − 1]|yk−1 , (xk , yk ) ∈ Lk )∧
+((xk−1 , yk−1 ) ∈
+/ Lk−1 ) .
+
+(40)
+
+∗
+If (40) is true then we can construct a new set L∗k−1 = (xk−1 , yk−1 ) ∪ Lk−1 . Its size is lk−1
+= lk−1 + 1 and
+∗
+2(k−1)
+so pk−1 = lk−1 /2
+. The latter differs from the actual value of the probability pk−1 = lk−1 /22(k−1) and
+therefore the assumption (40) is false. Thus ∀(xk , yk ) ∈ Lk : (xk−1 , yk−1 ) ∈ Lk−1 . Because #{(x[k], y[k])} =
+22 , the size of Lk can be at most 22 times bigger than the size of Lk−1 :
+
+lk ≤ 22 lk−1 ⇒
+
+lk
+lk−1
+≤ 2(k−1) ⇒ pk ≤ pk−1 .
+2k
+2
+2
+
+(41)
+⊓
+⊔
+
+E.2
+
+Proof of Theorem 1
+
+Proof. Let x be an n-bit input to LSH with shift constant r ≤ n. Let xL , xR : x = xL 2n−r + xR . Then
+(x ≪ r) = xR 2r . Similarly, for the input ADD difference α let αL , αR : α = αL 2n−r + αR and thus
+(α ≪ r) = αR 2r . The sum (x + α) can then be represented as:
+(x + α) = (xL + αL )2n−r + (xR + αR )
+= ((xL + αL + cR )
+
+mod 2r ) 2n−r + ((xR + αR )
+
+mod 2n−r ) ,
+
+(42)
+
+where cR is the carry generated from the addition (xR + αR ) mod 2n−r . From (42) follows that (x + α) ≪
+r = (xR + αR )2r . Thus for the output difference β we get:
+β = ((x + α) ≪ r) − (x ≪ r) = (xR + αR )2r − xR 2r = αR 2r = (α ≪ r) .
+
+(43)
+
+Note that (43) is independent of the input x and therefore holds with probability 1 over all values of x.
+From this the expression (4) for the probability adp≪r immediately follows.
+⊓
+⊔
+E.3
+
+Proof of Theorem 2
+
+Proof. Let x be an n-bit input to RSH with shift constant r ≤ n. Let xL , xR : x = xL 2r + xR . Then
+(x ≫ r) = xL . Similarly, for the input ADD difference α let αL , αR : α = αL 2r + αR and thus (α ≫ r) = αL .
+Denote by cR the carry generated from the addition (aR + αR ) mod 2r :
+(
+0 , if (xR + αR ) < 2r ,
+cR =
+.
+(44)
+1 , otherwise .
+
+The sum (x + α) can then be represented as:
+(x + α) = (xL + αL )2r + (xR + αR )
+= ((xL + αL + cR )
+
+mod 2n−r ) 2r + ((xR + αR )
+
+mod 2r ) .
+
+(45)
+
+Therefore (x + α) ≫ r = (xL + αL + cR ) mod 2n−r and for the output difference β we derive:
+β = ((x + α) ≫ r) − (x ≫ r) = ((xL + αL + cR )
+
+mod 2n−r ) − xL
+
+= αL − cL 2n−r + cR ,
+where
+cL =
+
+(
+
+0 ,
+1 ,
+
+(46)
+if (xL + αL + cR ) < 2n−r ,
+.
+otherwise .
+
+(47)
+
+The term −cL 2n−r in (46) is introduced in order to cancel the carry 2n−r that is generated in the cases in
+which the sum (xL +αL +cR ) is bigger than (2n−r −1). In such a case cL = 1 and −cL 2n−r +(xL +αL +cR ) =
+−2n−r + 2n−r + (xL + αL + cR ) mod 2n−r = (xL + αL + cR ) mod 2n−r .
+In the expression for β (46), for each distinct value of the tuple (cL , cR ) we get one of the four possibilities
+for β:
+
+
+(α ≫ r) ,
+cL = 0, cR = 0 ,
+
+
+
+(α ≫ r) − 2n−r ,
+cL = 1, cR = 0 ,
+.
+(48)
+β=
+
+(α ≫ r) + 1 ,
+cL = 0, cR = 1 ,
+
+
+
+(α ≫ r) − 2n−r + 1 , c = 1, c = 1 .
+L
+R
+In order to compute the corresponding probabilities, we have to count the number of inputs x, that
+result in a given value for (cL , cR ). Note that cL and cR depend on x and α, of which α is fixed and x can
+take on all values from 0 to 2n − 1. From (44) it is easy to compute that cR = 0 for exactly (2r − αR )
+values of xR and therefore cR = 1 for the remaining 2r − (2r − αR ) = αR values. Note that xR is an r-bit
+word. Similarly, if cR = 0 then cL = 0 for (2n−r − αL ) values of xL and cL = 1 for the remaining αL values.
+If cR = 1 then cL = 0 for (2n−r − αL − 1) values and cL = 1 for the remaining αL + 1 values. Therefore
+(cL , cR ) = (0, 0) for (2n−r − αL )(2r − αR ) values of x. Since the total number of values is 2n we obtain the
+probability:
+adp≫r (α → β = (α ≫ r)) = 2−n (2n−r − αL )(2r − αR ) .
+(49)
+The expressions for the remaining three probabilities are derived analogously.
+E.4
+
+⊓
+⊔
+
+Proof of Theorem 3
+
+Proof. Denote pi = adp3⊕ ((α ≪ 4), α, γi → β) and qi = adp≫5 (α → γi ). Let ∀i : 0 ≤ i < 4 : pi ≥ pthres .
+After multiplying both sides by qi and summing over i we obtain:
+3
+X
+i=0
+
+(pi qi ) = eadpF (α → β) ≥
+
+3
+X
+i=0
+
+(pthres qi ) = pthres
+
+3
+X
+
+qi = pthres ,
+
+(50)
+
+i=0
+
+P
+since 3i=0 qi = 1 (cf. Theorem 2), which proves (14). Similarly, to prove (15) assume that ∄i : adp3⊕ ((α ≪
+4), α, γi → β) ≥ pthres . Due to (50) this assumption contradicts the fact that eadpF (α → β) ≥ pthres and is
+therefore false. This completes the proof.
+⊓
+⊔
+
+Fig. 7. TEA, n = 10 bits: dependency of the maximum probability output ADD difference on the value of the round key.
+
+

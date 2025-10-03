@@ -1,0 +1,908 @@
+Efficient Algorithms for Computing Differential
+Properties of Addition
+Helger Lipmaa1 and Shiho Moriai2
+1
+
+Helsinki University of Technology, Department of Computer Science and Engineering
+P.O.Box 5400, FI-02015 HUT, Espoo, Finland
+helger@tml.hut.fi
+2
+NTT Laboratories
+1-1 Hikari-no-oka, Yokosuka, 239-0847 Japan
+shiho@isl.ntt.co.jp
+
+Abstract. In this paper we systematically study the differential properties
+of addition modulo 2n . We derive Θ(log n)-time algorithms for most of the
+properties, including differential probability of addition. We also present log-time
+algorithms for finding good differentials. Despite the apparent simplicity of modular addition, the best known algorithms require naive exhaustive computation.
+Our results represent a significant improvement over them. In the most extreme
+case, we present a complexity reduction from Ω(24n ) to Θ(log n).
+Keywords: Modular addition, differential cryptanalysis, differential probability,
+impossible differentials, maximum differential probability.
+
+1 Introduction
+One of the most successful and influential attacks against block ciphers is Differential
+Cryptanalysis (DC), introduced by Biham and Shamir in 1991 [BS91a]. For many of
+the block ciphers proposed since then, provable security against DC (defined by Lai,
+Massey and Murphy [LMM91] and first implemented by Nyberg and Knudsen [NK95])
+has been one of the primary criteria used to confirm their potential quality.
+Unfortunately, few approaches to proving security have been really successful. The
+original approach of [NK95] has been used in designing MISTY and its variant KASUMI
+(the new 3GPP block cipher standard). Another influential approach has been the “wide
+trail” strategy proposed by Daemen [Dae95], applied for example in the proposed AES,
+Rijndael. The main reason for the small number of successful strategies is the complex
+structure of modern ciphers, which makes exact evaluation of their differential properties
+infeasible. This has, unfortunately, led to a situation where the security against DC is
+often evaluated by heuristic methods.
+We approach the above problem by using the bottom-up methodology. That is, we
+evaluate many sophisticated differential properties of one of the most-used “non-trivial”
+block cipher cornerstones, addition modulo 2n for n ≥ 1. We hope that this will help
+to evaluate the differential properties of larger composite cipher parts like the PseudoHadamard Transform, with the entire cipher being the final goal. The algorithms proposed here will enable the advanced cryptanalysis of block ciphers. We hope that our
+M. Matsui (Ed.): FSE 2001, LNCS 2355, pp. 336–350, 2002.
+c Springer-Verlag Berlin Heidelberg 2002
+
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+337
+
+results will facilitate cryptanalysis of such stream ciphers and hash functions that use
+addition and XOR at the same time.
+Importance of Differential Properties of Addition. Originally, DC was considered
+with respect to XOR, and was generalized to DC with respect to an arbitrary group
+operation in [LMM91]. In 1992, Berson [Ber92] observed that for many primitive operations, it is significantly more difficult to apply DC with respect to XOR than with
+respect to addition modulo 232 . Most interestingly, he classified DC of addition modulo
+2n itself, with n sufficiently big, with respect to XOR to be hard to analyze, given the
+(then) current state of theory.
+Until now it has seemed that the problem of evaluating the differential properties of
+addition with respect to XOR is hard. Hereafter, we omit the “with respect to XOR” and
+take the addition to be always modulo 2n . The fastest known algorithms for computing
+the differential probability of addition DP+ (α, β → γ):=Px,y [(x + y) ⊕ ((x ⊕ α) +
+(y ⊕ β)) = γ] is exponential in n. The complexity of the algorithms for the maximum
++
+differential probability DP+
+max (α, β):= maxγ DP (α, β → γ), the double-maximum
++
++
+differential probability DP2max (α):= maxβ,γ DP (α, β → γ), and many other differential properties of addition are also exponential in n.
+With small n (e.g., n = 8 or even with n = 16), exponential-in-n computation is
+feasible, as demonstrated in the cryptanalysis of FEAL by Aoki, Kobayashi and Moriai
+in [AKM98]. However, this is not the case when n ≥ 32 as used in the recent 128-bit
+block ciphers such as MARS, RC6 and Twofish. In practice, if n ≥ 32, both cipher
+designers and cryptanalysts have mostly made use of only a few differential properties
+of addition. (For example, letting x0 be the least significant bit of x, they often use the
+property that α0 ⊕ β0 ⊕ γ0 = 0.) It means that block ciphers that employ both XOR and
+addition modulo 2n are hard to evaluate the security against DC due to the lack of theory.
+This has led to the general concern that mixed use of XOR and modular addition might
+add more confusion (in Shannon’s sense) to a cipher but “none has yet demonstrated
+to have a clear understanding of how to produce any proof nor convincing arguments
+of the advantage of such an approach” [Knu99]. One could say that they also add more
+confusion to the cipher in the layman’s sense.
+There has been significant ongoing work on evaluating the security of such “confusing” block ciphers against differential attacks. Some of these papers have also somewhat
+focused on the specific problem of evaluating the differential properties of addition. The
+full version of [BS91b] treated some differential probabilities of addition modulo 2n
+and included a few formulas useful to compute DP+ , but did not include any concrete
+algorithms nor estimations of their complexities. The same is true for many later papers
+that analyzed ciphers like RC5, SAFER, and IDEA. Miyano [Miy98] studied the simpler case with one addend fixed and derived a linear-time algorithm for computing the
+corresponding differential probability.
+Our Results. We develop a framework that allows the extremely efficient evaluation of
+many interesting differential properties of modular addition. In particular, most of the
+algorithms described herein run in time, sublinear in n. Since this would be impossible in
+the Turing machine model, we chose to use a realistic unit-cost RAM (Random Access
+
+338
+
+H. Lipmaa and S. Moriai
+
+Machine) model, which executes basic n-bit operations like Boolean operations and
+addition modulo 2n in unit time, as almost all contemporary microprocessors do.
+The choice of this model is clearly motivated by the popularity of such microprocessors. Still, for several problems (although sometimes implicitly) we also describe
+linear-time algorithms that might run faster in hardware. (Moreover, the linear-time
+algorithms are usually easier to understand and hence serve an educational purpose.)
+Nevertheless, the RAM model was chosen to be “minimal”, such that the described algorithms would be directly usable on as many platforms as possible. On the other hand,
+we immediately demonstrate the power of this model by describing some useful log-time
+algorithms (namely, for the Hamming weight, all-one parity and common alternation
+parity). They become very useful later when we investigate other differential properties.
+One of them (for the common alternation parity) might be interesting by itself; we have
+not met this algorithm in the literature.
+After describing the model and the necessary tools, we show that DP+ can be computed in time Θ(log n) in the worst-case. The corresponding algorithm has two principal
+steps. The first step checks in constant-time whether the differential δ = (α, β → γ) is
+impossible (i.e., whether DP+ (δ) = 0). The second step, executed only if δ is possible,
+computes the Hamming weight of an n-bit string in time Θ(log n). As a corollary, we
+prove an open conjecture from [AKM98].
+The structure of the described algorithm raises an immediate question of what is the
+density of the possible differentials. We show that the event DP+ (δ) = 0 occurs with the
+ n−1
+(This proves an open conjecture stated in [AKM98]).
+negligible probability 12 · 78
+That is, the density of possible differentials is negligible, so DP+ can be computed in
+time Θ(1) in the average-case. These results can be further used for impossible differential cryptanalysis, since the best previously known general algorithm to find non-trivial
+impossible differentials was by exhaustive search. Moreover, the high density of impossible differentials makes differential cryptanalysis more efficient; most of the wrong
+pairs can be filtered out [BS91a,O’C95].
+Furthermore, we compute the explicit probabilities Pδ [DP+ (δ) = i] for any i, 0 ≤
+i ≤ 1. This helps us to compute the distribution of the random variable X : δ → DP+ (δ),
+and to create formulas for the expected value and variance of the random variable X.
+Based on this knowledge, one can easily compute the probabilities that P[X > i] for
+any i.
+For the practical success of differential attacks it is not always sufficient to pick a
+random differential hoping it will be “good” with reasonable probability. It would be nice
+to find good differentials efficiently in a deterministic way. Both cipher designers and
+cryptanalysts are especially interested in finding the “optimal” differentials that result
+in the maximum differential probabilities and therefore in the best possible attacks.
+For this purpose we describe a log-time algorithm for computing DP+
+max (α, β) and a γ
+that achieves this probability. Both the structure of the algorithm (which makes use of
+the all-one parity) and its proof of correctness are nontrivial. We also describe a logtime algorithm that finds a pair (β, γ) that maximizes the double-maximum differential
++
+probability DP+
+2max (α). We show that for many nonzero α-s, DP2max (α) is very close
+to one. A summary of some of our results is presented in Table 1.
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+339
+
+Table 1. Summary of the efficiency of our main algorithms
+DP+
+DP+
+DP+
+max
+ 2n 
+ 3n 
+2max
+Previous result Ω 2
+Ω 2
+Ω 24n
+Our result
+Θ(log n) (worst-case), Θ(1) (average) Θ(log n) Θ(log n)
+
+Road map. We give some preliminaries in Sect. 2. Section 3 describes a unit-cost
+RAM model, and introduces the reader to several efficient algorithms that are crucial
+for the later sections. In Sect. 4 we describe a log-time algorithm for DP+ . Section 5
+gives formulas for the density of impossible differentials and other statistical properties
+of DP+ . Algorithms for maximum differential probability and related problems are
+described in Sect. 6.
+
+2 Preliminaries
+Let Σ = {0, 1} be the binary alphabet. For any n-bit string x ∈ Σ n , let xi ∈ Σ be the in−1
+i
+th coordinate of
+x∞(i.e., xi = i=0 xi 2 ). We always assume that xi = 0 if i ∈ [0, n−1].
+(That is, x = −∞ xi 2 .)
+Let ⊕, ∨, ∧ and ¬ denote n-bit bitwise “XOR”, “OR”, “AND” and “negation”,
+respectively. Let x  i (resp. x  i) denote the right (resp. the left) shift by i positions
+(i.e., x  i:=x/2i  and x  i:=2i x mod 2n ). Addition is always performed modulo
+2n , if not stated otherwise. For any x, y and z we define eq(x, y, z):=(¬x⊕y)∧(¬x⊕z)
+(i.e., eq(x, y, z)i = 1 ⇐⇒ xi = yi = zi ) and xor(x, y, z):=x ⊕ y ⊕ z. For any n, let
+mask(n):=2n − 1. For example, ((¬0)  1)0 = 0.
+Addition modulo 2n . The carry, carry(x, y):=c ∈ Σ n , x, y ∈ Σ n , of addition x + y is
+defined recursively as follows. First, c0 :=0. Second, ci+1 :=(xi ∧yi )⊕(xi ∧ci )⊕(yi ∧ci ),
+for every i ≥ 0. Equivalently, ci+1 = 1 ⇐⇒ xi + yi + ci ≥ 2. (That is, the carry bit
+ci+1 is a function of the sum xi + yi + ci .) The following is a basic property of addition
+modulo 2n .
+Property 1. If (x, y) ∈ Σ n × Σ n , then x + y = x ⊕ y ⊕ carry(x, y).
+Differential Probability of Addition. We define the differential of addition modulo
+2n as a triplet of two input and one output differences, denoted as (α, β → γ), where
+α, β, γ ∈ Σ n . The differential probability of addition is defined as follows:
+DP+ (δ) = DP+ (α, β → γ):=Px,y [(x + y) ⊕ ((x ⊕ α) + (y ⊕ β)) = γ] .
+That is, DP+ (δ):={x, y : (x + y) ⊕ ((x ⊕ α) + (y ⊕ β)) = γ}/22n . We say that δ is
+impossible if DP+ (δ) = 0. Otherwise we say that δ is possible. It follows directly from
+Property 1 that one can rewrite the definition of DP+ as follows:
+Lemma 1. DP+ (α, β → γ) = Px,y [carry(x, y) ⊕ carry(x ⊕ α, y ⊕ β) = xor(α, β, γ)].
+
+340
+
+H. Lipmaa and S. Moriai
+
+Probability Theory. Let X be a discrete random variable. Except for a few explicitly
+mentioned cases, we always deal with uniformly distributed
+variables. We note that in the
+ 
+binomial distribution, P[X = k] = pk (1 − p)n−k nk =:b (k; n, p),
+nfor some fixed 0 ≤
+p ≤ 1 and any k ∈ ZZ n+1 . From the basic
+axioms
+of
+probability,
+k=0 b (k; n, p) = 1.
+n
+Moreover, the expectation E[X] = k=0 k · P[X = k] of a binomially distributed
+random variable X is equal to np, while the variance Var[X] = E[X 2 ] − E[X]2 is
+equal to np(1 − p).
+
+3 RAM Model and Some Useful Algorithms
+In the n-bit unit-cost RAM model, some subset of fixed n-bit operations can be executed
+in constant time. In the current paper, we specify this subset to be a small set of n-bit
+instructions, all of which are readily available in the vast majority of contemporary
+microprocessors: Boolean operations, addition, and the constant shifts. We additionally
+allow unit-cost equality tests and (conditional) jumps. On the other hand, our model does
+not include table look-ups or (say) multiplications. Such a restriction guarantees that
+algorithms efficient in this model are also efficient on a very broad class of platforms,
+including FPGA and other hardware. This is further emphasized by the fact that our
+algorithms need only a few bytes of extra memory and thus a very small circuit size in
+hardware implementations.
+Many algorithms that we derive in the current paper make heavy use of the three
+non-trivial functions described below. The power of our minimal computational model
+is stressed by the fact that all three functions can be computed in time Θ(log n).
+Hamming Weight. The first function is the Hamming weight function (also
+n−1known
+as the population count or, sometimes, as sideways addition) wh : For x = i=0 xi 2i ,
+n−1
+wh (x) = i=0 xi , i.e., wh counts the “one” bits in an n-bit string. In the unit-cost RAM
+model, wh (x) can be computed in Θ(log n) steps. Many textbooks contain (a variation
+of) the next algorithm that we list here only for the sake of completeness.
+INPUT: x
+OUTPUT: wh (x)
+1. x ← x − ((x  1) ∧ 0x55555555L);
+2. x ← (x ∧ 0x33333333L) + ((x  2) ∧ 0x33333333L);
+3. x ← (x + (x  4)) ∧ 0x0F0F0F0FL;
+4. x ← x + (x  8);
+5. x ← (x + (x  16)) ∧ 0x0000003FL;
+6. Return x;
+Additional time-space trade-offs are possible in calculating the Hamming weight. If
+n = cm, then one can precompute 2c values of wh (i), 0 ≤ i < 2c , and then find wh (x)
+by doing m = n/c table look-ups. This method is faster than the method described in
+the previous paragraph if m ≤ log2 n, which is the case if n = 32 and m ∈ {8, 16}.
+However, it also requires more memory. While we do not discuss this method hereafter,
+our implementations use it, since it offers better performance on 32-bit processors.
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+341
+
+x = 00001000001100110000010101010100 ,
+y = 01000000000000010110110001110100 ,
+aop(x) = 00001000001000100000010101010100 ,
+aopr (x) = 00001000000100010000010101010100 ,
+C(x, y) = 00000000000000001000001001001010 ,
+C r (x, y) = 00000000000000010000010010010100 .
+
+Fig. 1. A pair (x, y) with corresponding values aop(x), aopr (x), C(x, y) and C r (x, y). Here,
+for example, aop(x)27 = 1 since 1 = x27 = x28 and 28 − 27 = 1 is odd. On the other hand,
+C r (x, y)4 = 1 since x4 = y4 = x3 = y3 = x2 = y2 = x1 = y1 = x0 = y0 , and 4 − 0 is even.
+Since 5 = 0, we could have taken also C(x, y)5 = 1
+
+Interestingly, many ancient and modern power architectures have a special machinelevel “cryptanalyst’s” instruction for wh (mostly known as the population count instruction): SADD on the Mark I (sic), CXi Xj on the CDC Cyber series, Ai PSj on the Cray
+X-MP, VPCNT on the NEC SX-4, CTPOP on the Alpha 21264, POPC on the Ultra SPARC,
+POPCNT on the Intel IA64, etc. In principle, we could incorporate in our model a unittime population count instruction, then several later presented algorithms would run in
+constant time. However, since there is no population count instruction on most of the
+other architectures (especially on the widespread Intel IA32 platform), we have decided
+not include it in the set of primitive operations. Moreover, the complexity of population count does not significantly influence the (average-case) complexity of the derived
+algorithms.
+All-one and Common Alternation Parity. The second and third functions, important
+for several derived algorithms (more precisely, they are used in Algorithm 4 and Algorithm 5), are the all-one and common alternation parity of n-bit strings, defined as
+follows. (Note that while the Hamming weight has very many useful applications in
+cryptography, the functions defined in this section have never been, as far as we know,
+used before for any cryptographic or other purpose.)
+The all-one parity of an n-bit number x is another n-bit number y = aop(x) s.t.
+yi = 1 iff the longest sequence of consecutive one-bits xi xi+1 . . . xi+j = 11 . . . 1 has
+odd length.
+The common alternation parity of two n-bit numbers x and y is a function C(x, y)
+with the next properties: (1) C(x, y)i = 1, if i is even and non-zero, (2) C(x, y)i = 0,
+if i is odd, (3) unspecified (either 0 or 1) if i = 0, where i is the length of the longest
+common alternating bit chain xi = yi = xi+1 = yi+1 = xi+2 = yi+2 . . . = xi+ i =
+yi+ i , where i + i ≤ n − 1. (In both cases, counting starts with one. E.g., if xi = yi
+but xi+1 = yi+1 then i = 1 and C(x, y)i = 0.) W.l.o.g., we will define
+C(x, y):=aop(¬(x ⊕ y) ∧ (¬(x ⊕ y)  1) ∧ (x ⊕ (x  1))) .
+
+342
+
+H. Lipmaa and S. Moriai
+
+Algorithm 1 Log-time algorithm for aop(x)
+INPUT: x ∈ Σ n , n is a power of 2
+OUTPUT: aop(x)
+1. x[1] = x ∧ (x  1);
+2. For i ← 2 to log2 n − 1 do x[i] ← x[i − 1] ∧ (x[i − 1]  2i−1 );
+3. y[1] ← x ∧ ¬x[1];
+4. For i ← 2 to log2 n do y[i] ← y[i − 1] ∨ ((y[i − 1]  2i−1 ) ∧ x[i − 1]);
+5. Return y[log2 n];
+
+For both the all-one and common alternation parity we will also need their “duals” (denoted as aopr and C r ), obtained by bit-reversing their arguments. That is,
+aopr (x, y) = aop(x , y  ), where xi := xn−i and yi := yn−i . (See Fig. 1.) Note that for
+every (x, y) and i, C(x, y)i = 1 ⇒ C(x, y)i+1 = C(x, y)i−1 = 0.
+Clearly, Algorithm 1 finds the all-one parity of x in time Θ(log n). (It is sufficient to
+note that x[i]j = 1 if and only if the number nj of ones in the sequence (xj = 1, xj+1 =
+1, . . . , xj+nj −1 = 1, xj+nj −2 = 0) is at least 2i and y[i]j = 1 iff nj is an odd number
+not bigger than 2j .) Therefore also C(x, y) can be computed in time Θ(log n).
+
+4 Log-time Algorithm for Differential Probability of Addition
+In this section we say that differential δ = (α, β → γ) is “good” if eq(α  1, β  1, γ 
+1)∧(xor(α, β, γ)⊕(α  1)) = 0.Alternatively, δ is not “good” iff for some i ∈ [0, n−1],
+αi−1 = βi−1 = γi−1 = αi ⊕ βi ⊕ γi . (Remember that α−1 = β−1 = γ−1 = 0.) The
+next algorithm has a simple linear-time version, suitable for “manual cryptanalysis”:
+(1) Check, whether δ is “good”, using the second definition of “goodness”; (2) If δ is
+“good”, count the number of positions i = n − 1, s.t. the triple (αi , βi , γi ) contains both
+zeros and ones.
+Theorem 1. Let δ = (α, β → γ) be an arbitrary differential. Algorithm 2 returns
+DP+ (δ) in time Θ(log n). More precisely, it works in time Θ(1) + t, where t is the time
+it takes to compute wh .
+
+Algorithm 2 Log-time algorithm for DP+
+INPUT: δ = (α, β → γ)
+OUTPUT: DP+ (δ)
+1. If eq(α 1, β 1, γ 1) ∧ (xor(α, β, γ) ⊕ (β
+2. Return 2−wh (¬eq(α,β,γ)∧mask(n−1)) ;
+
+1)) = 0 then return 0;
+
+Rest of this subsection consists of a step-by-step proof of this result, where we use the
+Lemma 1, i.e., that DP+ (δ) = Px,y [carry(x, y) ⊕ carry(x ⊕ α, y ⊕ β) = xor(α, β, γ).
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+343
+
+We first state and prove two auxiliary lemmas. After that we show how Theorem 1
+follows from them, and present two corollaries.
+Lemma 2. Let L(x) be a mapping, such that L(0) = 0, L(1) = L(2) = 12 and
+L(3) = 1. Let α, β ∈ Σ n . Then Px,y [carry(x, y)i+1 ⊕ carry(x ⊕ α, y ⊕ β)i+1 =
+1|αi + βi + ∆ci = j] = L(j).
+Proof. We denote c = carry(x, y) and c∗ = carry(x ⊕ α, y ⊕ β), where x and y are
+understood from the context. Let also ∆c = c ⊕ c∗ . By the definition of carry, ∆ci+1 =
+(xi ∧yi )⊕(xi ∧ci )⊕(yi ∧ci )⊕((x⊕α)i ∧(y ⊕β)i )⊕((x⊕α)i ∧c∗i )⊕((y ⊕β)i ∧c∗i ).
+This formula for ∆ci+1 is symmetric in the three pairs (xi , αi ), (yi , βi ) and (ci , ∆ci ).
+Hence, the function f (αi , βi , ∆ci ):=Pxi ,yi ,ci [∆ci+1 = 1] is symmetric, and therefore
+f is a function of αi + βi + ∆ci , f (j) = Pxi ,yi ,ci [∆ci+1 = 1|αi + βi + ∆ci = j]. One
+can now prove that Pxi ,yi [∆ci+1 = 1|αi + βi + ∆ci = j] = L(j) for any 0 ≤ j ≤ 3,
+and for any value of ci ∈ {0, 1}. For example, Pxi ,yi [∆ci+1 = 1|αi + βi + ∆ci =
+1] = Pxi ,yi [∆ci+1 = 1|(αi , βi , ∆ci ) = (0, 0, 1)] = Pxi ,yi [(xi ∧ ci ) ⊕ (yi ∧ ci ) ⊕
+(xi ∧ ¬ci ) ⊕ (xi ∧ ¬ci ) = 1] = Pxi ,yi [xi = yi ] = 12 . The claim follows since
+Px,y [∆ci+1 ] = Pxi ,yi [∆ci+1 ].
+
+
+Lemma 3. 1) Every possible differential is “good”.
+2) Let δ = (α, β → γ) be “good”. If i ∈ [0, n − 1], then Px,y [carry(x, y)i ⊕ carry(x ⊕
+α, y ⊕ β)i = 1|αi−1 + βi−1 + γi−1 = j] = L(j). In particular, Px,y [carry(x, y)0 ⊕
+carry(x ⊕ α, y ⊕ β)0 = 0] = 1.
+Proof. 1) Let δ be possible but not “good”. By Lemma 1, there exists an i and a pair
+(x, y), s.t. carry(x, y)i+1 ⊕ carry(x ⊕ α, y ⊕ β)i+1 = xor(α, β, γ)i+1 = αi = βi = γi .
+Note that then xor(α, β, γ)i = γi . But by Lemma 2, Pxi ,yi [carry(x, y)i+1 ⊕ carry(x ⊕
+α, y ⊕ β)i+1 = γi |αi = βi = γi ] = 0, which is a contradiction.
+2) Let δ be “good”. We prove the theorem by induction on i, by simultaneously
+proving the induction invariant Px,y [carry(x, y) ⊕ carry(x ⊕ α, y ⊕ β) = xor(α, β, γ)
+(mod 2i )] > 0. Base (i = 0). Straightforward from Property 1 and the definition
+of a “good” differential. Step (i + 1 > 0). We assume that the invariant is true for
+i. In particular, there exists a pair (x, y), s.t. ∆ci−1 = xor(α, β, γ)i−1 , where ∆c =
+carry(x, y) ⊕ carry(x ⊕ α, y ⊕ β). Then, by Lemma 2, L(j) = Px,y [∆ci = 1|αi−1 +
+βi−1 +∆ci−1 = j] = Px,y [∆ci = 1|αi−1 +βi−1 +xor(α, β, γ)i−1 = j] = Px,y [∆ci =
+1|αi−1 + βi−1 + γi−1 = j], where the last equation follows from the easily verifiable
+equality L(a1 + a2 + a3 ) = L(a1 + a2 + xor(a1 , a2 , a3 )), for every a1 , a2 , a3 ∈ Σ .
+This proves the theorem claim for i. The invariant for i, ∆ci = xor(α, β, γ)i , follows
+from that and the “goodness” of δ.
+
+
+Proof (Theorem 1). First, δ is “good” iff it is possible. (The “if” part follows from the
+first claim of Lemma 3. The “only if” part follows from the second claim of Lemma 3
+and the definition
+n−2of a “good” differential.) Let δ be possible. Then, by Lemma 1,
+DP+ (δ) =
+i=0 Px,y [carry(x, y)i ⊕ carry(x ⊕ α, y ⊕ β)i = xor(α, β, γ)i ]. By
+Lemma 2, Px,y [carry(x, y)i ⊕ carry(x ⊕ α, y ⊕ β)i = xor(α, β, γ)i ] is either 1 or
+1
+2 , depending on whether αi−1 = βi−1 = γi−1 or not. (This probability cannot be 0,
+
+344
+
+H. Lipmaa and S. Moriai
+n−2
+
+since δ is possible and hence “good”.) Therefore, DP+ (δ) = 2− i=0 ¬eq(α,β,γ)i =
+2−wh (¬eq(α,β,γ)∧mask(n−1)) , as required. Finally, the only non-constant time computation is that of Hamming weight.
+
+
+Note that technically, for Algorithm 2 to be log-time it would have to return (say) −1
+if the differential is impossible, or log2 DP+ (δ), if it is not. (The other valid possibility
+would be to include data-dependent shifts in the set of unit-cost operations.)
+The next two corollaries follow straightforwardly from Algorithm 2
+Corollary 1. DP+ is symmetric in its arguments. That is, for an arbitrary triple
+(α, β, γ), DP+ (α, β → γ) = DP+ (β, α → γ) = DP+ (α, γ → β). Therefore, in particular, maxα DP+ (α, β → γ) = maxβ DP+ (α, β → γ) = maxγ DP+ (α, β → γ).
+Corollary 2. 1) [Conjecture 1, [AKM98].] Let α + β = α + β  and α ⊕ β = α ⊕
+β  . Then for every γ, DP+ (α, β → γ) = DP+ (α , β  → γ). 2) For every α, β, γ,
+DP+ (α, β → γ) = DP+ (α ∧ β, α ∨ β → γ).
+Proof. We say that (α, β) and (α , β  ) are equivalent, if {αi , βi } = {αi , βi } for i <
+
+n − 1, and αn−1 ⊕ βn−1 = αn−1
+⊕ βn−1 . If (α, β) and (α , β  ) are equivalent then
++
++
+DP (α, β → γ) = DP (α , β  → γ) by the structure of Algorithm 2.
+1) The corresponding carries c = carry(α, β) and c = carry(α , β  ) are equal, since
+c = (α ⊕ β) ⊕ (α + β) = (α ⊕ β  ) ⊕ (α + β  ) = c . Therefore, α + β = α + β  and
+α ⊕ β = α ⊕ β  iff (α, β) and (α , β  ) are equivalnet.
+2) The second claim is straightforward, since (α, β) and (α∧β, α∨β) are equivalent
+for any α and β.
+
+
+Note that a pair (x, y) is equivalent to 21+wh ((x⊕y)∧mask(n−1)) different pairs (x∗ , y ∗ ).
+In [DGV93, Sect. 2.3] it was briefly mentioned that the number of such pairs is not more
+than 2wh (x⊕y) ; this result was used to cryptanalyse IDEA. The second claim carries
+unexpected connotations with the well known fact that α + α = (α ∧ α ) + (α ∨ α ).
+
+5 Statistical Properties of Differential Probability
+Note that Algorithm 2 has two principal steps. The first step is a constant-time check
+of whether the differential δ = (α, β → γ) is impossible (i.e., whether DP+ (δ) = 0).
+The second step, executed only if δ is possible, computes in log-time the Hamming
+weight of an n-bit string. The structure of this algorithm raises an immediate question of
+what is the density Pδ [DP+ (δ) = 0] of the possible differentials, since its average-case
+complexity (where the average is taken over uniformly and random chosen differentials
+δ) is Θ(Pδ [DP+ (δ) = 0] + Pδ [DP+ (δ) = 0] · log n). This is one (but certainly not the
+only or the most important) motivation for the current section.
+Let X : δ → DP+ (δ) be a uniformly random variable. We next calculate the
+exact probabilities P[X = i] for any i. From the results we can directly derive the
+distribution of X. Knowing the distribution, one can, by using standard probabilistic
+tools, calculate the values of many other interesting probabilistic properties like the
+probabilities P[X > i] for any i.
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+Theorem 2. 1) [Conjecture 2, [AKM98].] P[X = 0] = 12 ·
+−k
+
+2) Let 0 ≤ k < n. Then P[X = 2
+b k; n − 1, 67 .
+
+2+k−3n
+
+] = 2
+
+ 7 n−1
+
+k
+
+8
+
+·3 ·
+
+.
+
+
+n−1
+k
+
+= 12 ·
+
+345
+
+ 7 n−1
+8
+
+·
+
+Proof. Let δ = (α, β → γ) be an arbitrary differential and let e = eq(α, β, γ), e =
+eq(α  1, β  1, γ  1) and x = xor(α, β, γ) ⊕ (α  1)) be convenient shorthands.
+Since α, β and γ are mutually independent, e and x (and also e and x) are pairwise
+independent.
+n−1
+1) From Theorem 1, P[X = 0] = Pδ [e ∧ x = 0] = i=0 (1 − Pδ [ei = 1, xi =
+ n−1 
+
+
+n−1
+1]) = i=0 (1 − Pδ [ei = 1] · Pδ [xi = 1]) = 1 − 1 · 21 · i=1 1 − 14 · 12 =
+ 7 n−1
+1
+.
+2 · 8
+2) Let m = mask(n − 1). First, clearly, for any 0 ≤ k < n, Pδ [wh (e) = k] =
+
+
+ k  n−k n
+· k = b k; n, 14 and therefore Pδ [wh (¬e ∧
+Pα,β,γ∈Σ n [wh (e) = k] = 14 · 34
+
+
+
+
+
+
+
+
+
+
+n−1−k
+k
+= 22−2n · 3k · n−1
+· 34 · n−1
+m) = k] = b n − 1 − k; n − 1, 14 = 14
+k
+k .
+Let A denote the event wh (e ∧ m) = n − 1 − k and let B denote the event e ∧ x = 0.
+Let Bi be the event ei ∧ xi = 0. According to Algorithm 2, P[X = 2−k ] = Pδ [A, B] =
+n−1
+n−1
+Pδ [A] · Pδ [B|A] = Pδ [A] · i=0 Pδ [Bi |A] = 12 · Pδ [A] · i=1 Pδ [Bi |A], where we
+used the fact that e0 = 1.
+Now, if i > 0 then Pδ [Bi |ei = 1] = Pδ [xi = 0] = 12 , while Pδ [Bi = 0|ei =
+ n−1−k
+n−1
+, and hence
+0] = 1. Moreover, ei = ei−1 . Therefore, i=0 Pδ [Bi |A] = 12
+  1 n−1−k
+
+n−1
+1
+1
+1
+−k
+=
+P[X = 2 ] = 2 ·Pδ [A]· i=0 Pδ [Bi |A] = 2 ·b n − 1 − k; n − 1, 4 · 2
+
+
+ 1+k−n
+ 1  7 n−1 
+
+1
+6
+2−2n k n−1
+2+k−3n k n−1
+·3 · k ·2
+=2
+·3 · k = 2 · 8
+· b k; n − 1, 7 . 
+
+2 ·2
+Corollary 3. Algorithm 2 has average-case complexity Θ(1).
+As another corollary, X = X0 + X1 , where X1 , X2 : δ → DP+ (δ) are two random
+variables. X0 has domain D(X0 ) = {δ ∈ Σ 3n : DP+ (δ) = 0}, while X1 has the
+complementary domain D(X1 ) = {δ ∈ Σ 3n : DP+ (δ) = 0}. Moreover, X0 has
+constant distribution (since P[X0 = 0] = 1), while the random variable − log2 X1
+has binomial distribution with p = 67 . Knowledge of the distribution helps to find
+further properties of DP+ (e.g., the probabilities that DP+ (δ) > 2−k ) by using standard
+methods from probability theory.
+One can double-check the correctness of Theorem 2 by verifying that 12 · ( 78 )n−1 ·
+ n−1
+ n−1
+n−1 
+6
+−k
+] = P[X = 0] = 12 · 78
+. Moreover,
+k=0 b k; n − 1, 7 =
+k=0 P[X = 2
+clearly P[X = 2−k ] = |D(X0 )| · P[X0 = 2−k ] + |D(X1 )| · P[X1 = 2−k ] = 12 ·
+
+ 7 n−1 
+· b k; n − 1, 67 , which agrees with Theorem 2.
+8
+n−1
+We next compute the variance of X. Clearly, E[X] = k=0 2−k P[X = 2−k ] =
+2−n , and therefore E[X]2 = 2−2n . Next, by using Theorem 2 and the basic properties
+n−1
+of the binomial distribution, E[X 2 ] = 0 · P[X 2 = 0] + k=0 2−2k · P[X 2 = 2−2k ] =
+
+
+ 7 n−1 n−1 −2k
+
+ 5 n−1 n−1 
+1
+=
+· k=0 2
+· b k; n − 1, 67 = 12 · 16
+·  i=0 b k; n − 1, 35 
+2 · 8
+ 5 n−1
+ 5 n−1
+ 5 n−1  4 n−1
+1
+1
+1
+−2n
+.
+. Therefore, Var[X] = 2 · 16
+−2
+= 2 · 16
+− 16
+2 · 16
+Note that the density of possible differentials P[X = 0] is exponentially small in n.
+This can be contrasted with a result of O’Connor [O’C95] that a randomly selected n-bit
+
+346
+
+H. Lipmaa and S. Moriai
+
+Algorithm 3 Algorithm that finds all γ-s, s.t. DP+ (α, β → γ) = DP+
+max (α, β)
+INPUT: (α, β)
+OUTPUT: All (α, β)-optimal output differences γ
+1. γ0 ← α0 ⊕ β0 ;
+2. p ← C(α, β);
+3. For i ← 1 to n − 1 do
+If αi−1 = βi−1 = γi−1 then γi ← αi ⊕ βi ⊕ αi−1
+else if i = n − 1 or αi = βi or pi = 1 then γi ← {0, 1}
+else γi ← αi ;
+4. Return γ.
+
+permutation has a fraction of 1 − e−1/2 ≈ 0.4 impossible differentials, independently of
+the choice of n. Moreover, a randomly selected n-bit composite permutation [O’C93],
+n
+controlled by an n-bit string, has a negligible fraction ≈ 23n /e2 −1 of impossible
+differentials.
+
+6 Algorithms for Finding Good Differentials of Addition
+The last section described methods for computing the probability that a randomly picked
+differential δ has high differential probability. While this alone might give rise to successful differential attacks, it would be nice to have an efficient deterministic algorithm for
+finding differentials with high differential probability. This section gives some relevant
+algorithms for this.
+6.1
+
+Linear-Time Algorithm for DP+
+max
+
+In this subsection, we will describe an algorithm that, given an input difference (α, β),
+finds all output differences γ, for which DP+ (α, β → γ) is equal to the maximum differ+
+ential probability of addition, DP+
+max (α, β):= maxγ DP (α, β → γ). (By Corollary 1,
+we would get exactly the same result when maximizing the differential probability under
+α or β.) We say that such γ is (α, β)-optimal. Note that when an (α, β)-optimal γ is
+known, the maximum differential probability can be found by applying Algorithm 2 to
+δ = (α, β → γ). Moreover, similar algorithms can be used to find “near-optimal” γ-s,
+where log2 DP+ (α, β → γ) is only slightly smaller than log2 DP+
+max (α, β).
+Theorem 3. Algorithm 3 returns all (α, β)-optimal output differences γ.
+Proof (Sketch). First, we say that position i is bad if eq(α, β, γ)i = 0. According to Theorem 1, γ is (α, β)-optimal if it is chosen so that (1) for every i ≥ 0, if eq(α, β, γ)i−1 = 1
+then xor(αi , βi , γi ) = αi−1 , and (2) the number of bad positions i is the least among all
+such output differences γ  , for which (α, β → γ  ) is possible. For achieving (1) we must
+first fix γ0 ← α0 ⊕ β0 , and after that recursively guarantee that γi obtains the predicted
+value whenever αi−1 = βi−1 = γi−1 .
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+347
+
+Algorithm 4 A log-time algorithm that finds an (α, β)-optimal γ
+INPUT: (α, β)
+OUTPUT: An (α, β)-optimal γ
+1. r ← α ∧ 1;
+2. e ← ¬(α ⊕ β) ∧ ¬r;
+3. a ← e ∧ (e 1) ∧ (α ⊕ (α 1));
+4. p ← aopr (a);
+5. a ← (a ∨ (a  1)) ∧ ¬r;
+6. b ← (a ∨ e) 1;
+7. γ ← ((α ⊕ p) ∧ a) ∨ ((α ⊕ β ⊕ (α
+8. γ ← (γ ∧ ¬1) ∨ ((α ⊕ β) ∧ 1);
+9. Return γ.
+
+1)) ∧ ¬a ∧ b) ∨ (α ∧ ¬a ∧ ¬b);
+
+This, and minimizing the number of bad i-s can be done recursively for every 0 ≤
+i ≤ n − 1, starting from i = 0. If αi = βi then i is bad independently of the value of
+γi ∈ {0, 1}. Moreover, either choice of γ places no restriction on choosing γi+1 . This
+means that we can assign either γi ← 0 or γi ← 1.
+The situation is more complicated if αi = βi . Intuitively, if i = 2k > 0 is even, then
+the choice γi ← αi (as compared to the choice γi ← ¬αi ) will result in k bad positions
+(i, i + 2, . . . , i + 2k − 2) instead of k bad positions (i + 1, i + 3, . . . , i + 2k − 1).
+Thus these two choices are equal. On the other hand, if i = 2k + 1 > 0, then the
+choice γi ← αi would result in k bad positions compared to k + 1 when γi ← αi , and
+hence is to be preferred over the second one. We leave the full details of the proof to the
+reader.
+
+
+A linear-time algorithm that finds one (α, β)-optimal γ can be derived from Algorithm 3
+straightforwardly, by assigning γi ← αi whenever eq(α, β, γ)i−1 = 0.
+As an example, let us look at the case n = 16, α = 0x5254 and β = 0x1A45. Then
+C(α, β) = 0x1244, and by Algorithm 3 the set of (α, β)-optimal values is equal to
+215 Σ +212 P +211 Σ +24 Σ +1, where P = {0, 3, 7}, and Σ = {0, 1}, as always. There+
+fore, for example, DP+
+max (0x5254, 0x1A45) = DP (0x5254, 0x1A45 → 0x7011) =
+−8
+2 .
+6.2
+
+Log-time Algorithm for DP+
+max
+
+For a log-time algorithm we need a somewhat different approach, since in Algorithm 3
+the value of γi depends on that of γi−1 . However, luckily for us, γi only depends on
+γi−1 if eq(α, β, γ)i−1 = 1, and as seen from the proof of Theorem 3, in many cases we
+can choose the output difference γi−1 so that eq(α, β, γ)i−1 = 0!
+Moreover, the positions where eq(α, β, γ)i−1 = 1 must hold are easily detected.
+Namely (see Algorithm 3), if (1) i = 0 and αi = βi = 0, or (2) i > 0 and αi = βi but
+pi = 0. Accordingly, we can replace the condition eq(α, β, γ)i−1 = 1 with the condition
+¬(αi ⊕ βi ) ∧ pi , and take additional care if i is small. By noting how the values pi are
+computed, one can prove that
+
+348
+
+H. Lipmaa and S. Moriai
+
+Algorithm 5 A log-time algorithm for DP+
+2max (α)
+INPUT: α
+OUTPUT: DP+
+2max (α)
+r
+
+1. Return 2−wh (C (α,α)∧mask(n−1)) .
+
+Theorem 4. Algorithm 4 finds an (α, β)-optimal γ.
+Proof (Sketch, many details omitted). First, the value of p computed in the step 4 is
+“approximately” equal to C r (α, β), with some additional care taken about the lowest bits.
+Let r be the bit-reverse of  (i.e., ri is equal to the length of longest common alternating
+chain αi = βi = αi−1 = βi−1 = . . . .). Step 7 computes γi (again, “approximately”) as
+(1) γi ← αi ⊕ pi , if αi = βi , (2) γi ← αi ⊕ βi ⊕ αi−1 if αi = βi but eq(α, β, γ)i−1 = 1
+and (3) γi ← αi if αi = βi and eq(α, β, γ)i−1 = 0. Since the two last cases are sound,
+according to Algorithm 3, we are now left to prove that the first choice makes γ optimal.
+But this choice means that in every maximum-length common alternating bit chain
+αi = βi = αi−1 = βi−1 = . . . = αi− ri +1 = βi− ri +1 , Algorithm 4 chooses all bits
+γj , j ∈ [i − ri + 1, i], to be equal to αi− ri +1 = βi− ri +1 . By approximately the same
+arguments as in the proof of Theorem 3, this choice gives rise to i /2 bad bit positions
+in the fragment [i − ri + 1, i]; every other choice of bits γj would result in at least as
+many bad positions. Moreover, since ¬(αi+1 = βi+1 = αi = βi ), it has to be the case
+that either αi+1 = βi+1 or αi+1 = βi+1 = αi = βi . In the first case, both choices of γi
+make i + 1 bad. In the second case we must later take γi+1 ← αi+1 , which makes i + 1
+good, and enables us to start the next fragment from the position i + 1. (Intuitively, this
+last fact is also the reason why aopr is here preferred over aop.)
+
+
+Note that Biham and Shamir used the fact DP+ (α, β → α ⊕ β) =
+2−wh ((α∨β)∧mask(n−1)) in their differential cryptanalysis of FEAL in [BS91b]. Often this
+value is significantly smaller than the maximum differential probability DP+
+max (α, β).
++
+1
+For example, if α = β = 2n −1, then DP+
+max (α, β) = 2 , while DP (α, β → α ⊕ β) =
+DP+ (α, β → 0) = 2n−1 . However, since FEAL only uses 8-bit addition, it is possible
+to find (α, β)-optimal output differences γ by exhaustive search. This has been done,
+for example, in [AKM98].
+6.3
+
+Log-time Algorithm for Double-Maximum Differential Probability
+
+We next show that the double-maximum differential probability
++
++
+DP+
+2max (α):= max DP (α, β → γ) = max DPmax (α, β)
+β,γ
+
+β
+
+of addition can be computed in time Θ(log n). (As seen from Algorithm 3, DP+
+max (α, β)
++
+is a symmetric function and hence DP+
+2max (α) is equal to DP (α, β → γ) maximized under any two of its three arguments.) In particular, the next theorem shows
++
+that DP+
+2max (α) is equal to the (more relevant for the DC) value maxβ =0 DPmax (α, β)
+whenever α = 0. Note that the naive algorithm for the same problem works in time
+Ω(24n ), which makes it practically infeasible even for n = 16.
+
+Efficient Algorithms for Computing Differential Properties of Addition
+
+349
+
+Theorem 5. For every α ∈ Σ n , Algorithm 5 computes DP+
+2max (α) in time Θ(log n).
+Proof (Sketch). By the same arguments as in the proof of previous theorem, given inputs
+(α, α), the value γ:=α ⊕ (C r (α, α) ∧ mask(n − 1)) is (α, α)-optimal. We now prove
++
+
+by contradiction that DP+
+2max (α) = DPmax (α, α). Let β = α and γ be such that
++
++
+
+DP (α, β → γ ) > DPmax (α, α). By Algorithms 2 and 4, there is an i < n − 1
+such that eq(α, β, γ  )i = 1 and C r (α, α)i = 1. But then, on the other hand, since
+the differential (α, β → γ  ) is possible and C r (α, α)i = 1, it is also the case that
+eq(α, β, γ  )i−1 = 0. Since C r (α, α)i = 1 ⇒ C r (α, α)i−1 = 0, we have also that
+
+
+C r (α, α)i−1 = 0. Therefore DP+ (α, β → γ  ) ≤ DP+
+max (α, α).
+Straightforwardly, Theorem 5 helps to find many interesting properties of DP+
+2max . For
++
+n−1
+example, DP+
+(α)
+=
+1
+iff
+α
+∧
+(2
+−
+1)
+=
+0,
+and
+min
+DP
+(α)
+=
+2−n/2 .
+α
+2max
+2max
++
+1
+n−1
+s
+Another consequence is that DP2max (α) = 2 iff (1) α ∧ (2
+− 1) = −2 + 1 for
+some 0 ≤ s < n, or (2) α ∧ (2n−1 − 1) = 2s for some 0 ≤ s < n − 1. For better
+understanding, all values of DP+
+2max (α), n = 8, are depicted in Fig. 2.
++
+log2 DP2max
+(α)
+
+0
+-1
+-2
+-3
+-4
+
+0
+
+16 32 48 64 80 96 112 128 144 160 176 192 208 224 240
+α
+
+Fig. 2. Tabulation of values log2 DP+
+2max (α), 0 ≤ α ≤ 255, for n = 8. For example,
++
+−4
+1
+DP+
+2max (64) = 2 and DP2max (53) = 2
+
+Once again, our results may be compared with the results in [O’C93,O’C95] that
+show that for an n-bit permutation (resp. composite permutation, controlled by an nbit string) the expected probability of the maximum nonzero differential is ≤ n/2n−1
+(resp. ≈ 2−n ).
+Further Work and Acknowledgments. While we leave practical applications of our
+results as an open question, we note that our results have already been used in [MY00]
+for truncated differential cryptanalysis of Twofish.
+The current work bases somewhat on [Mor00], that had a (correct) linear-time algorithm for DP+ , but with an incorrect proof. We would like to thank Eli Biham for
+notifying us about the results presented in the full version of [BS91b].
+
+References
+[AKM98] Kazumaro Aoki, Kunio Kobayashi, and Shiho Moriai. The Best Differential Characteristic Search of FEAL. IEICE Trans. Fundamentals, E81-A(1):98–104, January
+1998.
+
+350
+
+H. Lipmaa and S. Moriai
+
+Thomas A. Berson. Differential Cryptanalysis Mod 232 with Applications to MD5. In
+Ernest F. Brickell, editor, Advances in Cryptology—CRYPTO ’92, volume 740 of Lecture Notes in Computer Science, pages 71–80. Springer-Verlag, 1993, 16–20 August
+1992.
+[BS91a] Eli Biham and Adi Shamir. Differential Cryptanalysis of DES-like Cryptosystems.
+Journal of Cryptology, 4(1):3–72, 1991.
+[BS91b] Eli Biham and Adi Shamir. Differential Cryptanalysis of Feal and N-Hash. In Donald W. Davies, editor, Advances on Cryptology — EUROCRYPT ’91, volume 547 of
+Lecture Notes in Computer Science, pages 1–16, Brighton, UK, April 1991. SpringerVerlag. Full version available from
+http://www.cs.technion.ac.il/˜biham/, as of April 2001.
+[Dae95]
+Joan Daemen. Cipher and Hash Function Design. Strategies based on linear and
+differential cryptanalysis. PhD thesis, Katholieke Universiteit Leuven, 1995.
+[DGV93] Joan Daemen, René Govaerts, and Joos Vandewalle. Cryptanalysis of 2.5 Rounds of
+IDEA. Technical Report 1, ESAT-COSIC, 1993.
+[Knu99] Lars Knudsen. Some Thoughts on the AES Process. Public Comment to the AES
+First Round, 15 April 1999. Available from
+http://www.ii.uib.no/˜larsr/serpent/, as of April 2001.
+[LMM91] Xuejia Lai, James L. Massey, and Sean Murphy. Markov Ciphers and Differential
+Cryptanalysis. In Donald W. Davies, editor, Advances on Cryptology — EUROCRYPT
+’91, volume 547 of Lecture Notes in Computer Science, pages 17–38, Brighton, UK,
+April 1991. Springer-Verlag.
+[Miy98] Hiroshi Miyano. Addend Dependency of Differential/Linear Probability of Addition.
+IEICE Trans. Fundamentals, E81-A(1):106–109, January 1998.
+[Mor00] Shiho Moriai. Cryptanalysis of Twofish (I). In The Symposium on Cryptography and
+Information Security, Okinawa, Japan, 26–28 January 2000. In Japanese.
+[MY00]
+Shiho Moriai and Yiqun Lisa Yin. Cryptanalysis of Twofish (II). Technical report,
+IEICE, ISEC2000-38, July 2000.
+[NK95]
+Kaisa Nyberg and Lars Knudsen. Provable Security Against a Differential Attack.
+Journal of Cryptology, 8(1):27–37, 1995.
+[O’C93] Luke J. O’Connor. On the Distribution of Characteristics in Composite Permutations.
+In Douglas R. Stinson, editor, Advances on Cryptology — CRYPTO ’93, volume 773
+of Lecture Notes in Computer Science, pages 403–412, Santa Barbara, USA, August
+1993. Springer-Verlag.
+[O’C95] Luke O’Connor. On the Distribution of Characteristics in Bijective Mappings. Journal
+of Cryptology, 8(2):67–86, 1995.
+[Ber92]
+
+

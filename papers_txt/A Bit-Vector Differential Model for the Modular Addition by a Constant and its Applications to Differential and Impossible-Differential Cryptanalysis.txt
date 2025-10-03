@@ -1,0 +1,6361 @@
+Designs, Codes and Cryptography (2022) 90:1797–1855
+https://doi.org/10.1007/s10623-022-01074-8
+
+A bit-vector differential model for the modular addition
+by a constant and its applications to differential and
+impossible-differential cryptanalysis
+Seyyed Arash Azimi1 · Adrián Ranea2 · Mahmoud Salmasizadeh3 ·
+Javad Mohajeri3 · Mohammad Reza Aref1 · Vincent Rijmen2,4
+Received: 4 January 2022 / Revised: 3 June 2022 / Accepted: 4 June 2022 /
+Published online: 5 July 2022
+© The Author(s), under exclusive licence to Springer Science+Business Media, LLC, part of Springer Nature 2022
+
+Abstract
+ARX algorithms are a class of symmetric-key algorithms constructed by Addition, Rotation,
+and XOR. To evaluate the resistance of an ARX cipher against differential and impossibledifferential cryptanalysis, the recent automated methods employ constraint satisfaction
+solvers to search for optimal characteristics or impossible differentials. The main difficulty
+in formulating this search is finding the differential models of the non-linear operations.
+While an efficient bit-vector differential model was obtained for the modular addition with
+two variable inputs, no differential model for the modular addition by a constant has been
+proposed so far, preventing ARX ciphers including this operation from being evaluated with
+automated methods. In this paper, we present the first bit-vector differential model for the
+n-bit modular addition by a constant input. Our model contains O(log2 (n)) basic bit-vector
+constraints and describes the binary logarithm of the differential probability. We describe an
+SMT-based automated method that includes our model to search for differential characteristics of ARX ciphers including constant additions. We also introduce a new automated method
+for obtaining impossible differentials where we do not search over a small pre-defined set of
+differences, such as low-weight differences, but let the SMT solver search through the space
+of differences. Moreover, we implement both methods in our open-source tool ArxPy to
+find characteristics and impossible differentials of ARX ciphers with constant additions in
+a fully automated way. As some examples, we provide related-key impossible differentials
+and differential characteristics of TEA, XTEA, HIGHT, LEA, SHACAL-1, and SHACAL-2,
+which achieve better results compared to previous works.
+Keywords Modular addition · ARX · SMT · Automated tool · Differential cryptanalysis ·
+Impossible differential
+
+Communicated by J. D. Key.
+Parts of this paper were presented at the Asiacrypt 2020 conference [3].
+
+B Seyyed Arash Azimi
+
+arash_azimi@ee.sharif.edu
+
+Extended author information available on the last page of the article
+
+123
+
+1798
+
+S. A. Azimi et al.
+
+Mathematics Subject Classification 94A60
+
+1 Introduction
+Low-end devices such as RFID tags, sensor networks, and the Internet of Things (IoT)
+are becoming ubiquitous. In 2018, Gartner, Inc. forecasted that there would be more than
+25 billion connected devices forming the IoT by 2021 [24], and following the COVID19 lockdowns Gartner also revealed that the unprecedented event led IoT implementers
+to increase IoT investments to reduce costs [25]. Traditional cryptographic algorithms are
+not suitable for these resource-constrained devices, and several lightweight cryptographic
+algorithms have been recently proposed to meet this growing demand. In this regard, the
+National Institute of Standards and Technology (NIST) has started a process to evaluate and
+standardize lightweight cryptographic algorithms [59].
+ARX primitives, composed exclusively of modular Additions, cyclic Rotations, and
+XORs, are a promising class of lightweight cryptographic algorithms with the most efficient
+software implementations on low-end microcontrollers [17]. There are many noteworthy
+ARX algorithms, such as the hash function BLAKE [1], the stream cipher Salsa20 [7], the
+MAC algorithm Chaskey [58] and notable block ciphers like HIGHT [31], LEA [32], SPECK
+[6], SPARX [16] or CHAM [41]. Usually, ciphers that are exclusively composed of ARX
+operations and other common bit-vector operations (e.g., modular multiplication or logical
+shifts) are also considered in the class of ARX ciphers, such as IDEA [43], TEA [73], or
+XTEA [60].
+The security of ARX ciphers is evaluated by analysing their robustness against various
+attacks. Some of the most successful attacks applied to ARX algorithms are differential
+cryptanalysis and their variants, such as boomerang or related-key differential attacks [32,
+41]. These attacks exploit differences in the inputs that propagate through the cipher with
+high probability. Another powerful attack based on non-random propagation of differences
+is impossible-differential cryptanalysis [8, 37], which exploits input differences propagating
+to differences in the outputs with zero probability.
+The standard approach to show an ARX cipher is secure against differential and
+impossible-differential attacks is by finding the optimal characteristics (i.e., trails of differences with the highest probabilities) and the longest impossible differentials and checking
+that no high-probability characteristic and no impossible differential cover most rounds of
+the cipher [31, 32]. When the best attack in the design stage is a differential or an impossibledifferential attack, the number of rounds of the cipher is determined by the longest observed
+high-probability characteristic or impossible differential. Thus, searching for optimal characteristics and impossible differentials is a crucial step in the design and security analysis of
+a cipher.
+Two main techniques have been applied to search for optimal characteristics of ARX
+algorithms: branch-and-bound algorithms [11, 13] based on Matsui’s algorithm [54], and the
+recent automated methods based on Constraint Satisfaction Problems (CSP), such as SMT
+(Satisfiability Modulo Theories) or MILP (Mixed Integer Linear Programming) problems
+[21, 57]. CSP-based methods have also been recently applied to find impossible differentials
+[14, 65, 66]. These automated methods formulate the characteristic or impossible-differential
+search problem as a CSP and delegate the solving task to one of the powerful off-the-shelf
+CSP solvers available nowadays [5, 49]. While some CSP-based open-source tools automate
+the search of ARX characteristics (e.g., CryptoSMT [38]), no CSP-based open-source tool
+has been published to search for impossible differentials of ARX ciphers.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1799
+
+The main difficulty in formulating a CSP-based search problem lies in the differential
+models of the non-linear operations, that is, the constraints describing the differential probability of the non-linear operations of the cipher. ARX ciphers can be efficiently described
+using the bit-vector theory of SMT, and several bit-vector differential models have been proposed so far [39, 47, 48]. For the modular addition with two n-bit operands, the foremost
+non-linear operation in ARX primitives, Lipmaa and Moriai found a bit-vector algorithm for
+computing the differential probability with complexity O(log2 n) [47]. This algorithm can be
+straightforwardly translated to a bit-vector differential model, and it has been used in several
+SMT-based methods to search for characteristics [48, 57, 68] and impossible differentials
+[65] of ARX ciphers.
+However, no CSP-based differential model has been proposed for the modular addition
+with a constant input, preventing from searching for characteristics or impossible differentials
+of ARX ciphers that contain constant additions. Lipmaa’s algorithm is restricted to the modular addition with two operands, and it cannot be applied when one of the inputs is fixed to a
+constant, as we will discuss later. Machado proposed an algorithm to compute the differential
+probability of the constant addition [53], but it cannot be translated to an efficient bit-vector
+differential model due to its recursive nature and the use of floating-point arithmetic.
+
+1.1 Contributions
+We propose an efficient bit-vector differential model for the modular addition by an n-bit
+constant. Our model contains O(log2 n) basic bit-vector constraints and it is composed of
+a bit-vector formula that determines whether a differential over the constant addition has
+non-zero probability, and a bit-vector function that computes the binary logarithm of the
+differential probability. Our bit-vector model exploits the properties of the carry chain of
+the modular addition and relies on efficient well-known bit-vector functions, such as the
+Hamming weight or the bit-reversal, and new bit-vector functions that we have developed
+for the binary logarithm.
+Furthermore, we describe an SMT-based automated method to search for characteristics
+of ARX ciphers, including constant additions. Our method is composed of an iterated search
+of optimal characteristics of round-reduced versions of the cipher and an automated encoding technique that formulates the SMT problems from the cipher’s Single Static Assignment
+(SSA) form. Moreover, we describe a new automated method to search for impossible differentials of ARX ciphers which does not depend on any pre-defined sets of input and output
+differences.
+We have implemented our methods in an SMT-based open-source tool ArxPy,1 which
+fully automated the search of ARX characteristics and impossible differentials. ArxPy is
+the first open-source tool that can search for the characteristics of ARX ciphers with constant
+additions, and it is also the first CSP-based open-source tool that automates the search of
+ARX impossible differentials. ArxPy offers a simple interface to represent any ARX cipher,
+different types of characteristics and impossible differentials to search, and a complete documentation.
+We have applied our characteristic and impossible-differential search methods to several ARX ciphers containing constant additions to provide some examples. In particular, we
+have searched for different types of related-key characteristics alongside related-key impossible differentials of TEA, XTEA, HIGHT, LEA, SHACAL-1, and SHACAL-2. With our
+automated approach, we have revisited results previously found with manual and ad-hoc
+1 https://github.com/ranea/ArxPy.
+
+123
+
+1800
+
+S. A. Azimi et al.
+
+techniques. We have obtained better characteristics in terms of probability and number of
+rounds, and longer impossible differentials.
+With our bit-vector model for the constant addition, the SMT-based automated methods,
+and our open-source tool ArxPy, we provide cipher designers with the resources to design
+ARX ciphers, including constant additions that are secure against differential and impossibledifferential attacks. Thus, cipher designers can choose the best constants for the modular
+additions and optimize the number of rounds to balance security and efficiency.
+
+1.2 Differences to the conference version
+This paper is an extended full version of the conference paper [3]. Thus, the content of the
+conference paper is included in this paper, namely the bit-vector differential model for the
+constant addition, the SMT-based method and tool to search for ARX differential characteristics and the related-key differential characteristics found for TEA, XTEA, HIGHT, and LEA.
+Apart from this content, the rest of this paper is new material. This new content includes
+the SMT-based method to search for impossible differentials of ARX ciphers, the tool to
+search for ARX impossible differentials, the related-key differential characteristics found
+for SHACAL-1 and SHACAL-2 and the related-key impossible differentials found for TEA,
+XTEA, HIGHT, LEA, SHACAL-1 and SHACAL-2. Furthermore, this paper enhances the
+description of the bit-vector differential model of the constant addition with improved proofs
+and new examples.
+
+1.3 Outline
+The notations and preliminaries are introduced in Sect. 2, and the bit-vector model for the
+modular addition by a constant is described in Sect. 3. Section 4 illustrates the formulation
+of the search of characteristics and impossible differentials as sequences of SMT problems.
+Section 5 presents the characteristics and impossible differentials found for TEA, XTEA,
+HIGHT, LEA, SHACAL-1, and SHACAL-2 using our automated approaches. Finally, Sect. 6
+concludes the paper and addresses future works.
+
+2 Preliminaries
+2.1 Notations
+Let x be an integer such that its n-bit vector representation when 0 ≤ x < 2n is x =
+(x[n − 1], . . . , x[0]), where x[0] and x[n − 1] denote respectively the least and the most
+significant bit. For ease of notation, we define x[i] = 0 when i < 0 and the symbol ∗ stands
+for an undetermined bit. The usual integer operations are denoted by (+, −, ×, /) and the
+basic bit-vector operations are gathered in Table 1.
+A mathematical expression only involving bit-vector variables and basic bit-vector operations is called a bit-vector expression. A bit-vector formula is a bit-vector expression returning
+True or False, such as Equals, whereas an n-bit vector function is a bit-vector expression
+returning an n-bit vector. In order to measure the complexity of the bit-vector differential
+model that we propose in this paper, we define the bit-vector complexity of a bit-vector
+expression as the number of basic bit-vector operations that the expression is composed of.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1801
+
+In the literature of the bit-vector theory, the set of basic bit-vector operations usually
+includes the operations gathered in Table 1 and few additional operations, such as modular
+multiplication or modular division [42]. However, modular multiplication and modular division are much more costly than the other operations in practice, and we have excluded them
+from our set of basic bit-vector operations, which resembles the unit-cost RAM model used
+in [47].
+Apart from the basic bit-vector operations listed in Table 1, we will also employ the following well-known bit-vector functions: Carry, Rev, RevCarry, HW and LZ. The carry function
+c = Carry(x, y) returns the n-bit carry chain of the n-bit modular addition x  y. It is defined
+iteratively as c[0] = 0 and c[i + 1] = (x[i] ∧ y[i]) ⊕ (x[i] ∧ c[i]) ⊕ (y[i] ∧ c[i]) for 0 < i <
+n −1. Note that the carry has bit-vector complexity O(1), since Carry(x, y) = x ⊕ y ⊕(x  y).
+The carry function is an efficient function that allows propagating information from the least
+significant bits to the most significant bits, a property that we will exploit for our bit-vector
+differential model.
+The bit-reversal function Rev(x) reverses the order of bits of x, i.e., Rev(x) =
+(x[0], x[1], . . . , x[n −1]). This function can be computed using a divide and conquer method
+with bit-vector complexity O(log2 n) [29, Fig. 7-1]. We will use this function to define the
+reverse carry, RevCarry(x, y) = Rev(Carry(Rev(x), Rev(y))), which allows to propagate
+information from right to left and also has bit-vector complexity O(log2 n).
+The Hamming weight HW(x) returns an n-bit vector denoting the number of non-zero
+bits of the n-bit input x. Similar to the bit-reversal, the Hamming weight can be computed
+using a divide and conquer approach with bit-vector complexity O(log2 n) [29, Fig. 5-2].
+The Hamming weight will be one of the main building blocks to obtain an efficient bit-vector
+representation of the binary logarithm.
+The last bit-vector function we will consider is the leading zeros function LZ(x). This
+function marks the leading zeros of an n-bit input x, that is, for 0 ≤ i < n, LZ(x)[i] =
+1 ⇐⇒ x[n − 1, i] = 0. This function is used as a subroutine for the well-known function
+to compute the number of leading zeros. Similar to the previous bit-vector functions, LZ can
+be computed with bit-vector complexity O(log2 n) [29, Fig. 5-16].
+
+Table 1 Basic bit-vector
+operations for n-bit vectors
+
+x[i, j]
+
+The bit-vector (x[i], . . . , x[ j]), n > i ≥ j ≥ 0
+
+¬x
+
+Bit-wise NOT of x
+
+x
+
+y
+
+Concatenation of x and y
+
+x∧y
+
+Bit-wise AND of x and y
+
+x∨y
+
+Bit-wise OR of x and y
+
+x⊕y
+
+Bit-wise XOR of x and y
+
+x
+
+i
+
+(Logical) left shift of x by i bits
+
+x
+
+i
+
+Right shift of x by i bits
+
+x ≪i
+
+Left cyclic rotation of x by i bits
+
+x ≫i
+
+Right cyclic rotation of x by i bits
+
+xy
+
+Modular addition of x and y
+
+xy
+
+Modular subtraction of x and y
+
+Equals(x, y)
+
+Bit-vector equality of x and y, returning True
+If x and y are the same, otherwise False
+
+123
+
+1802
+
+S. A. Azimi et al.
+
+2.2 Differential and impossible-differential cryptanalysis
+A block cipher is a family of permutations parametrized by a κ-bit key k, mapping n-bit
+plaintexts p to n-bit ciphertexts c. Most block ciphers consist of a key scheduling algorithm
+KS, which derives round keys k1 , . . . , kr from the master key k, and an encryption algorithm
+E k , which processes the plaintext by iterating a round function f and injecting a round key
+at each round, i.e., E k = f kr ◦ · · · ◦ f k1 .
+Block ciphers are shown to be secure by analysing their resistance against all known
+attacks. One of the most potent attacks, especially to ARX primitives, is differential cryptanalysis [10]. It exploits the non-random propagation of differences in the input to recover
+the secret key.
+Let F be an n-bit to n-bit function and ( p , c ) be the XOR of a pair of inputs ( p, p  ) and
+their corresponding outputs (c, c ), i.e.,  p = p ⊕ p  and c = c ⊕ c . The pair ( p , c )
+is called a differential and its probability is defined as
+
+ #{ p : F( p) ⊕ F( p ⊕  ) =  }
+F
+p
+c
+Pr  p −
+→ c =
+.
+2n
+A differential is valid if it has non-zero probability. In this case, its weight is defined as
+ 
+
+F
+weight F ( p , c ) = − log2 Pr  p −
+→ c .
+F
+
+The differential 0 −
+→ 0 has probability 1 for any function F, and a differential with
+non-zero input difference over a random n-bit permutation has probability 2−n . Differential
+cryptanalysis [10] exploits a differential over the n-bit block cipher with probability p > 2−n
+to recover the secret key with roughly O( p −1 ) encryption calls.
+Related-key differential cryptanalysis [34] extends differential cryptanalysis by considering key differences. A related-key differential is given by a pair of differentials over the key
+schedule and the encryption function respectively,
+
+
+
+
+KS 
+E
+k −
+→ k1 , . . . , kr ,  p −
+→ c ,
+where the ciphertext difference is computed using the related round-key pairs,
+
+
+
+
+
+c = f kr ◦ · · · ◦ f k1 ( p) ⊕ f kr ⊕kr ◦ · · · ◦ f k1 ⊕k1 p ⊕  p .
+The probability of a related-key differential is the product of the probability of key schedule
+differential pKS and the probability of encryption differential p E .
+A related-key attack exploits a related-key differential with pKS > 2−κ and p E > 2−n
+−1
+to recover the secret key with complexity O(( pKS × p E )−1 ). The attacker takes about pKS
+key pairs to find one key, on average, that satisfies the key schedule differential. Next and
+for each key pair, the attacker runs a differential attack over the encryption using O( p −1
+E )
+encryption calls.
+Related-key differential cryptanalysis requires a very powerful attacker that can query
+the encryption function E k⊕k for many keys k ⊕ k . In fact, if an adversary can query
+E k⊕k for 2m key differences k , any block cipher is vulnerable to a related-key attack with
+complexity O(2m + 2n−m ) [74]. Thus, we distinguish between weak related-key differentials
+(i.e., pKS < 1) and strong related-key differentials (i.e., pKS = 1), which can be exploited
+in practice with a single related-key pair. Furthermore, we define equivalent keys as pairs of
+related keys (k, k ⊕ k ) such that ∀ p, E k ( p) = E k⊕k ( p ⊕  p ) ⊕ c , for some ( p , c ).
+Note that a related-key differential with p E = 1 leads to 2κ pKS pairs of equivalent keys.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1803
+
+Lastly, we consider (related-key) impossible differentials. A differential ( p , c ) over
+a function F is called impossible if its probability is zero, and a related-key differential (k ,  p → c ) over a block cipher is called impossible if its probability is zero
+for all keys. Impossible-differential cryptanalysis [8] is an attack on block ciphers that
+exploits an impossible differential over the block cipher holding for every key. Related-key
+impossible-differential cryptanalysis is a combination of impossible-differential cryptanalysis and related-key cryptanalysis. Using the known difference of the key pairs and the input
+and the output of the impossible differential, the attacker discards the wrong keys to obtain
+the correct key.
+
+Searching for characteristics and impossible differentials.
+The most challenging step to launch a differential attack is finding a differential with high
+probability. The main approach is to analyse how differences traverse through the round
+function and search for a characteristic, that is, a trail of differences
+
+f k1
+f kr
+ =  p = x0 −−→ x1 → · · · → xr−1 −−→ xr = c
+
+.
+
+Similar to differentials, a characteristic  is valid if it has non-zero probability and its weight
+is defined as − log2 (Pr[]). Furthermore, we denote a related-key characteristic by a pair of
+characteristics (KS ,  E ), where  K S is the key schedule characteristic containing the trail
+of differences from the master key to the round keys and  E is the encryption characteristic
+containing the trail of differences through the encryption.
+Obtaining the exact probability of a characteristic is computationally infeasible. Thus,
+two assumptions are commonly made. First, it is assumed that the differential probabilities
+over each round are independent, which allows computing the weight of a characteristic by
+summing the round weights, i.e.,
+r
+
+weight() =
+
+weight(xi → xi+1 ) .
+i=0
+
+Second, it is assumed that the probability of a characteristic does not strongly depend on the
+choice of the secret key, also known as the hypothesis of stochastic equivalence [44], which
+allows computing the weight of a characteristic by averaging over all keys.
+On top of that, designers also assume that the probability of a differential ( p , c ) is close
+to the probability of the best characteristic ( p → · · · → c ), and they prove a cipher is
+secure against differential cryptanalysis by showing that characteristics with high probability
+cannot cover most rounds of the cipher. While these assumptions do not always hold, currently
+this is the best systematic approach to argue security against differential cryptanalysis, and
+this heuristic approach is widely used for ARX ciphers in practice [21, 39, 57, 68–70].
+Searching for characteristics is usually dependent on some assumptions, as mentioned
+earlier. In contrast, the process of obtaining an impossible differential typically results in a
+sound proof, guaranteeing that the probability of the achieved differential is equal to zero.
+Therefore, most of the impossible-differential search methods are sound but not complete. In
+other words, any differential found by these methods is assuredly impossible, yet there may
+be many impossible differentials that the search methods cannot detect.
+
+123
+
+1804
+
+S. A. Azimi et al.
+
+SMT solvers
+A recent approach to search for characteristics and impossible differentials of ARX ciphers is
+by formulating the search problem as an SMT problem in the bit-vector theory [2, 39, 48, 57,
+65, 68]. Satisfiability Modulo Theories (SMT) refers to the problem of determining whether
+a first order formula is satisfiable with respect to some logical theory. SMT problems are
+a generalization of SAT problems; while the latter problems are expressed in propositional
+logic, SMT formulas can be expressed in richer logics, such as the theory of bit-vectors or
+the theory of integers.
+SMT has grown in recent years into a very active research field, and several off-the-shelf
+SMT solvers are available nowadays [5]. Most SMT solvers can determine the satisfiability
+of a problem and obtain an assignment of the variables that satisfies the problem. This feature
+allows SMT solvers to be applied in search problems.
+An SMT problem in the bit-vector theory is given by a set of bit-vector variables and a set
+of bit-vector formulas or constraints. The constraints can be defined with the usual logical
+operations (e.g., Equals, NotEquals, Implies, etc.) and the usual bit-vector operations (e.g.,
+⊕, , ≪, etc.).
+For example, a bit-vector SMT problem to find an 8-bit preimage of y = f (x) = x ⊕
+((x  x) ∨ 1), given the 8-bit image y = 3 = 00000011, is the following:
+∃x ∈ {0, 1}8 : Equals(00000011, x ⊕ ((x  x) ∨ 1) .
+This problem is satisfiable and the only assignment that satisfies the problem is x =
+11111110.
+
+2.3 Differential models
+To represent a characteristic in a constraint satisfaction problem, it is necessary to find a
+differential model of the round function f . For an SMT problem in the bit-vector theory, a
+differential model of a function y = f (x) is given by a bit-vector formula valid f (x ,  y )
+and a bit-vector function weight f (x ,  y ). The formula valid f (x ,  y ) is True if and
+only if the differential (x →  y ) over f is valid, and the function weight f (x ,  y )
+returns the weight of a valid differential (x →  y ).
+Characteristics over ARX ciphers are usually defined by considering the difference after
+each ARX operation. The differential models of the XOR and the cyclic rotations are very
+simple since these operations propagate differences deterministically, that is,
+f (x1 ,x2 )=x1 ⊕x2
+
+x1 , x2 −−−−−−−−−→ x1 ⊕ x2 ,
+f a (x)=x≪a
+
+x −−−−−−−−−→ x ≪ a,
+
+f a (x)=x⊕a
+
+x −−−−−−−→ x ,
+f a (x)=x≫a
+
+x −−−−−−−→ x ≫ a.
+
+For the modular addition with two n-bit inputs, y = f (x1 , x2 ) = x1  x2 , the algorithm by
+Lipmaa and Moriai [47] can be translated into the following differential model with bit-vector
+complexity O(log2 n).
+Theorem 1 Let ((x1 , x2 ),  y ) be a differential over the modular addition y = x1  x2
+and denote ←
+x− = x
+1 and eq(a, b, c) = (¬a ⊕ b) ∧ (¬a ⊕ c). Then, the differential is
+valid if and only if the bit-vector formula
+←− ←− ←
+−
+←−
+valid ((x1 , x2 ),  y ) = Equals(0, eq(x1 , x2 ,  y ) ∧ (x1 ⊕ x2 ⊕  y ⊕ x2 ))
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1805
+
+is True. In this case, the differential weight is given by the bit-vector function
+weight ((x1 , x2 ),  y ) = HW(¬eq(x1 , x2 ,  y )
+
+1) .
+
+For the modular addition with a constant input a (x) = x  a, Machado [53] obtained
+the following algorithm to compute the differential probability [53].
+Theorem 2 Let (u, v) be a differential over the n-bit constant addition a . Then, the differential probability is given by
+a
+
+Pr[u −→ v] = ϕ0 × · · · × ϕn−1 ,
+where ϕi depends on the δi−1 and Si , each one defined for 0 ≤ i < n by
+Si = (u[i − 1], v[i − 1], u[i] ⊕ v[i]) ,
+⎧
+⎪
+(a[i − 1] + δi−1 )/2, Si = 000
+⎪
+⎪
+⎪
+⎪
+⎪
+Si = 001
+⎨0,
+δi = a[i − 1],
+Si ∈ {010, 100, 110}
+⎪
+⎪
+⎪
+δ
+,
+S
+⎪
+i−1
+i ∈ {011, 101}
+⎪
+⎪
+⎩1/2,
+Si = 111
+⎧
+⎪
+1,
+Si = 000
+⎪
+⎪
+⎪
+⎪
+⎪
+0,
+Si = 001
+⎨
+ϕi = 1/2,
+Si ∈ {010, 011, 100, 101}
+⎪
+⎪
+⎪
+−
+2a[i
+−
+1]δ
+),
+Si = 110
+1
+−
+(a[i
+−
+1]
++
+δ
+⎪
+i−1
+i−1
+⎪
+⎪
+⎩(a[i − 1] + δ
+Si = 111,
+i−1 − 2a[i − 1]δi−1 ),
+For i = −1, Si and δi are defined by S−1 = ⊥ and δ−1 = 0.
+Unfortunately, the algorithm illustrated in Theorem 2 is not suitable for constraint satisfaction
+problems due to its recursive nature and the use of floating-point arithmetic.
+Some authors [46, Corollary 2] [4] have adapted the differential model of the 2-input
+addition (i.e., the modular addition with two independent inputs) for the constant addition
+by setting the difference of the second operand to zero, that is,
+valida (x ,  y ) ← valid ((x , 0),  y ) ,
+weighta (x ,  y ) ← weight ((x , 0),  y ) .
+
+(1)
+
+a
+
+The approximation given by Eq. (1) models the differential (x −→  y ) by averaging over
+all a. While this approach can be used to model the constant addition by a round key, since
+the characteristic probability is also computed by averaging over all keys, for a fixed constant
+this approach is rather inaccurate.
+Surprisingly, the differential properties of the 2-input addition and the constant addition are
+very different. The 2-input addition was shown to be CCZ-equivalent to a quadratic function
+[67], that is, the differential properties of the 2-input addition are the same as some quadratic
+functions. In particular, the set of inputs (x1 , x2 ) satisfying a differential ((x1 , x2 ) →  y )
+over the 2-input addition forms a subspace of Fn2 , which allows to describe its differential
+model using few basic operations.
+On the other hand, the constant addition is not CCZ-equivalent to a quadratic function,
+since the set of inputs (x1 , x2 ) satisfying a differential (x ,  y ) over a does not form
+
+123
+
+1806
+
+S. A. Azimi et al.
+
+a subspace for many a. In other words, the probability of a differential over the constant
+addition is not necessarily of the form 2−α for a positive integer α, and finding a differential
+model for the constant input addition is a much harder problem.
+We experimentally checked the accuracy of the approximation given by Eq. (1) for 8bit constants a. For most values of a, validity formulas differ roughly in 213 out of all 216
+differentials. For those differentials where they did not differ, the difference between their
+weights was significantly high on average.
+Consequently, no differential model of the constant addition suitable for constraint satisfaction problems has been proposed so far. In the next section, we present the first differential
+model of the constant addition for SMT problems in the bit-vector theory.
+
+3 Bit-vector diﬀerential model of the constant addition
+We present a bit-vector differential model of the constant addition, composed of a bit-vector
+formula to determine whether a given differential is valid and a bit-vector function that
+computes the weight of the valid differential. Our model takes benefit from Theorem 2 [53];
+however, we avoid bit iterations, floating-point arithmetic, multiplications and look-up tables,
+in order to obtain efficient bit-vector constraints to be used in bit-vector SMT problems.
+Before we illustrate our model, we remark an essential property of Theorem 2. When
+the state Si is not 110 or 111, the probability of the step i, ϕi , depends exclusively on Si ;
+otherwise, ϕi depends on Si and δi−1 . When Si = 11*, Si−1 ∈ {010, 100, 110, 000} and
+for the first three cases, δi−1 is equal to a[i − 2]. However, considering the forth case, i.e.,
+Si−1 = 000, δi−1 depends on δi−2 and this dependency will proceed until we obtain a state
+Si−i  = 000 for some positive integer i . Thus, δi−1 has the following expression when
+Si = 11*,
+δi−1 =
+
+a[i − i − 1]
++
+2i −1
+
+i
+j=2
+
+a[i − j]
+.
+2 j−1
+
+(2)
+
+Therefore, when Si = 11*, ϕi also depends on the previous states Si−1 , . . . , Si−i , which
+motivates the following definition.
+Definition 1 Let Si = 11*. The chain i is defined as the smallest set of previous states
+{Si−1 , Si−2 , . . . , Si−i } that completely determine ϕi , and the positive integer i is called the
+length of i .
+Given a chain i = {Si−1 , Si−2 , . . . , Si−i }, note that Si−i  = 000 and the remaining
+states in the chain (if any) are all equal to 000.
+In the next example, we illustrate how to calculate the differential probability using the
+iterative method of Theorem 2 and we learn more about the intermediate variables used for
+obtaining the probability.
+Example 1 Consider the differential (u, v) = (1010001110, 1010001010) over the
+modular addition by the 10-bit constant a = 1000101110. According to Theorem 2,
+the differential probability of (u, v) is given by
+a
+
+Pr[u −→ v] =
+
+#{x : (xa ) ⊕ ((x ⊕ u)a ) = v} 
+=
+ϕi .
+210
+9
+
+i=0
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1807
+
+Table 2 The intermediate variables for finding the differential probability of Example 1
+9
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+−1
+
+a[i]
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+1
+
+1
+
+0
+
+0
+
+u[i]
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+1
+
+1
+
+0
+
+0
+
+v[i]
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+0
+
+0
+
+Si
+
+000
+
+110
+
+000
+
+000
+
+000
+
+110
+
+100
+
+111
+
+000
+
+000
+
+⊥
+
+3
+4
+
+1
+2
+
+1
+
+1
+
+1
+2
+
+0
+
+0
+
+0
+
+1
+
+1
+
+1
+
+1
+2
+
+1
+
+1
+
+1
+
+i
+
+δi
+
+0
+
+0
+
+3
+8
+
+ϕi
+
+1
+
+5
+8
+
+1
+
+Table 2 displays the variables we need to compute to obtain the differential probability. As
+we mentioned earlier, if Si = (u i−1 , vi−1 , u i ⊕ vi )  = 11*, each ϕi can be computed in a
+straightforward way without any further dependencies of previous states.
+For the remaining states equal to 110 or 111, we first obtain their associated chains as
+S2 = 111,
+
+2 = {S1 = 000, S0 = 000, S−1 = ⊥},
+
+2 = 3 ,
+
+S4 = 110,
+
+4 = {S3 = 100},
+
+S8 = 110,
+
+8 = {S7 = 000, S6 = 000, S5 = 000, S4 = 110},
+
+4 = 1 ,
+8 = 4 .
+
+Then, we compute the associated δi−1 using Eq. (2), and finally we obtain ϕi from the values
+of a[i − 1] and the computed δi−1 .
+Multiplying each ϕi listed in Table 2 leads to the differential probability,
+
+ 
+9
+5
+a
+Pr u −→ v =
+ϕi =
+.
+16
+i=0
+
+3.1 Validity
+Let (u, v) be a differential over a , the modular addition by n-bit constant a. According to
+Theorem 2, the differential probability of (u, v) can be expressed as ϕ0 × · · · × ϕn−1 . Thus,
+(u, v) is a valid differential, i.e., with non-zero probability, if and only if all ϕi are non-zero.
+If ϕi = 0, note that Si must be 001, 110 or 111. While Si = 001 always implies ϕi = 0,
+the other two cases require an extra condition to result in ϕi = 0, as shown in the next lemma.
+Lemma 1 Let the state Si be 11b, for b ∈ {0, 1}. Then, ϕi is equal to 0 if and only if
+¬b ⊕ a[i − 1] = a[i − 2] = · · · = a[i − i − 1].
+Proof Having Si = 11b, ϕi = 0 if and only if ¬b = δi−1 ⊕a[i −1]. Let i be the chain length
+of Si . The case for i = 1 is trivial, since δi−1 = a[i − 2]. To achieve δi−1 = a[i − 1] ⊕ ¬b
+when i > 1, the non-negative rational number δi−1 must be equal to 0 or 1. Since δi−1 is a
+monotonically increasing function of (a[i − 2], . . . , a[i − i − 1]) regarding Eq. (2), δi−1
+reaches its extrema in (0, . . . , 0) and (1, . . . , 1), that is,
+δi−1 = c ⇐⇒ a[i − 2] = a[i − 3] = · · · = a[i − i − 1] = c, ∀c ∈ {0, 1},
+Thus, δi−1 = a[i − 1] ⊕ ¬b ⇐⇒ δi−1 = a[i − 2] = · · · = a[i − i ].
+
+
+
+
+123
+
+1808
+
+S. A. Azimi et al.
+
+The next lemma provides a bit-vector expression to check Lemma 1 by exploiting the fact
+that the carry chain allows a bit to affect the bits to its left.
+Lemma 2 Consider the following n-bit values,
+1), s**1 = u ⊕ v, a  = (a ⊕ (a
+1))
+1,
+
+1) , g = (s**1 ⊕ a  ) ∧ (c ∨ ¬(s00*
+c = Carry s00* ∧ ¬a , ¬(s00*
+
+s00* = ¬(u
+
+
+
+1) ∧ ¬(v
+
+
+
+1)) .
+
+Then, for all states Si = 11*, we have ϕi = 0 if and only if g[i] = 1.
+Proof Let Si = 11b with chain length i . Note that a  [i] = a[i − 1] ⊕ a[i − 2] and that
+s00* [i] = 1 (resp. s**1 [i] = 1) if and only if Si = 00* (resp. Si = **1).
+The first operand of g[i], i.e., (s**1 ⊕ a  )[i], is equal to one if and only if b = ¬(a[i −
+1] ⊕ a[i − 2]). For i = 1 it is easy to see that Si−1  = 00*; therefore, the second operand
+of g[i] is 1, and by Lemma 1 g[i] = 1 if and only if ϕi = 0.
+When i > 1, Si−1 = 000 and the second major operand of g[i] reduces to c. In particular,
+the two major operands of the Carry function of c are given by
+(s00* ∧ ¬a  )[i, i − i ] = (¬(a[i − 1] ⊕ a[i − 2]), . . . , ¬(a[i − i ] ⊕ a[i − i − 1]), 0) ,
+¬(s00*
+
+1)[i, i − i ] = (0, . . . , 0, 1, ∗) .
+
+Thus, c[i] = c[i − 1] ∧ ¬a  [i − 1] and c[i − i + 1] = c[i − i ] ∧ ¬s00* [i − i − 1] = 0;
+otherwise, for 0 ≤ j ≤ i − i − 1 we will obtain s00* [ j] = 0 which does not conform to
+S0 = 00*. By unrolling the recursive definition of c[i], we see that c[i] = ¬a  [i − 1] ∧
+· · · ∧ ¬a  [i − i + 1]. In other words, c[i] = 1 if and only if a[i − 2] = · · · = a[i − i − 1].
+Together with the condition for (s**1 ⊕ a  )[i] = 1, we have that g[i] = 1 exactly when
+ϕi = 0, regarding Lemma 1.
+
+
+Lemma 2 provides a bit-vector variable g that detects the states Si = 11* leading to
+invalidity. The next theorem presents the final bit-vector formula for the validity by taking
+into account the states Si = 001 as well.
+Theorem 3 Let (u, v) be a differential over the n-bit constant addition a . Consider the n-bit
+value g defined in Lemma 2 and the following n-bit values
+s001 = ¬(u
+
+1) ∧ ¬(v
+
+1) ∧ (u ⊕ v), s11* = (u
+
+1) ∧ (v
+
+1) .
+
+Then, the bit-vector formula valida (u, v) = Equals(s001 ∨ (s11* ∧ g), 0) is True if and
+only if the differential (u, v) is valid.
+Proof By the definition of s001 and s11* , s001 [i] = 1 (respectively s11* [i] = 1) if and only
+if Si = 001 (respectively Si = 11*). Moreover, ϕi = 0 exactly when Si = 001, or when
+Si = 11∗ and g[i] = 1 (Lemma 2). Thus, ϕi = 0 if and only if s001 ∨ (s11* ∧ g)[i] = 1. 
+
+Since the number of basic bit-vector operations of our bit-vector validity formula is independent of the bit-size of the inputs, the bit-vector complexity of valida is O(1).
+Example 2 Consider the valid differential of Example 1, i.e. a = 1000101110, u =
+1010001110, and v = 1010001010. Previously, we showed that its differential probability is non-zero and equal to 5/16. In this example, we will illustrate our bit-vector validity
+formula step by step.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+Table 3 The intermediate
+variables for evaluating the
+bit-vector validity formula of
+Example 2
+
+i
+
+9
+
+8
+
+7
+
+1809
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+a[i]
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+1
+
+1
+
+0
+
+u[i]
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+1
+
+1
+
+0
+
+v[i]
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+0
+
+g[i]
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+s11* [i]
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+0
+
+0
+
+s001 [i]
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+Table 3 provides some of the essential bit-vector values used in Theorem 3. Since there
+is no state equal to 001, s001 is the all-zero bit-vector. As we have shown in Example 1,
+there are three states equal to 11*, and the associated bit of s11* is equal to one in the
+corresponding bits. In this example, no state 11* leads to invalidity, and g is equal to the
+all-zero bit-vector. Thus, s001 [i] ∨ (s11∗ [i] ∧ g[i]) = 0 for all i, and our validity formula
+valida (u, v) = Equals(s001 ∨ (s11∗ ∧ g), 0)
+evaluates to True.
+
+3.2 Weight of a valid differential
+In this section, we propose a bit-vector function that computes the weight of a valid differential
+over the constant addition. Working with differential weights has the advantage that multiple
+differential weights can be combined by adding them up, while probabilities need to be
+multiplied, a very costly operation in a bit-vector SMT problem.
+The weight of a valid differential over the constant addition is an irrational value in
+general, and it cannot be represented as a fixed-sized bit-vector. Thus, our bit-vector function
+computes a close approximation of the weight, and we provide almost tight bounds for the
+approximation error.
+Through the rest of the section, let (u, v) be a valid differential over the n-bit constant
+addition a . According to Theorem 2, the weight can be obtained by
+n−1 
+n−1
+
+ϕi = −
+log2 (ϕi ) .
+(3)
+weighta (u, v) = − log2
+i=0
+
+i=0
+
+Let I denote the set of indices corresponding to the states 11* with chain length bigger
+than one, i.e., I = {1 ≤ i ≤ n − 1 | Si = 11*, i > 1}. For i ∈
+/ I , the probability ϕi only
+depends on the current state Si and ϕi is either 1 or 1/2. Based on the aforementioned fact, we
+show how to acquire the summation of all log2 (ϕi ) when i ∈
+/ I using bit-vector expressions.
+Lemma 3 Let I = {1 ≤ i ≤ n − 1 | Si = 11*, i > 1}. Then,
+−
+
+log2 (ϕi ) = HW((u ⊕ v)
+
+1) .
+
+i∈
+/I
+
+Proof To prove the lemma, we divide the set {i | i ∈
+/ I } into two parts as {i | Si  = 11*} and
+{i | Si = 11*, i = 1}. For each state Si  = 11∗, there are two possible cases. If Si is equal
+
+123
+
+1810
+
+S. A. Azimi et al.
+
+to 000, the corresponding step probability is ϕi = 1. Otherwise, Si ∈ {010, 011, 100, 101}
+and we obtain ϕi = 1/2. Considering these two cases leads to
+log2 (ϕi ) =
+i
+Si =11∗
+
+log2 (1)
+i
+Si =000
+
++
+
+log2 (1/2) ,
+i
+Si ∈{010,011,100,101}
+
+= − #{Si ∈ {010, 011, 100, 101} : 0 ≤ i < n} .
+Since the second case Si ∈ {010, 011, 100, 101} occurs when u[i − 1] ⊕ v[i − 1] = 1, we
+can use HW((u ⊕ v)
+1) to compute the number of times this case happens.
+Now for Si = 11* when i = 1, we know that δi−1 = a[i − 2] ∈ {0, 1}. Since the
+probability is not equal to zero, we obtain ϕi = 1. Thus we get
+log2 (ϕi ) = 0.
+i
+Si =11∗
+i =1
+
+By and large, the sum of log2 (ϕi ) when i ∈
+/ I is
+log2 (ϕi ) =
+i∈
+/I
+
+log2 (ϕi ) +
+i
+Si  =11∗
+
+log2 (ϕi ) = −HW((u ⊕ v)
+
+1).
+
+
+
+
+i
+Si =11∗
+i =1
+
+/ I as a bit-vector expression with
+Lemma 3 describes the sum of log2 (ϕi ) when i ∈
+complexity O(log2 n). To describe the logarithmic summation when i ∈ I as a bit-vector,
+we will first show how to split ϕi as the quotient of two integers.
+Lemma 4 Let i ∈ I and let pi be the positive integer defined by
+
+a[i − 2, i − i ] + a[i − i − 1], u[i] ⊕ v[i] ⊕ a[i − 1] = 1
+pi =  −1
+2 i − (a[i − 2, i − i ] + a[i − i − 1]), u[i] ⊕ v[i] ⊕ a[i − 1] = 0
+where i > 1 is the chain length of the state Si = 11*. Then, ϕi =
+
+pi
+.
+
+2 i −1
+
+Proof Considering the definition of ϕi when Si = 11*,
+
+δi−1 ,
+u[i] ⊕ v[i] ⊕ a[i − 1] = 1
+ϕi =
+1 − δi−1 , u[i] ⊕ v[i] ⊕ a[i − 1] = 0
+and following the definition of δi−1 given by Eq. (2),
+2i −1 δi =
+
+i −2
+
+2 j a[i − i + j] + a[i − i − 1] = a[i − 2, i − i ] + a[i − i − 1] ,
+j=0
+
+we obtain that ϕi = pi /2i −1 . Moreover, having 0 < ϕi ≤ 1 and i > 1 results in 0 < pi ≤
+2i −1 . Thus, pi is always a positive integer.
+
+
+Due to Lemma 4, we can decompose the logarithmic summation over I as
+log2 (ϕi ) =
+i∈I
+
+log2 ( pi ) −
+i∈I
+
+(i − 1) .
+i∈I
+
+The next lemma shows how to describe the summation involving the chain lengths with basic
+bit-vector operations.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1811
+
+Lemma 5 Consider the n-bit vector s000 = ¬(u
+1) ∧ ¬(v
+1). Then,
+
+
+(i − 1) = HW s000 ∧ ¬LZ(¬s000 ) .
+i∈I
+
+Proof Recall that there are exactly (i − 1) states in each chain
+
+
+i such that
+
+Si−1 = Si−2 = · · · = Si−(i −1) = 000.
+
+Therefore, we have i∈I (i − 1) = #{S j |S j = 000 and ∃i ∈ I s.t. S j ∈ i } . When
+S j = 000, the next state S j+1 will be a member of the set {000, 11*}. As a result, it is easy
+to see that for an arbitrary j, if S j is equal to 000, then either S j is included in some chain
+ defined by
+i , i ∈ I , or S j belongs to the set
+
+
+= {Sn−1 = 000, . . . , Sn−k = 000} ,
+
+for some k > 0, where 
+Sn−k−1  = 000. Concerning Definition 1, one can observe that  is
+not a chain. Therefore, i∈I (i − 1) = #{S j |S j = 000 and S j ∈
+/  }.
+Since we are assuming that the differential is valid, there are no states S j = 001, and
+s000 [ j] = 1 if and only if S j = 000. On the other hand, the function LZ can be used to detect
+the states from the set  . In particular, LZ(¬s000 )[i] is equal to 1 if and only if Si ∈  .
+Therefore, we obtain
+
+
+(i − 1) = HW s000 ∧ (¬LZ(¬s000 )) .
+
+
+i∈I
+
+Representing the sum of log2 ( pi ) by a bit-vector expression is the most complex and
+challenging part of our differential model. Thus, we will proceed in several steps. First, we
+will show how to obtain a bit-vector w that contains all the pi as some sub-vectors.
+Lemma 6 Consider the following n-bit values,
+1),
+
+
+s000
+= s000 ∧ ¬LZ(¬s000 ),
+
+
+1) ∧ t)  (a ∧ (s000
+
+
+
+t  = s000
+∧ (¬(s000
+1)),
+
+q = (¬((a
+1) ⊕ u ⊕ v))
+
+s000 = ¬(u
+
+1) ∧ ¬(v
+
+
+
+t = ¬s000
+∧ (s000
+
+s = ((a
+
+1),
+
+
+d = RevCarry(s000
+, q) ∨ q,
+
+1)),
+
+
+1 ∧ t ,
+
+w = (q  (s ∧ d)) ∨ (s ∧ ¬d).
+
+Then, for all states Si = 11* with i ∈ I , w[i − 1, i − i ] = pi .
+
+[ j] = 1 exactly when S j = 000 and
+Proof For each i ∈ I and 0 ≤ j < n, note that s000
+
+S j ∈ i , and t[ j] = 1 (resp. t [ j] = 1) if and only if S j = Si−i (resp. S j = Si−1 ). Denoting
+
+s = s1  s2 , where s1 = (a
+1) ∧ t and s2 = a ∧ (s000
+1), when i ∈ I the sub-vectors
+
+s1 [i − 1, i − i − 1] = (0, 0,
+. . . , 0,
+a[i − i − 1], 0) ,
+s2 [i − 1, i − i − 1] = (0, a[i − 2], . . . , a[i − i + 1], a[i − i ],
+0) ,
+result in s[i −1, i −i ] = a[i −2, i −i ]+a[i −i −1]. In particular, s[i −1, i −i ] ≤ 2i −1
+and the equality holds when s[i − 1, i − i ] = 10…0.
+It is easy to see that q[i − 1] = ¬(a[i − 2] ⊕ u[i − 1] ⊕ v[i − 1]) when i ∈ I and q is
+zero elsewhere. Then, the sub-vectors d[i − 1, i − i ] are composed of repeated copies of
+q[i − 1] when i ∈ I , as shown by the following sub-vectors
+ [i, i −  − 1] = (0, 1,
+1,
+. . . , 1,
+0,
+∗) ,
+s000
+i
+q[i, i − i − 1] = (0, q[i − 1], 0,
+. . . , 0,
+0,
+∗) ,
+ , q)[i, i −  − 1] = (∗, 0,
+RevCarry(s000
+q[i − 1], . . . , q[i − 1], q[i − 1], 0) ,
+i
+d[i, i − i − 1] = (∗, q[i − 1], q[i − 1], . . . , q[i − 1], q[i − 1], ∗) .
+
+123
+
+1812
+
+S. A. Azimi et al.
+
+The only exception for the above equations is when i − i = −1, where the two least
+significant bits of the above sub-vectors will be equal to zero.
+Let w = w1 ∧ w2 , where w1 = q  (s ∧ d) and w2 = s ∧ ¬d. Regarding the acquired
+patterns for q and d, we prove the following inequalities for i ∈ I
+(s ∧ d)[i − 1, i − i ] ≤ q[i − 1, i − i ] ,
+(s ∧ d)[i − i − 1, 0] ≤ q[i − i − 1, 0] ,
+which imply the identity w1 [i − 1, i − i ] = q[i − 1, i − i ]  (s ∧ d)[i − 1, i − i ].
+The first inequality can be derived from the fact that s[i −1, i −i ] ≤ 10…0. For the second
+inequality, consider the index set J = { j|∀i ∈ I , S j ∈
+/ i }. Then, the second inequality holds
+since for j ∈ J and c ∈ {0, 1} we can see that
+
+s000
+[ j + 1 − c] = 0 ⇒ s1 [ j − c] = s2 [ j − c] = 0 .
+
+We are now ready to evaluate w[i −1, i −i ] when i ∈ I . If q[i −1] = 0, then d[i −1, i −i ] =
+(0, . . . , 0), w1 [i − 1, i − i ] reduces to 0, and
+w[i − 1, i − i ] = w2 [i − 1, i − i ] = a[i − 2, i − i ] + a[i − i − 1] .
+If q[i − 1] = 1, then d[i − 1, i − i ] = (1, . . . , 1), w2 [i − 1, i − i ] reduces to 0, and
+w[i − 1, i − i ] = w1 [i − 1, i − i ] = (1, 0, . . . , 0)  s[i − 1, i − i ]
+= 2i −1 − (a[i − 2, i − i ] + a[i − i − 1]) .
+Hence, for q[i − 1] = ¬(a[i − 1] ⊕ u[i] ⊕ v[i]) and regarding Lemma 4, we obtain that
+w[i − 1, i − i ] = pi .
+
+
+Recall that both LZ and RevCarry have bit-vector complexity O(log2 n). Therefore, w can
+be described with O(log2 n) basic bit-vector operations.
+Since pi is not always a power of two, log2 ( pi ) cannot be represented by a fixed-sized bitvector. Thus, we will use the following approximation for the binary logarithm of a positive
+integer x,
+apxlog2 (x)  m +
+
+Truncate(x[m − 1, 0])
+,
+24
+
+(4)
+
+where m = log2 (x) and Truncate(z) for an m-bit vector z is defined by
+⎧
+⎪
+m≥4
+⎨z[m − 1, m − 4],
+4−m
+Truncate(z) =
+  
+⎪
+⎩z[m − 1, 0] (0, . . . , 0), m < 4
+In other words, apxlog2 includes the integer part of the logarithm and takes the four bits right
+after the most significant one as the “fraction” bits. While Truncate can be generalized to
+consider more fraction bits, we will show later that four fraction bits are enough to minimize
+the bounds of our
+ approximation error.
+To describe i∈I apxlog2 ( pi ) with basic bit-vector operations, we will introduce in the
+next proposition two new bit-vector functions ParallelLog and ParallelTrunc. Given a bitvector x with sub-vectors delimited by a bit-vector y, ParallelLog(x, y) computes the sum
+of the integer part of the logarithm of the delimited sub-vectors, whereas ParallelTrunc(x, y)
+calculates the sum of the four most significant bits of the delimited sub-vectors.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1813
+
+Proposition 1 Let x and y be n-bit vectors such that y has r sub-vectors
+y[i t , jt ] = (1, 1, . . . , 1, 0), t = 1, . . . , r
+where i 1 > j1 > i 2 > j2 > · · · > ir > jr ≥ 0, and y is equal to zero elsewhere.
+We define the bit-vector functions ParallelLog and ParallelTrunc by
+ParallelLog(x, y) = HW(RevCarry(x ∧ y, y))
+ParallelTrunc(x, y) = (HW(z 0 )
+where z λ = x ∧ (y
+
+0) ∧ · · · ∧ (y
+
+3)  (HW(z 1 )
+λ) ∧ ¬(y
+
+2)  (HW(z 2 )
+
+1)  HW(z 3 )
+
+(λ + 1)).
+
+(a) If x[i t , jt ] > 0 for t = 1, . . . , r , then
+r
+
+log2 (x[i t , jt ]) = ParallelLog(x, y) .
+t=1
+
+(b) If at least log2 (n) + 4 bits are dedicated to ParallelTrunc(x, y), then
+r
+
+Truncate(x[i t , jt + 1]) = ParallelTrunc(x, y) .
+t=1
+
+Proof Case (a) Let m = log2 (x[i 1 , j1 ]) and c = RevCarry(x ∧ y, y). Note that c[n −
+1, i 1 ] = 0, since y[n − 1, i 1 + 1] = 0. For m ≥ 1, we obtain the sub-vectors
+i 1 , . . . , j1 + m + 1, j1 + m, j1 + m − 1, . . . , j1 + 1, j1 , j1 − 1
+y[i 1 , j1 − 1] = (1, . . . ,
+1,
+1,
+1,
+. . . , 1, 0, ∗) ,
+(x ∧ y)[i 1 , j1 − 1] = (0, . . . ,
+0,
+1,
+∗,
+. . . , ∗, 0, ∗) ,
+c[i 1 , j1 − 1] = (0, . . . ,
+0,
+0,
+1,
+. . . , 1, 1, 0) .
+In particular, c[i 1 , j1 ] has m bits set to one. If m = 0, x[i 1 , j1 + 1] = 0 and y[ j1 ] = 0,
+which implies that there is no carry chain, i.e., c[i 1 , j1 ] = 0. Therefore, in both cases
+HW(c)[i 1 , j1 ]) = m = log2 (x[i 1 , j1 ]).
+Note that the reversed carry chain stops at j1 , and c[ j1 − 1, i 2 ] = 0 · · · 0. Therefore, the
+same argument can be applied for t = 2, . . . , r , obtaining
+HW(c[i t , jt ]) = log2 (x[i t , jt ]) , c[ jt − 1, i t+1 ] = 0 .
+Finally, it is easy to see that c[ jr − 1, 0] = 0, concluding the proof for this case.
+Case (b) First note that for λ = 0, . . . , 3 and t = 1, . . . , r , the variable z λ is
+
+x[i], if i = i t − λ > jt
+z λ [i] =
+0,
+otherwise
+Therefore, the Hamming weight of z λ computes the following summation:
+HW(z λ ) =
+
+x[i t − λ] .
+t
+i t −λ> jt
+
+While we define HW as a bit-vector function returning an n-bit output given an n-bit input,
+log2 (n) + 1 bits are sufficient to represent the output of HW. Therefore, by representing
+
+123
+
+1814
+
+S. A. Azimi et al.
+
+each HW(z λ )
+(3 − λ) in a (log2 (n) + 4)-bit variable h λ , the bit-vector expression
+h 0  h 1  h 2  h 3 does not overflow, and we obtain
+r
+
+3
+
+r
+
+Truncate(x[i t , jt + 1]) =
+t=1
+
+x[i t − λ] × 23−λ = h 0  h 1  h 2  h 3 ,
+t=1
+
+λ=0
+i t −λ> jt
+
+
+
+
+which concludes the proof.
+
+Since both HW and Rev have O(log2 n) bit-vector complexities, so do the functions
+ParallelLog and ParallelTrunc. The next lemma applies ParallelLog and ParallelTrunc to
+provide a bit-vector expression of the sum of apxlog2 ( pi ).
+Lemma 7 Let r and f be the bit-vectors given by
+
+)
+r = ParallelLog((w ∧ s000
+
+
+1, s000
+
+1) ,
+
+
+1, RevCarry((w ∧ s000
+)
+
+f = ParallelTrunc(w
+
+
+1, s000
+
+1)) .
+
+If at least log2 (n) + 5 bits are dedicated to r and f , then
+apxlog2 ( pi ) = (r
+
+24
+
+4)  f .
+
+i∈I
+
+[i −
+Proof Regarding Lemma 6, w[i − 1, i − i ] represents the i -bit vector of pi and s000
+1, i − i ] conforms to the pattern (1, . . . , 1, 0) for any i ∈ I . Therefore,
+
+
+
+
+log2 ( pi ) = HW RevCarry((w ∧ s000
+)
+1, s000
+1) ,
+i∈I
+
+following Proposition 1. For the second case, let c be the n-bit vector given by c =
+
+
+)
+1, s000
+1). Denoting by j = i − li and m = log2 ( pi )
+RevCarry((w ∧ s000
+for a given i ∈ I , note that pi [m] is the most significant active bit of pi and
+(w
+
+i +1, . . . , j +m +2, j +m +1, j +m, . . . , j +2, j +1, j
+1)[i +1, j] = (0, . . . ,
+0
+pi [m], pi [m −1], . . . , pi [1], pi [0] 0) ,
+c[i +1, j] = (0, . . . ,
+0
+0,
+1,
+. . . , 1,
+1 0) .
+
+Thus c[ j + m, j] conforms to the pattern (1, . . . , 1, 0) and Proposition 1 leads to
+Truncate( pi [m − 1, 0]) = ParallelTrunc(w
+
+1, c) .
+
+i∈I
+m=log2 ( pi )
+
+For any n-bit variables x and y, it is easy to see that ParallelLog(x, y) < n. Thus,
+log2 (n) + 4 bits are sufficient to represent (r
+4), and f can also be represented with the
+same number of bits following Proposition 1. Therefore, by representing (r
+4) and f in
+(log2 (n) + 5)-bit variables, the bit-vector expression (r
+4)  f does not overflow. 
+
+Recall that the differential weight of constant addition can be decomposed as
+
+1
+log2 (ϕi ) −
+log2
+log2 ( pi ) .
+−
+weighta (u, v) = −
+2i −1
+i∈
+/I
+
+i∈I
+
+i∈I
+
+If the binary logarithm of pi is replaced by our approximation of the binary logarithm
+apxlog2 ( pi ), we obtain the following approximation of the weight,
+
+1
+apxweighta (u, v)  −
+log2 (ϕi ) −
+log2
+apxlog2 ( pi ) .
+(5)
+−
+2i −1
+i∈
+/I
+
+123
+
+i∈I
+
+i∈I
+
+A bit-vector differential model for the modular addition by a constant
+
+1815
+
+Our weight approximation can be computed with the bit-vector function BvWeight described
+in Algorithm 1, as shown in the lemma.
+Algorithm 1 Bit-vector function BvWeight(u, v, a).
+Input: (u, v, a)
+Output: BvWeight(u, v, a)
+s000 ← ¬(u
+1) ∧ ¬(v
+1)
+
+s000
+← s000 ∧ ¬LZ(¬s000 )
+
+
+t ← ¬s000
+∧ (s000
+1)
+
+
+t  ← s000
+∧ (¬(s000
+1))
+
+1))
+s ← ((a
+1) ∧ t)  (a ∧ (s000
+
+
+q ← (¬((a
+1) ⊕ u ⊕ v))
+1 ∧ t
+ , q) ∨ q
+d ← RevCarry(s000
+w ← (q  (s ∧ d)) ∨ (s ∧ ¬d)
+ )  ParallelLog((w ∧ s 
+int ← HW((u ⊕ v)
+1)  HW(s000
+000 )
+
+
+f rac ← ParallelTrunc(w
+1, RevCarry((w ∧ s000
+)
+1, s000
+return (int
+4)  f rac
+
+
+1, s000
+1))
+
+1)
+
+Lemma 8 If at least log2 (n) + 5 bits are dedicated to BvWeight(u, v, a), then
+24 apxweighta (u, v) = BvWeight(u, v, a).
+Proof Regarding Lemmas 3 and 5 and 7 we respectively obtain
+
+1
+log2 (ϕi ) = HW((u ⊕ v)
+1) , −
+log2
+−
+2i −1
+i∈
+/I
+
+
+apxlog2 ( pi ) = (ParallelLog((w ∧ s000
+)
+
+24
+
+
+),
+= HW(s000
+
+i∈I
+
+
+1, s000
+
+1)
+
+4)  f rac .
+
+i∈I
+
+All in all, we get the following identities,
+24 apxweighta (u, v) = 24 ((int
+
+4)  f rac) = BvWeight(u, v, a) .
+
+
+
+
+Note that the four least significant bits of BvWeight(u, v, a) correspond to the fraction
+bits of the approximate weight. In other words, the output of BvWeight(u, v, a) represents
+the rational value
+log2 (n)+4
+
+2i−4 BvWeight(u, v, a)[i] .
+i=0
+
+The bit-vector complexity of BvWeight is dominated by the complexity of LZ, Rev, HW,
+ParallelLog, and ParallelTrunc. Since these operations can be computed with O(log2 n)
+basic bit-vector operations, so does BvWeight.
+Theorem 4 shows that BvWeight leads to a close approximation of the differential weight
+and provides explicit bounds for the approximation error.
+Theorem 4 Let (u, v) be a valid differential over the n-bit constant addition a , let
+weighta (u, v) be the differential weight of (u, v), and let BvWeight be the bit-vector function
+defined by Algorithm 1. Then, the approximation error,
+E = weighta (u, v) − apxweighta (u, v) = weighta (u, v) − 2−4 BvWeight(u, v, a)
+is bounded by −0.029(n − 1) ≤ E ≤ 0 .
+
+123
+
+1816
+
+S. A. Azimi et al.
+
+Section 3.3 is devoted to the proof of Theorem 4, where we will also analyse the error
+caused by our approximated binary logarithm. Before proving Theorem 4, we will describe
+an example to understand this theorem and Algorithm 1.
+Example 3 Consider the same conditions as defined in Example 1, i.e., (u, v) =
+(1010001110, 1010001010) and the constant input a = 1000101110. The weight
+for our differential is
+
+5
+a
+weighta (u, v) = − log2 (Pr[u −→ v]) = − log2
+≈ 1.678.
+16
+Let’s find the approximate weight apxweighta based on Algorithm 1. Table 4 presents
+some of the variables we obtain to compute the aforementioned approximate weight.
+The set I = {1 ≤ i ≤ n − 1 | Si = 11*, i > 1} in this example is equal to I = {2, 8}.
+The variable int in Algorithm 1 consists of three parts. The first part of the variable int
+calculated in Algorithm 1 is
+1) = 0000000001 = 1 ,
+
+which is equal to − i ∈/ I log2 (ϕi ) = − i∈{0,1,3,4,5,6,7,9} log2 (ϕi ) = − log2 (ϕ3 ).
+
+The second part uses the variable s000
+which is the same as s000 except that the leading
+
+
+one bits of s000 are replaced in s000 by zeros. In other words, s000
+[9] = 0 but the remaining
+bits of these two bit-vectors are exactly equal. Computing the second part results in
+
+
+HW((u ⊕ v)
+
+
+HW(s000
+) = 0000000101 = 5 ,
+
+
+and it is equal to i∈I (i − 1) = (2 − 1) + (8 − 1).
+For the third and last part of int, we compute w, obtaining w = 0001010010. We
+remark that the bit-vector w for i ∈ I in fact includes pi as some subvectors, i.e.
+i = 2 : w[2 − 1, 2 − 2 ] = w[1, −1] = 100 = 4 = p2 ,
+i = 8 : w[8 − 1, 8 − 8 ] = w[7, 4] = 0101 = 5 = p8 .
+Hence, the third part of int is computed as
+
+
+ParallelLog((w ∧ s000
+)
+1, s000
+1) = 0000000100 = 4 ,
+
+which is equal to i∈I log2 ( pi ) = log2 ( p2 ) + log2 ( p8 ). Considering all three parts,
+the bit-vector int is obtained by
+
+int = 0000000001  0000000101  0000000100 = 0000000010 = 2 .
+Table 4 Intermediate variables
+for computing
+apxweighta (u, v) of
+Example 3
+
+123
+
+i
+
+9
+
+8
+
+7
+
+6
+
+5
+
+4
+
+3
+
+2
+
+1
+
+0
+
+a[i]
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+1
+
+1
+
+0
+
+u[i]
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+1
+
+1
+
+0
+
+v[i]
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+0
+
+s000 [i]
+
+1
+
+0
+
+1
+
+1
+
+1
+
+0
+
+0
+
+0
+
+1
+
+1
+
+
+s000
+[i]
+
+0
+
+0
+
+1
+
+1
+
+1
+
+0
+
+0
+
+0
+
+1
+
+1
+
+w[i]
+
+0
+
+0
+
+0
+
+1
+
+0
+
+1
+
+0
+
+0
+
+1
+
+0
+
+BvWeight(u, v, a)[i]
+
+0
+
+0
+
+0
+
+0
+
+0
+
+1
+
+1
+
+1
+
+0
+
+0
+
+A bit-vector differential model for the modular addition by a constant
+
+1817
+
+Moreover, the f rac bit-vector in Algorithm 1 is calculated by
+f rac = ParallelTrunc(w
+
+
+)
+1, RevCarry((w ∧ s000
+
+= HW(0000100000)
+
+
+1, s000
+
+1)) ,
+
+2 = 4.
+
+Considering the third major operand of int and the bit-vector f rac, we can obtain the
+summation of all approximate logarithms
+apxlog2 ( pi ) = apxlog2 ( p2 ) + apxlog2 ( p8 ) = 4 +
+i∈I
+
+4
+= 4.25 .
+24
+
+To summarize, the output of Algorithm 1 is
+BvWeight(u, v, a) = (int
+
+4)  f rac ,
+
+= 0000100000  0000000100 = 0000011100 = 28 .
+Therefore, the approximate weight will be equal to
+apxweighta (u, v) = 2−4 BvWeight(u, v, a) =
+
+28
+= 1.75 .
+24
+
+The total error of our approximation is
+E = weighta (u, v) − apxweighta (u, v) ≈ 1.678 − 1.75 = −0.072 ,
+which is a negative value and lower bounded by −0.029(n − 1) = −0.261 as suggested by
+Theorem 4.
+
+3.3 Error analysis: proof of Theorem 4
+In this subsection, we will prove Theorem 4 by gradually analysing the error produced by
+our approximation of the binary logarithm. As we can see from Eqs. (3) and (5), the gap
+between weighta (u, v) and apxweighta (u, v) is
+
+
+weighta (u, v) − apxweighta (u, v) = −
+
+
+log2 ( pi ) − apxlog2 ( pi ) .
+
+i∈I
+
+Note that the integer part of apxlog2 is equal to the integer part of log2 and the error is caused
+by the fraction part of the logarithm.
+Given a positive integer x and the corresponding m = log2 (x), we define apxlogκ2 as
+
+m + x[m − 1, 0]/2m ,
+m≤κ
+κ
+apxlog2 (x) =
+κ
+m + x[m − 1, x − κ]/2 , m > κ
+The non-negative integer κ is called the precision of the fraction part. Note that apxlogκ2
+is the generalization of apxlog2 , which considers κ = 4 bits for the fraction part. While
+Theorem 4 only focuses on κ = 4, we will use apxlogκ2 in this section to additionally prove
+that our error bound also applies to κ ≥ 4.
+The following lemma bounds the approximation error of apxlog2 when κ ≥ log2 (x),
+with a similar proof as [56] for the sake of completeness. The main idea is that after extracting
+integer part of the logarithm in base 2, one can estimate log2 (1 + γ ) by γ when 0 ≤ γ < 1.
+
+123
+
+1818
+
+S. A. Azimi et al.
+
+Lemma 9 Consider a positive integer x and the binary logarithm approximation log2 (x) ≈
+m + x[m − 1, 0]/2m , where m = log2 (x). Then, the approximation error e = log2 (x) −
+(m + x[m − 1, 0]/2m ) is bounded by 0 ≤ e ≤ B, where B is given by
+
+
+B = 1 − 1 + ln(ln(2)) / ln(2) ≈ 0.086 .
+Proof Let x = 2m + b, where b is a non-negative integer such that 0 ≤ b < 2m . Therefore,
+x[m − 1, 0] = x − 2m = b and the error is given by
+
+
+x[m − 1, 0]
+b
+m
+(2
++
+b)
+−
+m+ m
+e = log2 (x) − m +
+=
+log
+2
+m
+2
+2
+
+b
+b
+= log2 1 + m − m .
+2
+2
+For γ = b/2m , we obtain 0 ≤ γ < 1 and e = log2 (1 + γ ) − γ . Note that e is a concave
+function of γ where e ≥ 0 if and only
+ if 0 ≤ γ ≤ 1. By deriving e = e(γ ), one can see that
+max(e) = B = 1 − 1 + ln(ln(2)) / ln(2) ≈ 0.086 is reached when γ = 1/ ln(2) − 1 ≈
+0.44.
+
+
+The bound B is an almost tight bound, e.g., when x = 3, the obtained error is log2 (3)−(1+
+1
+)
+2  0.085. The following example sheds more light on our binary logarithm approximation.
+Example 4 Consider the positive integer x = 11101. Note that log2 (x)  4.85798 and
+m = (log2 (x)) = 4. In order to obtain the approximation defined in Proposition 9, we first
+find and omit the greatest "one" in binary representation of x, and we get x[m−1, 0] = 1101.
+By interpreting the remaining bits as a binary fraction, we have x[m − 1, 0] 2m = 0.1101.
+Therefore, the approximated binary logarithm of x = 11101 in binary representation is
+m+
+
+x[m − 1, 0]
+= 100.1101 ,
+2m
+
+which is equal to 4.8125. In addition, the corresponding error of such approximation is
+e ≈ 0.04548, which is a positive value and upper bounded by B ≈ 0.086.
+Finally, we can now prove Theorem 4, which basically states that if we dedicate 4 bits to
+the fraction precision κ, the approximation error E is bounded by −0.029 · (n − 1) ≤ E ≤ 0.
+While Theorem 4 focuses on κ = 4, we will show in the proof that we can also bound the
+error for κ ≥ 4. To this end, we generalize the approximated weight apxweighta and the
+approximated weight error E κ as follows
+
+
+
+1
+κ
+κ
++
+apxlog2 ( pi ) +
+log2
+log2 (ϕi )
+apxweighta (u, v) = −
+2i −1
+i∈I
+
+i∈I
+
+E κ = weighta (u, v) − apxweightκa (u, v) ,
+
+i∈
+/I
+
+where apxweight4a (u, v) = apxweighta (u, v) is defined by Eq. (5) and E 4 = E is defined
+in Theorem 4.
+Proof (Theorem 4) First, we mention that log2 (ϕi ) is an integer number when Si  = 11* or
+for Si = 11* we see i < 3. For these cases, log2 (ϕi ) = log2 (ϕi ) and the approximation
+error is equal to zero.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1819
+
+(0.44, 0.086)
+
+·10−2
+
+Fig. 1 The error
+e = log2 (1 + γ ) − γ , over
+0≤γ <1
+
+8
+
+e
+
+6
+
+4
+
+2
+
+0
+
+0
+
+0.2
+
+0.4
+
+γ
+
+0.6
+
+0.8
+
+1
+
+Next, for each i ∈ I when i ≥ 3, let pi = 2m i + bi such that m i and bi are two nonnegative integers, m i ≤ i − 2 and 0 ≤ bi < 2m i . If i ≤ κ + 2, we obtain m i ≤ κ and
+apxlogκ2 ( pi ) = m i + bi · 2−m i . Thus, the resulting error
+ei = log2 ( pi ) − apxlogκ2 ( pi ) = log2 ( pi ) − (m i + bi · 2−m i )
+is exactly the same as the error defined in Proposition 9, and 0 ≤ ei ≤ B ≈ 0.086.
+On the other hand, for m i > κ, i.e., i ≥ κ + 3, let pi = 2m i + ti · 2m i −κ + ζi , where ti
+and ζi are two non-negative integers such that 0 ≤ ti < 2κ as well as 0 ≤ ζi < 2m i −κ . In
+this case, the approximated binary logarithm is apxlogκ2 ( pi ) = m i + ti · 2−κ . We now define
+a new error ei as
+ei = log2 ( pi ) − apxlogκ2 ( pi ) = log2 (1 + ti · 2−κ + ζi · 2−m i ) − ti · 2−κ .
+Due to the fact that ζi ≥ 0, we can see that
+ei = log2 ( pi ) − (m i + ti · 2−κ ) ≥ log2 ( pi ) − (m i + ti · 2−κ + ζi · 2−m i ) = ei ≥ 0 .
+Since ζi < 2m i −κ and by reforming the error, we obtain the upper bound of ei
+ei ≤ log2 (1 + ti · 2−κ + 2−κ ) − ti · 2−κ = (log2 (1 + γi ) − γi ) + 2−κ ,
+where γi = (ti + 1) · 2−κ and 2−κ ≤ γi < 1. Regarding Proposition 9, the new error ei is
+bounded by 0 ≤ ei ≤ B + 2−κ .
+Note that for a valid differential (u, v) over the constant addition a we can see that
+S0 = 000 which for some i ∗ belongs to the chain
+i ∗ = {Si ∗ −1 , . . . , S0 , S−1 = ⊥},
+
+i ∗ = i ∗ + 1.
+
+Hence, we obtain
+δi ∗ −1 =
+
+a[i ∗ − i ∗ − 1]
++
+2i ∗ −1
+
+i ∗
+j=2
+
+Similar to the proof of Lemma 4 we have
+ϕi ∗ =
+
+pi ∗
+
+=
+ ∗−1
+
+2i
+
+ ∗ −1
+
+i
+a[i ∗ − j]
+=
+j−1
+2
+
+j=2
+
+pi∗∗
+
+2i ∗−2
+
+a[i ∗ − j]
+.
+2 j−1
+
+,
+
+123
+
+1820
+
+S. A. Azimi et al.
+
+where pi∗∗ = pi ∗ /2 is an integer. Therefore, by replacing i ∗ with i∗∗ = i ∗ − 1, the previous
+statements considering the error bounds of our approximation for the state Si ∗ = 11* and
+its new i∗∗ are still correct. We now define two bits b and b as
+
+
+1, i∗∗ > κ + 2
+1, 3 ≤ i∗∗ ≤ κ + 2
+
+, b =
+b=
+0, o.w.
+0, o.w.
+β
+
+Finally, by defining the conditional index set Iα = {i ∈ I − {i ∗ } | α ≤ i ≤ β} we obtain
+E κ = weighta (u, v) − apxweightκa (u, v)
+(log2 ( pi ) − apxlogκ2 ( pi ))
+
+=−
+i∈I
+
+⎞
+
+⎛
+⎜
+= −⎝
+⎛
+
+ei +
+
+i∈I3κ+2
+
+⎜
+≥ − ⎝B
+⎛
+
+⎟
+ei + bei ∗ + b ei ∗ ⎠
+
+n
+i∈Iκ+3
+
+⎞
+
+1 + (B + 2−κ )
+
+i∈I3κ+2
+
+⎜B
+≥ −⎝
+3
+
+n
+i∈Iκ+3
+
+
+i +
+
+⎟
+1 + bB + b (B + 2−κ ) ⎠
+
+B + 2−κ
+κ +3
+
+i∈I3κ+2
+
+i + b
+n
+i∈Iκ+3
+
+B ∗
+ ∗ + b
+3 i
+
+B
+B + 2−κ
+≤ , resulting in
+κ +3
+3
+⎛
+⎞
+⎛
+B
+B
+B
+i + i∗∗ ⎠ = − ⎝
+0 ≥ Eκ ≥ − ⎝
+3
+3
+3
+n
+
+
+
+⎞
+B + 2−κ
+κ +3
+
+⎟
+i∗∗ ⎠ .
+
+For κ ≥ 4, we can see that
+
+i∈I3
+
+⎞
+B
+i + (i ∗ − 1)⎠
+3
+n
+
+i∈I3
+
+B
+≥ − (n − 1) ≈ −0.029(n − 1).
+3
+Since for κ = 4, we have E 4 = E = weighta (u, v) − apxweighta (u, v), the above
+inequalities hold for the approximation error E as well.
+
+
+While dedicating κ = 4 bits as the fraction precision is enough to obtain the same error
+bounds as κ > 4, considering κ < 4 creates a trade-off between the lower bound of the error
+and the complexity of Algorithm 1. As an example, choosing κ = 3 removes one HW call
+in Algorithm 1. However, by following the proof of Theorem 4 for κ = 3, the error will be
+lower bounded by −0.035(n − 1), which potentially is an acceptable trade-off.
+The differential model of the constant addition as well as the approximation error will
+be used in the automated method that we will present in the next section to search for
+characteristics and impossible differentials of ARX ciphers.
+
+4 SMT-based search of characteristics and impossible diﬀerentials
+In this section, we describe how to formulate the search of optimal characteristics and impossible differentials as a sequence of SMT problems, which can be solved by an off-the-shelf
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1821
+
+SMT solver such as Boolector [62] or STP [22]. Our methods are inspired by the approach
+of Mouha and Preneel [57] to search for single-key characteristics of Salsa20 [57] and the
+approach by Sasaki and Todo to search for impossible differentials using Mixed Integer
+Linear Programming (MILP) [66].
+
+4.1 Searching for characteristics
+−n
+To search for characteristics
+ −w−1 −wup
+! to probability 2 , the probability space is decomposed into n
+intervals Iw = 2
+,2
+, where w = 0, 1, . . . , n − 1, and for each interval, the decision
+problem of whether there exists a characteristic with probability p ∈ Iw is encoded as an
+SMT problem. Note that a characteristic  has probability p ∈ Iw if and only if its integer
+weight weight() is equal to w. Section 4.2 describes the encoding process for an ARX
+cipher.
+The SMT problems are provided to the SMT solver, which checks their satisfiability
+in increasing weight order. When the SMT solver finds the first satisfiable problem, an
+assignment of the variables that makes the problem satisfiable is obtained, and the search
+finishes. The assignment contains a characteristic with integer weight ŵ, and it is optimal in
+the sense that there are no characteristics with integer weight strictly smaller than ŵ. If the
+n SMT problems are found to be unsatisfiable, then it is proved there are no characteristics
+with probability higher than 2−n .
+To speed up the search, we perform the search iteratively on round-reduced versions of
+the cipher. First, we search for an optimal characteristic for a small number of rounds r ; let
+ŵ denote its integer weight. Then, we search for an optimal (r + 1)-round characteristic,
+but skipping the SMT problems with weight strictly less than ŵ. Since these SMT problems
+were found to be unsatisfiable for r rounds, they will also be unsatisfiable for r + 1 rounds.
+This procedure is repeated until the total number of rounds is reached. Algorithm 2 describes
+in pseudo-code this search strategy. Our strategy prioritises SMT problems with low weight
+and small number of rounds, which are faster to solve. In addition, our search also finds
+optimal characteristics of round-reduced versions, which can be used in other differentialbased attacks, such as rectangle or boomerang attacks [9, 71].
+
+Algorithm 2 SMT-based optimal characteristic search
+←∅
+ŵ ← 0
+for r = 1, . . . , max_rounds do
+for w = ŵ, ŵ + 1, . . . , n − 1 do
+P ← CreateSMTProblem(rounds = r , target_weight = w)
+if SMTSolver.IsSatisfiable(SMT_problem = P) then
+ŵ ← w
+ ← SMTSolver.GetAssignment(SMT_problem = P)
+Print()
+ optimal r -round characteristic
+break
+return , ŵ
+
+This automated method can be used to search for either single-key or related-key characteristics. Furthermore, additional SMT constraints can be added to the SMT problems
+in order to search for different types of characteristics. For related-key characteristics and
+by default, this method searches characteristics minimizing the total weight weight() =
+weight( K S ) + weight( E ). Strong related-key characteristics can be searched by adding
+
+123
+
+1822
+
+S. A. Azimi et al.
+
+the constraint weight( K S ) = 0 in the SMT problems. Similarly, equivalent keys can be
+found by adding the constraint weight( E ) = 0.
+Algorithm 2 returns the characteristic with the minimum SMT integer weight, obtained
+from the bit-vector differential models used within the SMT problems. When some of these
+models compute approximations of the intermediate weights, the SMT integer weight and the
+actual integer weight of the characteristic might differ, and the returned characteristic might
+not be optimal. However, if we have alternative models that compute the exact intermediate
+weights (that cannot be represented in the SMT problems) and a bound for the error of the SMT
+integer weight, Algorithm 2 can be adapted to obtain the optimal characteristic as follows.
+First, Algorithm 2 is used to obtain the characteristic  with the minimum SMT integer weight
+ŵ. Then, one finds all2 characteristics with SMT integer weights {ŵ, ŵ + 1, . . . , ŵ + },
+where  is the absolute bound for the error of the SMT integer weight. Finally, the weights of
+the found characteristics are recomputed with the alternative models, and the characteristic
+with the minimum integer weight is returned. This adaptation can be used for ARX ciphers
+with constant additions, as the error bound can be computed from Theorem 4 and Machado’s
+algorithm [53] can be used to compute the exact weights of the constant additions.
+This method only ensures optimality if the differential probabilities over each round are
+independent and the characteristic probability does not strongly depend on the choice of
+the secret key. When these assumptions do not hold for a cipher, we empirically compute
+the weight of each characteristic found by sampling many input pairs satisfying the input
+difference and counting those satisfying the difference trail. In this case, this method provides
+a practical heuristic to find characteristics with high probability, and it is one of the best
+systematic approaches for some families of ciphers, such as ARX.
+
+4.2 Encoding the SMT problems
+In this section, we explain how to formulate the decision problem of determining whether a
+characteristic  exists with integer weight W of an ARX cipher as an SMT problem in the
+bit-vector theory.
+First, the ARX cipher is represented in Static Single Assignment (SSA) form, that is, as
+an ordered list of instructions y ← f (x) such that each variable is assigned exactly once and
+each instruction is a modular addition, a rotation, or an XOR.
+For each variable x in the SSA representation, a bit-vector variable x denoting the
+difference of x is defined in the SMT problem. Then, for every instruction y ← f (x), the
+weight and the differential model of f are added to the SMT problem as a bit-vector variable
+w and bit-vector constraints valid fi (x ,  y ) and Equals(w, weight fi (x ,  y )), following
+Table 5.
+Finally, the following bit-vector constraints are added to the SMT problem,
+NotEquals( p , 0) , Equals(W , w1  · · ·  wr ) ,
+where  p denotes the input difference and (w1 , . . . , wr ) denote the weight of each operation.
+The first constraint excludes the trivial characteristic with zero input difference, while the
+second constraint fixes the weight of the characteristic to the target weight. Note that the
+bit-size of the weights might need to be increased to prevent an overflow in the modular
+addition of the last constraint.
+2 It is possible to get another solution of an SMT problem by solving it again with an additional constraint
+
+that excludes the first solution. By repeating this process, one can find all the solutions.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+Table 5 Bit-vector differential
+models of ARX operations
+
+1823
+
+y = f a (x)
+
+Validity
+
+y = x1 ⊕ x2
+
+Equals( y , x1 ⊕ x2 )
+
+0
+
+y = x ⊕a
+
+Equals( y , x )
+
+0
+
+Weight
+
+y=x ≪a
+
+Equals( y , x ≪ a)
+
+0
+
+y=x ≫a
+
+Equals( y , x ≫ a)
+
+0
+
+y = x1  x2
+
+Theorem 1
+
+Theorem 1
+
+y = x a
+
+Theorem 3
+
+Theorem 4
+
+Fig. 2 The function f k
+
+Example 5 Consider the keyed function f k with key k and input p = ( p1 , p2 ),
+f k ( p1 , p2 ) = ((( p2  1) ⊕ k)  p1 , p1 ≪ 1) .
+This function can be written as a list of simple instructions (SSA form) as
+x 1 ← p2  1 ,
+x2 ← x1 ⊕ k ,
+x 3 ← x 2  p1 ,
+x 4 ← p1 ≪ 1 ,
+where the output is the pair (x3 , x4 ). Figure 2 depicts the function f k together with its
+intermediate variables.
+An SMT problem in the bit-vector theory denoting whether f k has a characteristic with
+integer weight W is as follows:
+∃ p1 , p2 , x1 , x2 , x3 , x4 , w1 , w2 , w3 , w4 :
+valid1 ( p2 , x1 ) ,
+
+123
+
+1824
+
+S. A. Azimi et al.
+
+Equals(w1 , BvWeight( p2 , x1 , 1)) ,
+Equals(x2 , x1 ) ,
+Equals(w2 , 0) ,
+valid ((x2 ,  p1 ), x3 ) ,
+Equals(w3 , weight ((x2 ,  p1 ), x3 )) ,
+Equals(x4 , d p1 ≪ 1) ,
+Equals(w4 , 0) ,
+NotEquals(( p1 ,  p2 ), 0) ,
+Equals(W , (w1  ((w2  w3  w4 )
+
+4)
+
+4)) .
+
+The shifts in the last constraint are due to the fact that the last four bits of w1 denote fraction
+bits. Furthermore, depending on the bit-size of f k , it might be necessary to extend the bit-size
+of the weights in order to prevent an overflow in the last modular additions.
+
+4.3 Searching of impossible differentials
+In [66], Sasaki and Todo [66] propose a MILP-based method to search for impossible differentials that employs the MILP problems used to search for characteristics. Since this method
+can also be adapted to SMT problems, we will explain the method within the SMT context.
+The method’s main idea is that one can check whether a particular differential ( p , c ) is
+impossible by querying a simple SMT problem. While it is infeasible to check all differentials,
+one can check those with a low number of active bits since most of the known impossible
+differentials have this property.
+The subroutine to check whether a particular differential ( p0 , c0 ) is impossible can
+be done as follows. First, the SMT problem of whether there exists a characteristic over the
+cipher is encoded as in Sect. 4.2. However, only the validity constraints are added; the weight
+constraints and the target weight W are ignored. Second, the constraints that fix the input
+and output differences ( p , c ) to ( p0 , c0 ) are added to the SMT problem, that is,
+Equals( p ,  p0 ), Equals(c , c0 ) .
+Then, the SMT solver checks the satisfiability of the SMT problem. If the problem is found
+to be unsatisfiable, the differential is impossible.
+This method can be used to search for single-key and related-key impossible differentials.
+For the former case, the validity constraints of the key schedule are ignored, while for the
+latter case they are included in the SMT problems.
+As opposed to the previous SMT-based characteristic search method, the impossible check
+subroutine is a sound method. In other words, a characteristic found by Algorithm 2 could
+be invalid due to the independence assumptions, but a differential found impossible by the
+check subroutine is always impossible. While the check subroutine is a sound method, it is
+not complete; there are some impossible differentials that cannot be detected by the check
+subroutine.
+While the check subroutine is fast, checking all differentials is infeasible and only a small
+subset can be checked with the method by [66]. Thus, we propose a new automated method
+to search for impossible differentials that does not restrict the search over any pre-defined
+small subset and let the SMT solver efficiently search through the space of differentials. Our
+automated method proceeds as follows.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1825
+
+Fig. 3 The partial characteristic  = (x0 , x1 , x2 , x3 ) over E = E 2 ◦ E 1 ◦ E 0 , alongside the condition
+that the inner part (x1 , x2 ) over E 1 is an impossible differential
+
+First, we split the cipher E = E 2 ◦ E 1 ◦ E 0 into three parts E 2 , E 1 and E 0 . Let
+ = (x0 , x1 , x2 , x3 ) denote a partial characteristic over E, that is, any characteristic verifying
+E0
+
+E2
+
+Pr(x0 −→ x1 ) = 1, Pr(x2 −→ x3 ) = 1 .
+Note that no relation is imposed between x1 and x2 .
+Then, we search for all partial characteristics using our SMT-based method from Sect. 4.1.
+For each partial characteristic  = (x0 , x1 , x2 , x3 ), we apply the check subroutine
+to the differential (x1 , x2 ) over E 1 . If (x1 , x2 ) is found to be impossible over E 1 ,
+then (x0 , x3 ) is an impossible differential over E, since (x0 , x1 ) and (x2 , x3 ) are
+differentials with probability one (see Fig. 3).
+Like the characteristic search method, we start searching for impossible differentials over
+a round-reduced version of the cipher and keep increasing the number of rounds iteratively.
+This procedure is described in Algorithm 3. While FindPartialCh in Algorithm 3 is
+responsible for finding partial characteristics, IsImpossible subroutine checks the corresponding inner differential to be impossible. Impossible differentials starting after a few
+rounds are useful in practice, and our method can easily be adapted by splitting the cipher
+into four parts, E = E 2 ◦ E 1 ◦ E 0 ◦ E −1 , where E −1 denotes the skipped rounds.
+Algorithm 3 SMT-based impossible-differential search
+for r = 1, . . . , max_rounds do
+for r1 = 1, . . . , r − 2 do
+for r0 = 1, . . . , r − r1 − 1 do
+r2 = r − r0 − r1
+for  ∈ FindPartialCh(rounds E 0 =r0 , rounds E 1 =r1 , rounds E 2 =r2 )
+do
+(x0 , x1 , x2 , x3 ) ← 
+if IsImpossible(input = x1 , output = x2 , rounds E 1 = r1 )
+then
+Print(x0 , x3 )
+ impossible differential over r rounds
+break
+ break three inner loops and increase r
+return (x0 , x3 )
+
+The main advantage of our method is that the subset of differentials to check does not need
+to be specified. Thus, it can find impossible differentials that other methods cannot. Moreover,
+the search of partial characteristics is quite fast, as for many operations f (including the
+
+123
+
+1826
+
+S. A. Azimi et al.
+
+modular addition and the constant addition) the constraint Equals(0, weight f (x ,  y )) is
+much simpler than the constraint for the general case Equals(w, weight f (x ,  y )).
+As opposed to the search of characteristics, the search of r + 1-round impossible differentials cannot reuse information obtained from the search of r -round impossible differentials. In
+other words, Algorithm 2 exploits the fact that if no r -round characteristics were found with
+weight w, then no r + 1-round characteristics can be found with the same weight. However,
+for some key schedules, Algorithm 2 might find r + 1-round impossible differentials even if
+no r -round impossible differentials were found.
+
+4.4 Implementation
+We have developed an open-source tool ArxPy3 to find characteristics and impossible differentials of ARX ciphers implementing the methods described earlier. Originally, ArxPy
+was a tool to search for rotational-XOR characteristics using SMT solvers [64]. However, we
+have extended it to support (related-key) differential characteristics and impossible differentials containing the constant addition. ArxPy provides high-level functions that automate the
+search, a simple interface to represent ARX ciphers, and complete documentation in HTML
+format, among other features.
+ArxPy workflow is represented in Fig. 4. The user first defines the ARX cipher using
+the interface provided by ArxPy and chooses the parameters of the search (e.g., the type
+of the characteristic to search, the SMT solver to use, etc.). Then, ArxPy automatically
+translates the python implementation of the ARX cipher into SSA form, encodes the SMT
+problems associated to the type of search selected by the user, and solves the SMT problems
+by querying the SMT solver. When searching for characteristics, for each satisfiable SMT
+problem found, ArxPy reconstructs the characteristic from the assignment of the variables
+that satisfies the problem and empirically verifies the weight of the characteristic. Finally,
+ArxPy returns the results of the search to the user.
+Internally, ArxPy is implemented in Python 3 and uses the libraries SymPy [55] to obtain
+the SSA representation through symbolic execution and PySMT [23] for the communication
+with the SMT solvers. Thus, all the SMT solvers supported by PySMT can be directly used
+for ArxPy.
+
+5 Experiments
+We have applied our methods for finding characteristics and impossible differentials to some
+ARX ciphers that include constant additions. In particular, we have searched for relatedkey characteristics and related-key impossible differentials of TEA, XTEA, HIGHT, LEA,
+SHACAL-1, and SHACAL-2.
+Due to the difficulty of searching for characteristics of ciphers with constant additions this
+far, cipher designers have avoided constant additions in the encryption functions so that they
+could search for single-key characteristics, the most threatening ones. Only a few ciphers
+include constant additions in the encryption function, and their ad-hoc structures make them
+more suitable to be analysed with other types of differences, such as additive differences in
+the case of TEA [11]. As a result, we have focused on searching related-key characteristics
+and impossible differentials of some well-known ciphers.
+3 https://github.com/ranea/ArxPy.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1827
+
+Fig. 4 Workflow of ArxPy
+
+Regarding the search for characteristics, we used Algorithm 2 to find related-key characteristics starting from the first round of each cipher. For the case of impossible differentials,
+we applied Algorithm 3 to search for related-key impossible differentials but skipping the
+first rounds of the cipher. To this end, we repeatedly call Algorithm 3 while increasing the
+number of skipped rounds in each call.
+For related-key characteristics, the usual assumptions (i.e., round independence and the
+hypothesis of stochastic equivalence) do not always hold. Thus, we empirically verify each
+characteristic and stopped each round-reduced search after the first valid characteristic is
+found.
+To verify a related-key characteristic , we split  in smaller characteristics i = (xi →
+· · · →  yi ) with weight wi lower than 20, and empirically compute the probability of
+each differential (xi ,  yi ) by sampling a small multiple of 2wi input pairs for 210 relatedkey pairs. After combining the probability of each differential, we obtain 210 characteristic
+probabilities, one for each related-key pair. If the characteristic probability is non-zero for
+several key pairs, we consider the characteristic valid and we define its empirical probability
+(resp. weight) as the arithmetic mean of the 210 characteristic probabilities (resp. weights),
+but excluding those key pairs with zero probability.
+Thus, for each characteristic that we have found, i.e. strong related-key characteristic
+(wKS = 0) and weak related-key characteristic (wKS > 0), Table 6 provides: (1) the theoretical
+key schedule and encryption weights (wKS , w E ), computed by summing the weight of each
+ARX operation; (2) the empirical key schedule and encryption weights (wKS , w E ), computed
+by sampling input pairs as explained before; and (3) the percentage of the valid key pairs that
+empirically lead to non-zero probability in the weight verification. In the appendix, we provide
+the round weights and the round differences for the characteristics covering the most rounds.
+When searching for impossible differentials with skipped rounds, Algorithm 3 splits the
+cipher into four parts. More specifically, the cipher E is represented as E = E 2 ◦ E 1 ◦ E 0 ◦ E −1 ,
+where E −1 denotes the skipped rounds, E 1 stands for the rounds of the inner impossible
+differential, and E 0 and E 2 respectively denote the backward and the forward rounds of the
+partial characteristics. In Table 7 we provide the number of rounds of each part for the best
+
+123
+
+1828
+
+S. A. Azimi et al.
+
+Table 6 Best related-key differential characteristics of XTEA, HIGHT, LEA, SHACAL-1, and SHACAL-2
+Cipher
+
+Ch. Type
+
+XTEA
+
+Strong
+
+Weak
+
+HIGHT
+
+Strong
+
+Weak
+
+LEA
+
+SHACAL-1
+
+Weak
+
+Strong
+Weak
+
+SHACAL-2
+
+Strong
+Weak
+
+Rounds
+
+(wKS , wKS )
+
+(w E , w E )
+
+% valid keys
+
+References
+
+16
+
+0
+
+32
+
+–
+
+[52]
+
+16
+
+(0,0)
+
+(37, 32.02)
+
+46%
+
+This paper
+
+18
+
+(0,0)
+
+(57, 49.79)
+
+48%
+
+This paper
+
+18
+
+17
+
+19
+
+–
+
+[45, 52]
+
+18
+
+(4.83, 3.15)
+
+(16, 14.46)
+
+100%
+
+This paper
+
+27
+
+(6.89, 5.74)
+
+(40, 39.39)
+
+7%
+
+This paper
+
+10
+
+0
+
+12
+
+–
+
+[50]
+
+10
+
+(0, 0)
+
+(12, 9.97)
+
+34%
+
+This paper
+
+15
+
+(0, 0)
+
+(45, 42.59)
+
+8%
+
+This paper
+
+12
+
+2
+
+19
+
+–
+
+[40]
+
+12
+
+(2.48, 3.19)
+
+(19, 17.65)
+
+40%
+
+This paper
+
+14
+
+(13.09, 9.85)
+
+(14, 11.46)
+
+17%
+
+This paper
+
+11
+
+–
+
+–
+
+–
+
+[32]
+
+6
+
+(1.56, 1.22)
+
+(24, 22.50)
+
+100%
+
+This paper
+
+7
+
+(2.56, 4.68)
+
+(36, 34.35)
+
+100%
+
+This paper
+
+27
+
+0
+
+29
+
+–
+
+[36]
+
+30
+
+(0, 0)
+
+(63, 47.36)
+
+97%
+
+This paper
+
+35
+
+10
+
+29
+
+–
+
+[18, 72]
+
+25
+
+(1, 0.87)
+
+(22, 13.31)
+
+47%
+
+This paper
+
+24
+
+0
+
+38a
+
+–
+
+[51]
+
+23
+
+(0, 0)
+
+(58, 48.06)
+
+100%
+
+This paper
+
+24
+
+–
+
+52
+
+–
+
+[12]
+
+22
+
+(6.67, 2.38)
+
+(29, 24.03)
+
+100%
+
+This paper
+
+a Imposes extra conditions on plaintext values or intermediate values
+
+Table 7 Best related-key impossible differentials of XTEA, HIGHT, LEA, SHACAL-1, and SHACAL-2
+Cipher
+XTEA
+HIGHT
+LEA
+
+Rounds
+
+Start
+
+Backward
+
+Inner ID
+
+Forward
+
+References
+
+25(19 ∼ 43)
+
+19
+
+–
+
+–
+
+–
+
+[15]
+
+25(0 ∼ 24)
+
+0
+
+7
+
+13
+
+5
+
+This paper
+
+22(6 ∼ 27)
+
+6
+
+–
+
+–
+
+–
+
+[63]
+
+22(0 ∼ 21)
+
+0
+
+4
+
+14
+
+4
+
+This paper
+
+4(0 ∼ 3)
+
+0
+
+0
+
+4
+
+0
+
+This paper
+This paper
+
+SHACAL-1
+
+30(20 ∼ 49)
+
+20
+
+2
+
+16
+
+12
+
+SHACAL-2
+
+18(0 ∼ 17)
+
+0
+
+–
+
+–
+
+–
+
+[75]
+
+24(0 ∼ 23)
+
+0
+
+1
+
+12
+
+11
+
+This paper
+
+related-key impossible differentials that we found, and in Table 8 we provide the input and
+output differences of our longest impossible differentials.
+Apart from all of the best-known impossible differentials that are indicated in Table 7,
+we also implemented and searched impossible differentials using the automated method of
+Sasaki and Todo [66] to compare the results with the ones observed by Algorithm 3. While for
+XTEA, LEA, and HIGHT, both methods find impossible differentials with the same number
+of rounds, for SHACAL-1 and SHACAL-2 Algorithm 3 achieves impossible differentials
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1829
+
+Table 8 Input, output, and key differences of our longest related-key impossible differentials
+Cipher
+
+Differences
+
+XTEA
+
+mk
+
+(0x80000000, 0x00000000, 0x00000000, 0x00000000)
+
+p
+
+(0x80000000, 0x00000000)
+
+c
+
+(0x00000000, 0x80000000)
+
+mk
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+p
+
+(0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00)
+
+c
+
+(0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+mk
+
+(0x00000001, 0x00000000, 0x00000000, 0x00000000)
+
+p
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+c
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+mk
+
+(0xa0000000, 0x80000000, 0xa0000000, 0x00000000,
+
+HIGHT
+
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00)
+
+LEA
+
+SHACAL-1
+
+0x80000000, 0x00000000, 0xc0000000, 0x00000000,
+0x80000000, 0x80000000, 0x40000000, 0x00000000,
+0x80000000, 0x80000000, 0x40000000, 0x00000000)
+
+SHACAL-2
+
+p
+
+(0x00000000, 0x00000000, 0x00000000, 0x80000000, 0x00000000)
+
+c
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+mk
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000, 0x00000000, 0x00000000,
+0x94857ee6, 0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+p
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000,
+
+c
+
+(0x80000000, 0x00000000, 0x00000000, 0x00000000,
+
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x80000000, 0x00000000, 0x00000000, 0x00000000)
+
+covering more rounds. For XTEA and HIGHT, the longest impossible differentials found by
+Algorithm 3 include a few active bits, and thus they could also be found by the other method.
+However, for SHACAL-1 and SHACAL-2, our algorithm found impossible differentials
+containing multiple active bits, which cannot be obtained by other methods that restrict to
+predefined differential subsets with a low number of active bits.
+For the experiments, we have used ArxPy equipped with the SMT solver Boolector [62],
+winner of the SMT competition SMT-COMP 2019 in the bit-vector track [26]. We run the
+characteristic search for one week on a single core of an Intel Xeon 6244 at 3.60GHz. The
+search of impossible differentials was done on similar hardware during one week as well. Note
+that better characteristics and impossible differentials could be found if the round-reduced
+searches are not stopped after the first valid characteristic or if more time is employed.
+
+5.1 TEA
+Designed by Wheeler and Needham, TEA [73] is a block cipher with 64-bit block size and
+128-bit key size. It iterates 64 times an ARX round function, including constant additions
+
+123
+
+1830
+Fig. 5 The i-th round of TEA,
+i = 0, 1 . . . , 63. The master key
+mk is split into four 32-bit words
+(mk0 , mk1 , mk2 , mk3 ) and the
+i-th round key is defined as
+(ki,0 , ki,1 ) = (mk0 , mk1 ) if i is
+even and (ki,0 , ki,1 ) = (mk2 ,
+mk3 ) if i is odd. The i-th round
+constant is defined as
+i = i−2  0 , where
+−1 = 0 = 2654435769
+
+S. A. Azimi et al.
+
+Δi
+ki,0
+4
+ki,1
+5
+
+and logical shifts, depicted in Fig. 5. Since the logical shifts propagate XOR differences
+deterministically, the encoding method presented in Sect. 4.2 can be easily extended to
+include these operations.
+Kelsey et al. [35] presented the best related-key characteristics in [35]. They found a
+2-round iterative strong related-key characteristic  with weight (wk , we ) = (0, 1), which
+they extended to a 60-round characteristic with weight (0, 30). They also discovered in [34]
+that each TEA key has three other equivalent keys.
+Using ArxPy, we revisited the results by Kelsey et al. [34], but in a fully automated way.
+We found three related-key characteristics with weight zero over the full cipher, confirming
+that each key is equivalent to exactly three other keys. Excluding these three characteristics,
+we also obtained a 60-round strong related-key characteristic with weight (0, 30), and all
+the 60-round SMT problems with smaller weights were found to be unsatisfiable. Since a
+60-round related-key characteristic is sufficient to mount the related-key differential cryptanalysis on full-round TEA [35], there is no need to search for characteristics containing
+more rounds of TEA, and we stop at 60 rounds.
+There is also no need to search for related-key impossible differentials of TEA, as each
+of the three full-round zero-weight related-key characteristics induces roughly 2 × 264 fullround related-key impossible differentials, simply by alternating either the plaintext or the
+ciphertext difference.
+
+5.2 XTEA
+The block cipher XTEA [60] is designed by the same authors of TEA to fix the weakness
+of the former cipher (in the related-key setting). XTEA has a 64-bit block size and 128bit key size, and it iterates 64 times the round function depicted in Fig. 6. Like TEA, the
+round function also includes logical shifts, but the constant additions are included in the key
+schedule.
+The longest related-key characteristics found so far are the 16-round strong related-key
+differential with weight 32, manually found by Lu in [52], and the 18-round weak related-key
+characteristic with weights (wKS , w E ) = (19, 19), manually found by Lee et al. [45] but later
+improved to (17, 19) by Lu [52].
+The results of our automated search for related-key characteristics are listed in Table 6.
+In the strong related-key search, we found an 18-round characteristic with weight 57; all the
+SMT problems for 19 rounds were found to be unsatisfiable. In the weak related-key search,
+we found characteristics up to 27 rounds, where the 27-round characteristic has total weight
+6 + 40 = 46. No equivalent keys were found for XTEA.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+Fig. 6 The i-th round of XTEA,
+i = 0, 1 . . . , 63. The master key
+mk is split into four 32-bit words
+(mk0 , mk1 , mk2 , mk3 ) and the
+i-th round key is defined as
+ki = si  mksi ∧3 if i is even and
+ki = si  mk(si 11)∧3 if i is
+odd. The i-th constant si is
+defined as si = si−2  s0 , where
+s−1 = s0 = 2654435769
+
+1831
+
+ki
+4
+5
+
+Fig. 7 The i-th round function of HIGHT, i = 0, 1 . . . , 31 [31]. The i-th round key is denoted by ki =
+(S K 4i−1 , S K 4i−2 , S K 4i−3 , S K 4i−4 ) and the functions F0 and F1 are defined as F0 (x) = (x ≪ 1) ⊕ (x ≪
+2) ⊕ (x ≪ 7) and F1 (x) = (x ≪ 3) ⊕ (x ≪ 4) ⊕ (x ≪ 6)
+
+In our automated search for related-key impossible differentials of XTEA, we observed
+impossible differentials spanning 25 rounds, similar to the best impossible differential found
+this far by Darbuka [15]. Denoting the cipher XTEA with 25 rounds by E = E 2 ◦ E 1 ◦ E 0 ,
+our related-key impossible differential contains a 13-round inner impossible differential over
+E 1 , extended by a deterministic 7-round backward trail over E 0 and a deterministic 5-round
+forward trail over E 2 as depicted in Table 7. Our automated tool was also able to complete the
+search of related-key impossible differentials up to 31 rounds, but no impossible differentials
+spanning more than 25 rounds were found.
+
+5.3 HIGHT
+Adopted as an international standard by ISO/IEC [33], HIGHT [31] is a lightweight cipher
+with a block size of 64 bits and a key size of 128 bits. The encryption function performs
+initial and final key whitening transformations, and iterates 32 times a round function including XORs, 2-input additions and rotations; the constant additions are performed in the key
+schedule.
+The longest related-key characteristics found for HIGHT are a 10-round strong characteristic with weight 12 found by Lu [50], and a 12-round weak characteristic with weights
+(wKS , w E ) = (2, 19) found by Koo et al. [40]. In our automated search, we found related-key
+characteristics up to 15 rounds, listed in Table 6. The longest strong related-key characteristic we found covered 15 rounds with weights (0, 45), whereas the longest weak related-key
+characteristic covered 14 rounds with total weight 13 + 14 = 27.
+
+123
+
+1832
+
+S. A. Azimi et al.
+
+Fig. 8 The key schedule of HIGHT [31]. The round key words are denoted by S K i and the key schedule
+constants are denoted by δ j
+
+Özen et al. introduced the best-known 22-round related-key impossible differential for
+HIGHT [63]. Using ArxPy, we found a new impossible differential covering the same
+number of rounds, as shown in Table 7. Our impossible differential consists of a 14-round
+inner impossible differential, extended by two zero-weight 4-round backward and forward
+related-key trails. The mentioned 22-round impossible differential is the longest related-key
+impossible differential that ArxPy could obtain in one week by checking up to 32 rounds
+of HIGHT.
+
+5.4 LEA
+Among the family of ARX ciphers LEA [32], we analysed LEA-128, the version with 128-bit
+block size, 24 rounds, and 128-bit key size. The encryption round function of LEA performs
+2-input additions, rotations, and XORs, whereas the key schedule contains constant additions
+and rotations.
+The designers of LEA found related-key characteristics up to 11 rounds, but only specifying that the 11-round characteristics are valid for a small part of the key space and without
+providing the weights of such characteristics [32]. Excluding these characteristics, there are
+no others examples of related-key characteristics of LEA. Our automated search found weak
+related-key characteristics up to 7 rounds valid for the full key space, listed in Table 6. Strong
+characteristics with weight smaller than 128 were found up to 4 rounds, and all the strong
+related-key SMT problems for 5 rounds were found unsatisfiable. No equivalent keys were
+found for LEA.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1833
+
+Fig. 9 The i-th round function of the encryption (top) and the key schedule (bottom) of LEA-128, i =
+0, 1 . . . , 23. The tuple (ki,0 , . . . , ki,3 ) denotes the i-th round key and δi denotes the i-th key schedule constant
+
+We applied ArxPy on LEA to automatically search for related-key impossible differentials. While our method completed the search for a large number of rounds, only impossible
+differentials with non-zero key difference spanning up to four rounds were found. The lack
+of related-key impossible differentials, with low Hamming weight or with key schedule transitions with probability 1, seems to be due to the heavy and robust key schedule of LEA. By
+and large, ciphers with lightweight key schedule algorithms tend to have longer related-key
+impossible differentials in comparison to their single-key counterparts. However, the key
+schedule and the round function of LEA are of the same complexity. Thus, finding an impos-
+
+123
+
+1834
+
+S. A. Azimi et al.
+
+sible differential that covers more rounds in related-key setting instead of single-key setting
+seems infeasible. We confirmed this by applying our tool to LEA in the single-key setting,
+obtaining multiple 10-round single-key impossible differentials within a few hours.
+
+5.5 SHACAL-1
+Based on the compression function of the NIST standard hash function SHA-1 [19], the
+block cipher SHACAL-1 was initially suggested in [27] and submitted by Handschuh and
+Naccache to the NESSIE project [61]. SHACAL-1 uses 160-bit block size and 80 rounds,
+where its round function is similar to the SHA-1 compression function. The key size can be
+variable from 0 to 512 bits, although a minimum of 128-bit key size is required in [28] and
+we analysed SHACAL-1 for 512-bit keys.
+There are some ad-hoc differential characteristics presented in [18, 30, 36]. However,
+Wang et al. [72] indicated that many of the previous characteristics are invalid. The
+longest valid XOR differential characteristic is a 35-round weak related-key characteristic that appeared in [18] and was later corrected in [72] to obtain the corrected weights
+(wKS , w E ) = (10, 29). Moreover, the longest strong related-key XOR differential characteristic that is not found to be invalid by [72] spans 27 rounds of SHACAL-1 with the
+corresponding weights (wKS , w E ) = (0, 29) [36].
+These characteristics do not necessarily start from the first round of SHACAL-1 since they
+are not used for a differential attack but rather for a rectangle attack [9]. Note that the round
+function of SHACAL-1 changes in different rounds (see Fig. 10), and these characteristics
+could take advantage of the variable definition of the round function. However, we are only
+looking for the characteristics starting from the first round and for the particular case of
+SHACAL-1 with variable round functions, we do not necessarily obtain the best possible
+characteristics.
+Our automated tool ArxPy obtained a weak-key 25-round characteristic with (wKS , w E )
+= (1, 22). Moreover, the tool could also find a 30-round characteristic in the strong-key
+setting with the corresponding weights (wKS , w E ) = (0, 63). In our search, a large amount
+of SHACAL-1 characteristics found by the SMT solver did not pass our empirical validation
+test, which significantly increased the running time for finding each valid characteristic.
+More specifically and in the weak-key setting, we found more than 100 empirically invalid
+characteristics until we detected a valid 25-round one; we also obtained multiple 26-round
+weak characteristics within a week, but they were found invalid by our empirical test. We
+discarded more than 900 empirically invalid characteristics for the strong-key setting before
+finding a valid 30-round characteristic, and none of the 31-round trails obtained in a week
+could pass the test.
+One of the main reasons for the large number of empirically invalid characteristics is the
+5-input modular addition within the round function of SHACAL-1. Since the differential
+model of the modular addition with three or more inputs is unknown, we had to approximate
+the differential model of the 5-input addition with a chain of 2-input addition models. In
+other words, to model the 5-input addition y = x 1  x2  x3  x4  x5 , we split it into four
+2-input additions
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1835
+
+Fig. 10 The i-th round of SHACAL-1, i = 0, 1 . . . , 79. The 160-bit input is divided into five 32-bit words Ai ,
+Bi , Ci , Di , and E i . The function f i significantly changes regarding the round number. For a given 512-bit
+master key mk = (M0 , M1 , · · · , M15 ), the round keys K i are computed as described above, where Wi is the
+round constant
+
+z 1 = x1  x2 , z 2 = z 1  x3 , z 3 = z 2  x4 , y = z 3  x5 ,
+and we model the four 2-input additions independently. Thus, we are approximating the
+differential probability of the 5-input addition
+
+
+Pr[(x1 , . . . , x5 ) −
+→ y ]
+with the multiplication of the differential probabilities of the four 2-input additions
+
+
+
+
+Pr[(x1 , x2 ) −
+→ z 1 ] × Pr[(z 1 , x3 ) −
+→ z 2 ] ×
+
+
+
+
+→ z 3 ] × Pr[(z 3 , x5 ) −
+→  y ].
+Pr[(z 2 , x4 ) −
+For many differentials, this approximation is not accurate, and this caused the appearance of
+many empirically invalid characteristics in our search.
+As depicted in Table 7, our automated tool found the first known related-key impossible
+differential of SHACAL-1, extending to 30 rounds of the cipher from rounds 20 to 49. The
+
+123
+
+1836
+
+S. A. Azimi et al.
+
+Fig. 11 The i-th round of SHACAL-2, i = 0, 1 . . . , 63. The 256-bit input is divided into eight 32-bit words
+Ai , Bi , Ci , Di , E i , Fi , G i , and Hi . The special operators used in the round function of SHACAL-2 are If,
+Maj, 0 , and 1 that are defined as above. For a given 512-bit master key mk = (M0 , M1 , · · · , M15 ), the
+key schedule generates round keys K i as described in above, where Wi is the round constant
+
+backward and forward trails respectively traverse 2 and 12 rounds of SHACAL-1, delimiting
+the inner 16-round impossible differential. The search for 31-round impossible differentials
+did not finish after one week, and we stopped the search. Thus, we expect that dedicating
+more time to the search may result in obtaining longer impossible differentials.
+
+5.6 SHACAL-2
+Similar to SHACAL-1, the block cipher SHACAL-2 [28] was designed based on the compression function of the NIST standard hash function SHA-256 [20]. The cipher was submitted to
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1837
+
+the NESSIE project [61] and was approved as one of the NESSIE final selections. SHACAL2 is a 256-bit block cipher, has 64 rounds, and supports a variable key size up to 512 bits. We
+analysed SHACAL-2 for 512-bit keys.
+The longest ad-hoc related-key XOR differential characteristic in the strong-key setting is
+a 24-round characteristic presented in [51] with (wKS , w E ) = (0, 38), which relies on some
+additional conditions on specific values alongside the differences to improve the weights.
+Moreover, in the weak-key setting, Biryukov et al. [12] provided two 24-round relatedkey XOR differential characteristics of SHACAL-2, each has encryption weight w E = 52.
+However, they did not explicitly mention the key schedule weight wKS for each characteristic.
+Our automated search resulted in a 23-round characteristic in the strong-key setting with
+encryption weight w E = 58 and a 22-round characteristic in the weak-key setting with
+total weight wKS + w E = 6 + 29 = 35. Like SHACAL-1, our automated search could
+not find longer characteristics of SHACAL-2 within a week due to the large number of
+empirically invalid characteristics found. The round function of SHACAL-2 also contains a
+modular addition with multiple inputs (i.e., seven operands), and modelling it with 2-input
+additions is one of the main reasons for the inaccurate differential behaviour for some special
+differences.
+Table 7 lists the results of the best related-key impossible differentials of SHACAL-2.
+The 18-round impossible differential presented by Yang et al. in [75] has been the longest
+known related-key impossible differential for SHACAL-2 so far. Our automated tool ArxPy
+obtained a 24-round impossible differential, improving the previous best result by 6 rounds.
+This impossible differential includes a 12-round inner impossible differential, extended by
+two deterministic 1-round backward and 11-round forward trails. We checked up to 28rounds of SHACAL-2 in one week, and the longest impossible differential we observed was
+the 24-round related-key impossible differential.
+
+6 Conclusion
+In this paper, we proposed the first bit-vector differential model of the n-bit modular addition with a constant. We described a bit-vector formula, with bit-vector complexity O(1),
+that determines whether a differential is valid and a bit-vector function, with complexity
+O(log2 n), that provides a close approximation of the differential weight. In this regard, we
+carefully studied our approximation error and obtained almost tight bounds. Moreover, we
+described two new SMT-based automated methods to search for characteristics and impossible differentials of ARX ciphers including constant additions, respectively.
+Each of our methods formulates the search problem as a sequence of bit-vector SMT
+problems, encoded from the cipher’s SSA representation and the bit-vector differential models
+of each operation. We have implemented our methods in ArxPy, an open-source tool to find
+characteristics and impossible differentials of ARX ciphers in a fully automated way. To
+show some examples, we have applied our automated methods to search for equivalent keys,
+related-key characteristics, and related-key impossible differentials of TEA, XTEA, HIGHT,
+LEA, SHACAL-1, and SHACAL-2.
+Regarding the characteristic results, for TEA we revisited previous results obtained in
+a manual approach. In contrast, for XTEA, HIGHT, and LEA, we improved the previous
+best-known related-key characteristics in both the strong-key and the weak-key settings. Our
+characteristic results of SHACAL-1 and SHACAL-2 did not outperform previous works in
+
+123
+
+1838
+
+S. A. Azimi et al.
+
+all settings due to the presence of modular additions with more than two inputs, for which
+no efficient differential model has been proposed yet.
+Concerning the impossible differentials, our results for TEA, XTEA, and HIGHT are of the
+same length, compared to the best-known related-key impossible differentials. On the other
+hand, we obtained the longest related-key impossible differentials for LEA, SHACAL-1, and
+SHACAL-2.
+Our differential model relies on a bit-vector-friendly approximation on the binary logarithm. Thus, future works could explore other approximations improving the bit-vector
+complexity or the approximation error, which could also be applied to other SMT problems
+involving the binary logarithm. While we have focused on the modular addition by a constant,
+there are other simple operations for which no differential model has been proposed so far,
+such as the modular multiplication, and the modular addition with more than two inputs.
+Obtaining differential models for more operations will allow designing ciphers with more
+flexibility, leading to new designs that potentially are more efficient.
+Acknowledgements Seyyed Arash Azimi and Mohammad Reza Aref were partially supported by Iran
+National Science Foundation (INSF) under Contract No. 96/53979. Adrián Ranea is supported by a PhD
+Fellowship from the Research Foundation - Flanders (FWO).
+
+Appendix A: Characteristics
+We describe the characteristics covering most rounds that we obtained in Sect. 5. For each
+characteristic, we provide the difference of the master key words mk , the difference of the
+plaintext words  p and the difference of the ciphertext words c . Furthermore, for each
+round i = 0, 1, . . . of the cipher, we provide the difference of the i-th round key words, the
+output difference of the i-th round function xi , the (cumulative) weight of the operations
+that compute the i-th round key words wki and the weight of the i-th round function wxi .
+The differences are given in hexadecimal values.
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1839
+
+Table 9 The 60-round strong related-key characteristic of TEA
+i-th round
+
+xi
+
+wxi
+
+0
+
+(0x00000000, 0x80000000)
+
+0
+
+1
+
+(0x80000000, 0x00000000)
+
+1
+
+2
+
+(0x00000000, 0x80000000)
+
+0
+
+3
+
+(0x80000000, 0x00000000)
+
+1
+
+4
+
+(0x00000000, 0x80000000)
+
+0
+
+5
+
+(0x80000000, 0x00000000)
+
+1
+
+6
+
+(0x00000000, 0x80000000)
+
+0
+
+7
+
+(0x80000000, 0x00000000)
+
+1
+
+8
+
+(0x00000000, 0x80000000)
+
+0
+
+9
+
+(0x80000000, 0x00000000)
+
+1
+
+10
+
+(0x00000000, 0x80000000)
+
+0
+
+11
+
+(0x80000000, 0x00000000)
+
+1
+
+12
+
+(0x00000000, 0x80000000)
+
+0
+
+13
+
+(0x80000000, 0x00000000)
+
+1
+
+14
+
+(0x00000000, 0x80000000)
+
+0
+
+15
+
+(0x80000000, 0x00000000)
+
+1
+
+16
+
+(0x00000000, 0x80000000)
+
+0
+
+17
+
+(0x80000000, 0x00000000)
+
+1
+
+18
+
+(0x00000000, 0x80000000)
+
+0
+
+19
+
+(0x80000000, 0x00000000)
+
+1
+
+20
+
+(0x00000000, 0x80000000)
+
+0
+
+21
+
+(0x80000000, 0x00000000)
+
+1
+
+22
+
+(0x00000000, 0x80000000)
+
+0
+
+23
+
+(0x80000000, 0x00000000)
+
+1
+
+24
+
+(0x00000000, 0x80000000)
+
+0
+
+25
+
+(0x80000000, 0x00000000)
+
+1
+
+26
+
+(0x00000000, 0x80000000)
+
+0
+
+27
+
+(0x80000000, 0x00000000)
+
+1
+
+28
+
+(0x00000000, 0x80000000)
+
+0
+
+29
+
+(0x80000000, 0x00000000)
+
+1
+
+30
+
+(0x00000000, 0x80000000)
+
+0
+
+31
+
+(0x80000000, 0x00000000)
+
+1
+
+32
+
+(0x00000000, 0x80000000)
+
+0
+
+33
+
+(0x80000000, 0x00000000)
+
+1
+
+34
+
+(0x00000000, 0x80000000)
+
+0
+
+35
+
+(0x80000000, 0x00000000)
+
+1
+
+36
+
+(0x00000000, 0x80000000)
+
+0
+
+37
+
+(0x80000000, 0x00000000)
+
+1
+
+38
+
+(0x00000000, 0x80000000)
+
+0
+
+39
+
+(0x80000000, 0x00000000)
+
+1
+
+40
+
+(0x00000000, 0x80000000)
+
+0
+
+41
+
+(0x80000000, 0x00000000)
+
+1
+
+123
+
+1840
+
+S. A. Azimi et al.
+
+Table 9 continued
+i-th round
+
+xi
+
+wxi
+
+42
+
+(0x00000000, 0x80000000)
+
+0
+
+43
+
+(0x80000000, 0x00000000)
+
+1
+
+44
+
+(0x00000000, 0x80000000)
+
+0
+
+45
+
+(0x80000000, 0x00000000)
+
+1
+
+46
+
+(0x00000000, 0x80000000)
+
+0
+
+47
+
+(0x80000000, 0x00000000)
+
+1
+
+48
+
+(0x00000000, 0x80000000)
+
+0
+
+49
+
+(0x80000000, 0x00000000)
+
+1
+
+50
+
+(0x00000000, 0x80000000)
+
+0
+
+51
+
+(0x80000000, 0x00000000)
+
+1
+
+52
+
+(0x00000000, 0x80000000)
+
+0
+
+53
+
+(0x80000000, 0x00000000)
+
+1
+
+54
+
+(0x00000000, 0x80000000)
+
+0
+
+55
+
+(0x80000000, 0x00000000)
+
+1
+
+56
+
+(0x00000000, 0x80000000)
+
+0
+
+57
+
+(0x80000000, 0x00000000)
+
+1
+
+58
+
+(0x00000000, 0x80000000)
+
+0
+
+59
+
+(0x80000000, 0x00000000)
+
+1
+
+Total
+
+30
+
+p
+
+(0x80000000, 0x00000000)
+
+c
+
+(0x80000000, 0x00000000)
+
+mk
+
+(0x00000000, 0x00000000, 0x00000000, 0x84000000)
+
+Table 10 The three full-round related-key characteristics with total weight 0 of TEA
+mk
+
+p
+
+c
+
+(0x80000000, 0x80000000,
+0x80000000, 0x80000000)
+
+(0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000,
+0x80000000, 0x80000000)
+
+(0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000)
+
+(0x80000000, 0x80000000,
+0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000)
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1841
+
+Table 11 The 18-round strong related-key characteristic of XTEA
+i-th round
+
+k i
+
+wk i
+
+xi
+
+wxi
+
+0
+
+0x00000000
+
+0
+
+(0x00010000, 0x44200000)
+
+9
+
+1
+
+0x00000000
+
+0
+
+(0x44200000, 0x04000000)
+
+6
+
+2
+
+0x00000000
+
+0
+
+(0x04000000, 0x80000000)
+
+6
+
+3
+
+0x80000000
+
+0
+
+(0x80000000, 0x00000000)
+
+2
+
+4
+
+0x80000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+5
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+6
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+7
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+8
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+9
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+10
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+11
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+12
+
+0x80000000
+
+0
+
+(0x00000000, 0x80000000)
+
+0
+2
+
+13
+
+0x80000000
+
+0
+
+(0x80000000, 0x04000000)
+
+14
+
+0x00000000
+
+0
+
+(0x04000000, 0x44200000)
+
+6
+
+15
+
+0x00000000
+
+0
+
+(0x44200000, 0x00010000)
+
+6
+
+16
+
+0x00000000
+
+0
+
+(0x00010000, 0xc4310800)
+
+9
+
+17
+
+0x00000000
+
+0
+
+(0xc4310800, 0x01010040)
+
+11
+
+Total
+
+0
+
+p
+
+(0xc4310800, 0x00010000)
+
+c
+
+(0xc4310800, 0x01010040)
+
+mk
+
+(0x00000000, 0x00000000, 0x80000000, 0x00000000)
+
+57
+
+123
+
+1842
+
+S. A. Azimi et al.
+
+Table 12 The 27-round weak related-key characteristic of XTEA
+i-th round
+
+k i
+
+wk i
+
+xi
+
+wxi
+
+0
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+1
+
+0x80000000
+
+0
+
+(0x00000000, 0x80000000)
+
+0
+
+2
+
+0x80000000
+
+0
+
+(0x80000000, 0x04000000)
+
+2
+
+3
+
+0x40200000
+
+1.179
+
+(0x04000000, 0x04000000)
+
+4
+
+4
+
+0x40200000
+
+0
+
+(0x04000000, 0x80000000)
+
+4
+
+5
+
+0x80000000
+
+0
+
+(0x80000000, 0x00000000)
+
+2
+
+6
+
+0x80000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+7
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+8
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+9
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+10
+
+0x80000000
+
+0
+
+(0x00000000, 0x80000000)
+
+0
+
+11
+
+0x80000000
+
+0
+
+(0x80000000, 0x04000000)
+
+2
+
+12
+
+0x40200000
+
+1.006
+
+(0x04000000, 0x04000000)
+
+4
+
+13
+
+0x40200000
+
+0.734
+
+(0x04000000, 0x80000000)
+
+4
+
+14
+
+0x80000000
+
+0
+
+(0x80000000, 0x00000000)
+
+2
+
+15
+
+0x80000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+16
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+17
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+18
+
+0x80000000
+
+0
+
+(0x00000000, 0x80000000)
+
+0
+
+19
+
+0x00000000
+
+0
+
+(0x80000000, 0x84000000)
+
+2
+
+20
+
+0x40600000
+
+2.067
+
+(0x84000000, 0x80000000)
+
+4
+
+21
+
+0x80000000
+
+0
+
+(0x80000000, 0x80000000)
+
+2
+
+22
+
+0x80000000
+
+0
+
+(0x80000000, 0x84000000)
+
+2
+
+23
+
+0xc0600000
+
+1.907
+
+(0x84000000, 0x80000000)
+
+4
+
+24
+
+0x00000000
+
+0
+
+(0x80000000, 0x00000000)
+
+2
+
+25
+
+0x80000000
+
+0
+
+(0x00000000, 0x00000000)
+
+0
+
+26
+
+0x80000000
+
+0
+
+(0x00000000, 0x80000000)
+
+Total
+
+6.893
+
+p
+
+(0x00000000, 0x00000000)
+
+c
+
+(0x80000000, 0x00000000)
+
+mk
+
+(0x00000000, 0x80000000, 0xc0200000, 0x80000000)
+
+123
+
+0
+40
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x80, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x80, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x80, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x80)
+
+(0x00, 0x00, 0x00, 0x00)
+
+−1
+
+0
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10
+
+11
+
+12
+
+13
+
+14
+
+(0x00, 0x00, 0x09, 0x20, 0xb8, 0xe9, 0x80, 0x00)
+
+(0x80, 0xe9, 0x80, 0x00, 0x89, 0xa4, 0x2b, 0xe9)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x80, 0x00)
+
+mk
+
+(0x80, 0xe9, 0x80, 0x00, 0x89, 0xa4, 0x2b, 0xe9)
+
+(0x00, 0xe9, 0x80, 0x00, 0x00, 0xa4, 0x80, 0xe9)
+
+(0xe9, 0x00, 0x95, 0x80, 0x00, 0x00, 0x00, 0x80)
+
+(0x00, 0xe9, 0x90, 0x95, 0x80, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x90, 0xd4, 0x80, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0xd4, 0x80, 0x00)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x2c, 0x80, 0x00, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0xb8, 0x2c, 0x80, 0x00, 0x00, 0x00)
+
+(0x00, 0x00, 0x20, 0xb8, 0xe9, 0x80, 0x00, 0x00)
+
+(0x00, 0x00, 0x09, 0x20, 0xb8, 0xe9, 0x80, 0x00)
+
+xi
+
+c
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+wk i
+
+p
+
+Total
+
+ki
+
+i-th
+round
+
+Table 13 The 15-round strong related-key characteristic of HIGHT. The round -1 corresponds to the initial key whitening
+
+45
+
+6
+
+9
+
+1
+
+7
+
+1
+
+5
+
+0
+
+0
+
+0
+
+0
+
+0
+
+3
+
+3
+
+6
+
+3
+
+1
+
+wxi
+
+A bit-vector differential model for the modular addition by a constant
+1843
+
+123
+
+1844
+
+S. A. Azimi et al.
+
+Table 14 The 14-round weak related-key characteristic of HIGHT. The round -1 corresponds to the initial key
+whitening
+i-th round ki
+
+wk i
+
+xi
+
+wxi
+
+-1
+
+(0x00, 0x00, 0x00, 0x40) 0
+
+(0x62, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+1
+
+0
+
+(0x40, 0x00, 0x00, 0x00) 0.791 (0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+2
+
+1
+
+(0x00, 0x00, 0x00, 0x00) 0
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0xc0)
+
+0
+
+2
+
+(0x00, 0x00, 0x00, 0x3a) 1.0
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0,
+0x00)
+
+0
+
+3
+
+(0x00, 0x00, 0x00, 0x40) 0.752 (0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+1
+
+4
+
+(0x00, 0x00, 0x00, 0x00) 0
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+0
+
+5
+
+(0x00, 0x00, 0x00, 0x40) 0.791 (0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00,
+0x00)
+
+1
+
+6
+
+(0x00, 0x00, 0x2e, 0x00) 4.0
+
+(0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00,
+0x00)
+
+5
+
+7
+
+(0x00, 0x00, 0x40, 0x00) 1.093 (0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+1
+
+8
+
+(0x00, 0x00, 0x00, 0x00) 0
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+0
+
+9
+
+(0x00, 0x00, 0xc0, 0x00) 0.046 (0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00,
+0x00)
+
+1
+
+10
+
+(0x00, 0x16, 0x00, 0x00) 4.0
+
+(0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+0
+
+11
+
+(0x00, 0x40, 0x00, 0x00) 0.142 (0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+1
+
+12
+
+(0x00, 0x00, 0x00, 0x00) 0
+
+(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+0
+
+13
+
+(0x00, 0x00, 0xc0, 0x00) 0.476 (0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00,
+0x00)
+
+1
+
+Total
+
+13.091
+
+p
+
+(0x62, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40)
+
+c
+
+(0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00)
+
+mk
+
+(0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x7a, 0x00, 0x00, 0x00, 0x00,
+0x40, 0x00, 0x00, 0x00)
+
+123
+
+14
+
+A bit-vector differential model for the modular addition by a constant
+
+1845
+
+Table 15 The 7-round weak related-key characteristic of LEA
+i-th round
+
+ki
+
+wk i
+
+xi
+
+wxi
+
+0
+
+(0x20000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0.408
+
+(0x80000000, 0x40000000,
+0xc0000010, 0x4000000c)
+
+14
+
+1
+
+(0x40000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0.462
+
+(0x00000000, 0x80000000,
+0x80000000, 0x80000000)
+
+7
+
+2
+
+(0x80000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0.695
+
+(0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+3
+
+(0x00000001, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+(0x00000200, 0x00000000,
+0x00000000, 0x00000000)
+
+1
+
+4
+
+(0x00000002, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+(0x00040400, 0x00000000,
+0x00000000, 0x00000200)
+
+2
+
+5
+
+(0x00000004, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+(0x08080800, 0x00000000,
+0x00000040, 0x00040400)
+
+4
+
+6
+
+(0x00000008, 0x00000000,
+0x00000000, 0x00000000)
+
+1.0
+
+(0x10101010, 0x00000002,
+0x00008088, 0x08080800)
+
+8
+
+Total
+
+2.565
+
+p
+
+(0x4000000c, 0x2040000c, 0x20400004, 0x20400082)
+
+c
+
+(0x10101010, 0x00000002, 0x00008088, 0x08080800)
+
+mk
+
+(0x10000000, 0x00000000, 0x00000000, 0x00000000)
+
+36
+
+Table 16 The 30-round strong related-key characteristic of SHACAL-1
+i-th round
+
+k i
+
+wk i
+
+xi
+
+wxi
+
+0
+
+0x80000000
+
+0
+
+(0x00000000, 0x00000002, 0x00000000,
+0x80100008, 0x00008000)
+
+7
+
+1
+
+0x80000000
+
+0
+
+(0x00008000, 0x00000000, 0x80000000,
+0x00000000, 0x80100008)
+
+5
+
+2
+
+0x00000000
+
+0
+
+(0x00000008, 0x00008000, 0x00000000,
+0x80000000, 0x00000000)
+
+5
+
+3
+
+0x00000000
+
+0
+
+(0x00000100, 0x00000008, 0x00002000,
+0x00000000, 0x80000000)
+
+5
+
+4
+
+0x80000000
+
+0
+
+(0x00000008, 0x00000100, 0x00000002,
+0x00002000, 0x00000000)
+
+6
+
+5
+
+0x00000000
+
+0
+
+(0x00000102, 0x00000008, 0x00000040,
+0x00000002, 0x00002000)
+
+8
+
+6
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000102, 0x00000002,
+0x00000040, 0x00000002)
+
+8
+
+7
+
+0x00000000
+
+0
+
+(0x00000000, 0x00000000, 0x80000040,
+0x00000002, 0x00000040)
+
+5
+
+8
+
+0x80000000
+
+0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x80000040, 0x00000002)
+
+5
+
+9
+
+0x00000000
+
+0
+
+(0x00000002, 0x00000000, 0x00000000,
+0x00000000, 0x80000040)
+
+3
+
+123
+
+1846
+
+S. A. Azimi et al.
+
+Table 16 continued
+i-th round ki
+
+wk i
+
+xi
+
+wxi
+
+10
+
+0x80000000 0
+
+(0x00000000, 0x00000002, 0x00000000,
+0x00000000, 0x00000000)
+
+3
+
+11
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x80000000,
+0x00000000, 0x00000000)
+
+1
+
+12
+
+0x80000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x80000000, 0x00000000)
+
+1
+
+13
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x80000000)
+
+1
+
+14
+
+0x80000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+15
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+16
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+17
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+18
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+19
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+20
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+21
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+22
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+23
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+24
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+25
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+26
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+27
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+28
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+29
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000)
+
+0
+
+Total
+
+0
+
+63
+
+p
+
+(0x00000002, 0x00000000, 0x80100008, 0x00008000, 0x80000040)
+
+c
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+mk
+
+(0x80000000, 0x80000000, 0x00000000, 0x00000000,
+0x80000000, 0x00000000, 0x00000000, 0x00000000,
+0x80000000, 0x00000000, 0x80000000, 0x00000000,
+0x80000000, 0x00000000, 0x80000000, 0x00000000)
+
+123
+
+0x00000000
+
+0x00000000
+
+0x00000000
+
+0x00000000
+
+0x00000000
+
+11
+
+12
+
+13
+
+14
+
+0x00000000
+
+6
+
+10
+
+0x80000000
+
+5
+
+0x00000000
+
+0x00000000
+
+4
+
+9
+
+0x80000000
+
+3
+
+0x80000000
+
+0x00000000
+
+2
+
+0x00000000
+
+0x80000000
+
+1
+
+7
+
+0x00000000
+
+0
+
+8
+
+k i
+
+i-th round
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+wk i
+
+Table 17 The 25-round weak related-key characteristic of SHACAL-1
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x80000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x80000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x80000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000002, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000002, 0x00000000, 0x00000000, 0x00000000, 0x80000040)
+
+(0x00000000, 0x00000000, 0x00000000, 0x80000040, 0x00000002)
+
+(0x00000000, 0x00000000, 0x80000040, 0x00000002, 0x80000000)
+
+xi
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+1
+
+1
+
+1
+
+3
+
+3
+
+3
+
+3
+
+wxi
+
+A bit-vector differential model for the modular addition by a constant
+1847
+
+123
+
+123
+
+0x00000000
+
+0x00000000
+
+20
+
+21
+
+(0x00000020, 0x00000001, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x80000000, 0x00000000, 0x80000000,
+
+mk
+
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+0x00000000, 0x00000000, 0x00000000, 0x00000000,
+
+0x00000000, 0x80000000, 0x00000000, 0x80000000,
+
+(0x00000000, 0x00000102, 0x00000002, 0x80000000, 0x80000000)
+
+(0x00000020, 0x00000001, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+xi
+
+c
+
+1
+
+0
+
+1
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+wk i
+
+p
+
+Total
+
+0x00000000
+
+0x00000000
+
+19
+
+24
+
+0x00000000
+
+18
+
+0x00000000
+
+0x00000000
+
+17
+
+0x00000003
+
+0x00000000
+
+16
+
+22
+
+0x00000000
+
+15
+
+23
+
+k i
+
+i-th round
+
+Table 17 continued
+
+22
+
+3
+
+4
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+0
+
+wxi
+
+1848
+S. A. Azimi et al.
+
+A bit-vector differential model for the modular addition by a constant
+
+1849
+
+Table 18 The 23-round strong related-key characteristic of SHACAL-2
+i-th round ki
+
+wk i  x i
+
+wxi
+
+0
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x221c0240, 0x80000000, 12
+
+1
+
+0x00000000 0
+
+(0x80000000, 0x00000000, 0x00000000, 0x221c0240, 26
+
+2
+
+0x00000000 0
+
+(0x00000000, 0x80000000, 0x00000000, 0x00000000, 7
+
+3
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x80000000, 0x00000000, 4
+
+4
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x80000000, 3
+
+5
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 4
+
+6
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 1
+
+7
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 1
+
+8
+
+0x80000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+9
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+10
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 3
+
+11
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+12
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+13
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+14
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+15
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+16
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+17
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+18
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+19
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+20
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+0x00000000, 0x00082200, 0x20040000, 0x80000000)
+0x00000000, 0x00000000, 0x00082200, 0x20040000)
+0x02100040, 0x00000000, 0x00000000, 0x00082200)
+0x00000000, 0x02100040, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x02100040, 0x00000000)
+0x80000000, 0x00000000, 0x00000000, 0x02100040)
+0x00000000, 0x80000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x80000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x80000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+123
+
+1850
+
+S. A. Azimi et al.
+
+Table 18 continued
+i-th round ki
+
+wk i  x i
+
+wxi
+
+21
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+22
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+Total
+
+0
+
+58
+
+p
+
+(0x00000000, 0x00000000, 0x221c0240, 0x80000000,
+
+c
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000,
+
+mk
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000,
+
+0x00000000, 0x00082200, 0x20040000, 0x80000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000,
+0x80000000, 0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+Table 19 The 22-round weak related-key characteristic of SHACAL-2
+i-th round ki
+
+wk i
+
+xi
+
+wxi
+
+0
+
+0x00000000 0
+
+(0x00000000, 0x00020000, 0x00000000, 0x00000000, 6
+
+1
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00020000, 0x00000000, 4
+
+2
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00020000, 4
+
+3
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 4
+
+4
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 1
+
+5
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 1
+
+6
+
+0x00020000 0.405 (0x00000000, 0x00000000, 0x00000000, 0x00000000, 3
+
+7
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+8
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+9
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+10
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+11
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+0x01000840, 0x00000000, 0x00000000, 0x88000020)
+0x00000000, 0x01000840, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x01000840, 0x00000000)
+0x00020000, 0x00000000, 0x00000000, 0x01000840)
+0x00000000, 0x00020000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00020000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00020000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1851
+
+Table 19 continued
+i-th round ki
+
+wk i
+
+xi
+
+wxi
+
+12
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 3
+
+13
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+14
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+15
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+16
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+17
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+18
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+19
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+20
+
+0x00000000 0
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000, 0
+
+21
+
+0x80004400 6.262 (0x00000000, 0x00000000, 0x00000000, 0x00000000, 6
+
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+Total
+
+6.67
+
+p
+
+(0x00000000, 0x00020000, 0x00000000, 0x00000000,
+
+c
+
+(0x80004400, 0x00000000, 0x00000000, 0x00000000,
+
+mk
+
+(0x00000000, 0x00000000, 0x00000000, 0x00000000,
+
+29
+
+0x01000840, 0x00000000, 0x00000000, 0x88000020)
+0x80004400, 0x00000000, 0x00000000, 0x00000000)
+0x00000000, 0x00000000, 0x00020000, 0x00000000,
+0x00000000, 0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000, 0x00000000, 0x00000000)
+
+References
+1. Aumasson J.P., Henzen L., Meier W., Phan R.C.W.: Sha-3 proposal blake. NIST (round 3) 92, 2008
+(2009).
+2. Aumasson J.P., Jovanovic P., Neves S.: Analysis of NORX: investigating differential and rotational properties. In: LATINCRYPT, volume 8895 of Lecture Notes in Computer Science. Springer, Cham (2014).
+3. Azimi S.A., Ranea A., Salmasizadeh M., Mohajeri J., Aref M.R., Rijmen V.: A bit-vector differential
+model for the modular addition by a constant. In: International Conference on the Theory and Application
+of Cryptology and Information Security, pp. 385–414. Springer, Cham (2020).
+4. Bagherzadeh E., Ahmadian Z.: Milp-based automatic differential searches for LEA and HIGHT. IACR
+Cryptol. 2018, 948 (2018).
+5. Barrett C., Tinelli C.: Satisfiability modulo theories. In: Clarke E.M., Henzinger T.A., Veith H., Bloem
+R. (eds.) Handbook of Model Checking, pp. 305–343. Springer, Cham (2018).
+6. Beaulieu R., Shors D., Smith J., Treatman-Clark S., Weeks B., Wingers L.: The SIMON and SPECK
+families of lightweight block ciphers. IACR Cryptol. 2013, 404 (2013).
+
+123
+
+1852
+
+S. A. Azimi et al.
+
+7. Bernstein D.J.: The salsa20 family of stream ciphers. New stream cipher designs. Springer, New York
+(2008).
+8. Biham E., Biryukov A., Shamir A.: Cryptanalysis of skipjack reduced to 31 rounds using impossible
+differentials. In: EUROCRYPT, volume 1592 of Lecture Notes in Computer Science. Springer (1999).
+9. Biham E., Dunkelman O., Keller N.: The rectangle attack-rectangling the serpent. In: Proceedings of
+the International Conference on the Theory and Application of Cryptographic Techniques, Advances in
+Cryptology - EUROCRYPT 2001, Innsbruck, Austria, May 6–10, 2001 (2001).
+10. Biham E., Shamir A.: Differential cryptanalysis of des-like cryptosystems. J. Cryptol. 4(1), 3–72 (1991).
+11. Biryukov A., Velichkov V.: Automatic search for differential trails in arx ciphers. In Cryptographers’
+Track at the RSA Conference. Springer, Cham (2014)
+12. Biryukov A., Lamberger M., Mendel F., Nikolić I.: Second-order differential collisions for reduced sha256. In: International Conference on the Theory and Application of Cryptology and Information Security.
+Springer (2011)
+13. Biryukov A., Velichkov V., Le Corre Y.: Automatic search for the best trails in arx: application to block
+cipher speck. In: International Conference on Fast Software Encryption, pp. 289–310. Springer (2016).
+14. Cui T., Chen S., Fu K., Wang M., Jia K.: New automatic tool for finding impossible differentials and
+zero-correlation linear approximations. Sci. China 64(2), 129103 (2021).
+15. Darbuka A.: Related-key attacks on block ciphers. Master’s thesis. Master’s thesis, Middle East Technical
+University (2009).
+16. Dinu D., Perrin L., Udovenko A., Velichkov V., Großschädl J., Biryukov A.: Design strategies for ARX
+with provable bounds: Sparx and LAX. In: ASIACRYPT (1), volume 10031 of Lecture Notes in Computer
+Science (2016).
+17. Dinu D., Corre Y.L., Khovratovich D., Perrin L., Großschädl J., Biryukov A.: Triathlon of lightweight
+block ciphers for the internet of things. J. Cryptogr. Eng. 9(3), 283–302 (2019).
+18. Dunkelman O., Keller N., Kim J.: Related-key rectangle attack on the full shacal-1. In: International
+Workshop on Selected Areas in Cryptography. Springer (2006).
+19. FIPS. Secure hash standard. Federal Information Processing Standards Publication 180-1. (1995).
+20. FIPS. Secure hash standard. Federal Information Processing Standards Publication 180-4 (2015).
+21. Fu K., Wang M., Guo Y., Sun S., Hu L.: Milp-based automatic search algorithms for differential and
+linear trails for speck. In: Fast Software Encryption—23rd International Conference, FSE 2016, Bochum,
+Germany, March 20–23, 2016 Revised Selected Papers (2016).
+22. Ganesh V., Dill D.L.: A decision procedure for bit-vectors and arrays. In: CAV, volume 4590 of Lecture
+Notes in Computer Science. Springer (2007).
+23. Gario M., Micheli A.: Pysmt: a solver-agnostic library for fast prototyping of smt-based algorithms. In:
+SMT Workshop 2015 (2015).
+24. Gartner. Gartner identifies top 10 strategic IoT technologies and trends. https://www.gartner.com/en/
+newsroom/press-releases/2018-11-07-gartner-identifies-top-10-strategic-iot-technologies-and-trends
+(2018).
+25. Gartner. Gartner survey reveals 47 percent of organizations will increase investments in IoT despite the
+impact of covid-19. https://www.gartner.com/en/newsroom/press-releases/2020-10-29-gartner-surveyreveals-47-percent-of-organizations-will-increase-investments-in-iot-despite-the-impact-of-covid-19(2020).
+26. Hadarean L., Hyvarinen A., Niemetz A., Reger G.: 14th international satisfiability modulo theories competition (smt-comp 2019). https://smt-comp.github.io/2019/ (2019).
+27. Handschuh H., Knudsen L.R., Robshaw M.J.: Analysis of sha-1 in encryption mode. In: Track at the RSA
+Conference. Springer (2001)
+28. Handschuh H., Naccache D.: Shacal: a family of block ciphers. Submission to the NESSIE project (2002).
+29. Henry J., Warren S.: Hacker’s delight. Addison-Wesley, Boston (2003).
+30. Hong S., Kim J., Lee S., Preneel B.: Related-key rectangle attacks on reduced versions of shacal-1 and
+aes-192. Springer, In International Workshop on Fast Software Encryption (2005).
+31. Hong D., Sung J., Hong S., Lim J., Lee S., Koo B.S., Lee C., Chang D., Lee J., Jeong K., Kim H.: HIGHT:
+A new block cipher suitable for low-resource device. In: Cryptographic Hardware and Embedded Systems
+- CHES 2006, 8th International Workshop, Yokohama, Japan, October 10–13, 2006, Proceedings (2006).
+32. Hong D., Lee J.K., Kim D.C., Kwon D., Ryu K.H., Lee D.G.: LEA: A 128-bit block cipher for fast
+encryption on common processors. In: WISA, volume 8267 of Lecture Notes in Computer Science.
+Springer (2013).
+33. ISO/IEC 18033-3:2010. Information technology, Security techniques, Encryption algorithms, Part 3:
+Block ciphers. Standard, International Organization for Standardization (2010).
+34. Kelsey J., Schneier B., Wagner D.A.: Key-schedule cryptanalysis of idea, g-des, gost, safer, and triple-des.
+In: CRYPTO, volume 1109 of Lecture Notes in Computer Science. Springer (1996).
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+
+1853
+
+35. Kelsey J., Schneier B., Wagner B.A.: Related-key cryptanalysis of 3-way, biham-des, cast, des-x, newdes,
+rc2, and TEA. In: ICICS, volume 1334 of Lecture Notes in Computer Science. Springer (1997).
+36. Kim J., Kim G., Hong S., Lee S., Hong D.: The related-key rectangle attack, application to shacal-1. In:
+Australasian Conference on Information Security and Privacy. Springer (2004).
+37. Knudsen L.: Deal-a 128-bit block cipher. Complexity 258(2), 216 (1998).
+38. Kölbl S., Hadipour H.: Cryptosmt: An easy to use tool for cryptanalysis of symmetric primitives based
+on smt/sat solvers. https://github.com/kste/cryptosmt.
+39. Kölbl S., Leander G., Tiessen T., Observations on the SIMON block cipher family. In Advances in
+Cryptology - CRYPTO 2015–35th Annual Cryptology Conference, Santa Barbara, CA, USA, August
+16–20,: Proceedings. Part I, 2015 (2015).
+40. Koo B., Hong D., Kwon D.: Related-key attack on the full HIGHT. In: Information Security and Cryptology - ICISC 2010 - 13th International Conference, Seoul, Korea, December 1–3, 2010, Revised Selected
+Papers (2010).
+41. Koo B, Roh D, Kim H, Jung Y, Lee D, Kwon, D: CHAM: A family of lightweight block ciphers for
+resource-constrained devices. In: Information Security and Cryptology - ICISC 2017 - 20th International
+Conference, Seoul, South Korea, November 29–December 1, 2017, Revised Selected Papers (2017).
+42. Kovásznai G., Fröhlich A., Biere A.: Complexity of fixed-size bit-vector logics. Theory Comput. Syst.
+59(2), 323 (2016).
+43. Lai X., Massey J.L.: A proposal for a new block encryption standard. In EUROCRYPT, volume 473 of
+Lecture Notes in Computer Science. Springer (1990).
+44. Lai X., Massey J.L., Murphy S.: Markov ciphers and differential cryptanalysis. In: EUROCRYPT, volume
+547 of Lecture Notes in Computer Science. Springer (1991).
+45. Lee E., Hong D., Chang D., Hong S., Lim J.: A weak key class of XTEA for a related-key rectangle
+attack. In: VIETCRYPT, volume 4341 of Lecture Notes in Computer Science. Springer (2006).
+46. Lipmaa H.: On differential properties of pseudo-hadamard transform and related mappings. In:
+A. Menezes, P. Sarkar (eds) Progress in Cryptology - INDOCRYPT 2002, Third International Conference on Cryptology in India, Hyderabad, India, December 16–18, 2002, vol. 2551 of Lecture Notes in
+Computer Science. Springer (2002).
+47. Lipmaa H., Moriai S.: Efficient algorithms for computing differential properties of addition. In: Fast
+Software Encryption, 8th International Workshop, FSE 2001 Yokohama, Japan, April 2–4, 2001, Revised
+Papers (2001).
+48. Liu Y., Witte G.D., Ranea A., Ashur T.: Rotational-xor cryptanalysis of reduced-round SPECK. IACR
+Trans. Symmetric Cryptol. 3, 2017 (2017).
+49. Lodi A.: Mixed integer programming computation. In: 50 Years of Integer Programming. Springer (2010).
+50. Lu J.: Cryptanalysis of reduced versions of the HIGHT block cipher from CHES 2006. In: Information
+Security and Cryptology - ICISC 2007, 10th International Conference, Seoul, Korea, November 29–30,
+2007, Proceedings (2007).
+51. Lu J., Kim J., Keller N., Dunkelman O.: Related-key rectangle attack on 42-round shacal-2. In: International Conference on Information Security. Springer (2006).
+52. Lu J.: Related-key rectangle attack on 36 rounds of the XTEA block cipher. Int. J. Inf. Sec. 8(1), 15
+(2009).
+53. Machado A.W.: Differential probability of modular addition with a constant operand. IACR Cryptol.
+2001, 52 (2001).
+54. Matsui M.: On correlation between the order of s-boxes and the strength of des. Springer, In Workshop
+on the Theory and Application of of Cryptographic Techniques (1994).
+55. Meurer A., Smith C.P., Paprocki M., et al.: Sympy: symbolic computing in python. PeerJ 3, e103 (2017).
+56. Mitchell J.N.: Computer multiplication and division using binary logarithms. IRE Trans. Electron. Comput. 4, 512 (1962).
+57. Mouha N., Preneel B.: Towards finding optimal differential characteristics for ARX: application to
+Salsa20. IACR Cryptol. 2013, 328 (2013).
+58. Mouha N., Mennink B., Van Herrewege A., Watanabe D., Preneel B., Verbauwhede I.: Chaskey: an
+efficient mac algorithm for 32-bit microcontrollers. In International Conference on Selected Areas in
+Cryptography. Springer (2014).
+59. National Institute of Standards and Technology. Lightweight cryptography project. https://csrc.nist.gov/
+Projects/Lightweight-Cryptography.
+60. Needham R., Wheeler D.: Tea extensions. Technical report, Computer Laboratory, University of Cambridge (1997).
+61. NESSIE. New european schemes for signatures, integrity and encryption. https://www.cosic.esat.
+kuleuven.be/nessie/index.html.
+
+123
+
+1854
+
+S. A. Azimi et al.
+
+62. Niemetz A., Preiner M., Biere A.: Boolector 2.0 system description. J. Satisf. Boolean Modeling Comput.
+9, 53–58 (2015).
+63. Özen O., Varıcı K., Tezcan C., Kocair C.: Lightweight block ciphers revisited: Cryptanalysis of reduced
+round present and height. In Australasian Conference on Information Security and Privacy. Springer
+(2009).
+64. Ranea A., Liu Y., Ashur T.: An easy-to-use tool for rotational-xor cryptanalysis of ARX block ciphers.
+Proc. Roman. Acad. Series A 18(3), 1–8 (2017).
+65. Ren J., Chen S.: Cryptanalysis of reduced-round speck. IEEE Access 7, 63045–63056 (2019).
+66. Sasaki Y., Todo Y.: New impossible differential search tool from design and cryptanalysis aspects revealing structural properties of several ciphers. In EUROCRYPT (3), volume 10212 of Lecture Notes
+in Computer Science (2017).
+67. Schulte-Geers E.: On ccz-equivalence of addition mod 2n . Designs Codes Cryptogr. 66(1–3), 111–127
+(2013).
+68. Song L., Huang Z., Yang Q.: Automatic differential analysis of ARX block ciphers with application to
+SPECK and LEA. In Information Security and Privacy - 21st Australasian Conference, ACISP: Melbourne,
+VIC, Australia, July 4–6, 2016, Proceedings. Part I, 2016 (2016).
+69. Sun S., Hu L., Wang P., Qiao K., Ma X., Song L.: Automatic security evaluation and (related-key)
+differential characteristic search: Application to simon, present, lblock, DES(L) and other bit-oriented
+block ciphers. In Advances in Cryptology - ASIACRYPT 2014 - 20th International Conference on the
+Theory and Application of Cryptology and Information Security, Kaoshiung, Taiwan, R.O.C., December
+7–11, 2014. Proceedings, Part I (2014).
+70. Sun S., Gerault D., Lafourcade P., Yang Q., Todo Y., Qiao K., Hu L.: Analysis of aes, skinny, and others
+with constraint programming. IACR Trans. Symmetric Cryptol. 1, 2017 (2017).
+71. Wagner DA. The boomerang attack. In Fast Software Encryption, 6th International Workshop, FSE ’99,
+Rome, Italy, March 24–26, 1999, Proceedings (1999).
+72. Wang G., Keller N., Dunkelman O.: The delicate issues of addition with respect to xor differences. In:
+International Workshop on Selected Areas in Cryptography. Springer (2007).
+73. Wheeler D.J., Needham R.M.: Tea, a tiny encryption algorithm. In FSE, volume 1008 of Lecture Notes
+in Computer Science. Springer (1994).
+74. Winternitz R.S., Hellman M.E.: Chosen-key attacks on a block cipher. Cryptologia 11(1), 1–7 (1987).
+75. Yang S.P., Hu Y.P., Zhong M.F.: Related-key impossible differential attacks on 31-round shacal-2. J.
+Commun. 28(11A), 54–58 (2006).
+Publisher’s Note Springer Nature remains neutral with regard to jurisdictional claims in published maps and
+institutional affiliations.
+
+Authors and Aﬃliations
+Seyyed Arash Azimi1 · Adrián Ranea2 · Mahmoud Salmasizadeh3 ·
+Javad Mohajeri3 · Mohammad Reza Aref1 · Vincent Rijmen2,4
+Adrián Ranea
+adrian.ranea@esat.kuleuven.be
+Mahmoud Salmasizadeh
+salmasi@sharif.edu
+Javad Mohajeri
+mohajer@sharif.edu
+Mohammad Reza Aref
+aref@sharif.edu
+Vincent Rijmen
+vincent.rijmen@esat.kuleuven.be
+1
+
+Department of Electrical Engineering, Sharif University of Technology, Tehran, Iran
+
+2
+
+imec-COSIC, KU Leuven, Leuven, Belgium
+
+123
+
+A bit-vector differential model for the modular addition by a constant
+3
+
+Electronic Research Institute, Sharif University of Technology, Tehran, Iran
+
+4
+
+Department of Informatics, UiB, Bergen, Norway
+
+1855
+
+123
+
+
