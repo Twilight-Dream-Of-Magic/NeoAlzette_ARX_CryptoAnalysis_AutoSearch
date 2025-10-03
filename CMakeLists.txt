@@ -21,6 +21,8 @@ add_library(neoalzette STATIC
     src/melcc_analyzer.cpp
     src/threshold_search_framework.cpp
     src/utility_tools.cpp
+    src/matsui_algorithm2_complete.cpp
+    src/pddt_algorithm1_complete.cpp
 )
 target_include_directories(neoalzette PUBLIC include)
 
@@ -66,10 +68,16 @@ add_executable(complete_matsui_demo src/complete_matsui_demo.cpp)
 target_include_directories(complete_matsui_demo PUBLIC include)
 target_link_libraries(complete_matsui_demo PRIVATE neoalzette)
 
-option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo)" OFF)
+# Paper algorithms demo (Algorithm 1 & 2 complete implementation)
+add_executable(demo_paper_algorithms src/demo_paper_algorithms.cpp)
+target_include_directories(demo_paper_algorithms PUBLIC include)
+target_link_libraries(demo_paper_algorithms PRIVATE neoalzette)
+
+option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo demo_paper_algorithms)" OFF)
 if(NOT NA_BUILD_DEMOS)
   set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(highway_table_build PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(highway_table_build_lin PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(complete_matsui_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+  set_target_properties(demo_paper_algorithms PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
 endif()
