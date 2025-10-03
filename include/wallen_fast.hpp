@@ -50,9 +50,18 @@ static inline uint32_t MnT_of(uint32_t v) noexcept {
 // Fast Hamming weight
 static inline int hw32(uint32_t x) noexcept { return __builtin_popcount(x); }
 
-// Enumerate feasible omega given mu,nu for addition x+y=z (Wallén).
-// Yield signature: void(uint32_t omega, int weight)
-// Stops early if weight >= cap.
+/*
+ * enumerate_wallen_omegas
+ * Inputs:
+ *   mu, nu : input masks; cap : pruning threshold on HW(z*)
+ *   yield  : callback (omega, weight) per feasible mask omega
+ * Outputs:
+ *   Feasible omega and integer weight w = HW(z*) where z* = M_n^T (mu ⊕ nu ⊕ omega)
+ * Complexity:
+ *   Heuristic enumeration with early pruning; typical far below 2^n
+ * Reference:
+ *   T. Wallén; ARX linear model literature
+ */
 template<class Yield>
 inline void enumerate_wallen_omegas(uint32_t mu, uint32_t nu, int cap, Yield&& yield) {
     // We enumerate v = mu ^ nu ^ omega  ->  omega = v ^ mu ^ nu

@@ -11,6 +11,17 @@
 
 namespace neoalz {
 
+/*
+ * LbFullRound - one-round differential lower bound for NeoAlzette
+ * Inputs:
+ *   dA0, dB0 : canonicalized input differences; K1/K2 : local Top-K widths; cap : pruning cap
+ * Outputs:
+ *   Minimal additive weight lower bound for one full round
+ * Complexity:
+ *   Two LM enumerations (var–var) and add-constant DP (var–const) with Top-K truncation
+ * Reference:
+ *   "Automatic Search for Differential Trails in ARX Ciphers"; Bit-vector add-constant model
+ */
 struct LbFullRound {
     struct Entry { uint32_t dA, dB; int w; };
     std::unordered_map<uint64_t,int> cache;

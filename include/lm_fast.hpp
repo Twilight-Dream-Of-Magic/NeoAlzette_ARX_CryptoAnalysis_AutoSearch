@@ -19,8 +19,20 @@ namespace neoalz {
 
 // rotate helpers are provided by neoalzette.hpp
 
-// Fast incremental LM-2001 enumeration with prefix-pruning.
-// Tracks psi low-bit count incrementally to avoid recomputing popcounts.
+/*
+ * enumerate_lm_gammas_fast
+ * Inputs:
+ *   alpha, beta : LM inputs for x + y = z (ARX var–var local model)
+ *   n           : word size (bits, default 32)
+ *   w_cap       : local weight cap for pruning
+ *   yield       : callback (gamma, weight) for each feasible gamma with exact LM weight
+ * Outputs:
+ *   Enumerates feasible gamma under LM-2001 constraints with exact integer weight
+ * Complexity:
+ *   Typical << 2^n due to prefix infeasibility; per-branch O(1) incremental popcount
+ * Reference:
+ *   Lipmaa–Moriai (2001); "Automatic Search for Differential Trails in ARX Ciphers"
+ */
 template<typename Yield>
 static inline void enumerate_lm_gammas_fast(uint32_t alpha, uint32_t beta, int n, int w_cap, Yield&& yield)
 {

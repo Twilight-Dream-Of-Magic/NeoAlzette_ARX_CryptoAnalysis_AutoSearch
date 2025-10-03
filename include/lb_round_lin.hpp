@@ -8,6 +8,17 @@
 
 namespace neoalz {
 
+/*
+ * LbFullRoundLin - one-round linear lower bound for NeoAlzette
+ * Inputs:
+ *   mA0, mB0 : canonicalized input masks; K1/K2 : local Top-K widths; cap : pruning cap
+ * Outputs:
+ *   Minimal additive weight lower bound for one full round
+ * Complexity:
+ *   Dominated by two Wallén enumerations with Top-K truncation; O(K1*K2)
+ * Reference:
+ *   "Automatic Search for the Linear (hull) Characteristics of ARX Ciphers" (and related)
+ */
 struct LbFullRoundLin {
     std::unordered_map<uint64_t,int> cache;
 
