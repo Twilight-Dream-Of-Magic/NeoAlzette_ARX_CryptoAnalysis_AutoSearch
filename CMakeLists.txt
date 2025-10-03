@@ -35,3 +35,11 @@ target_include_directories(search_beam_diff PUBLIC include)
 
 add_executable(milp_diff src/milp_diff.cpp)
 target_include_directories(milp_diff PUBLIC include)
+
+add_executable(analyze_medcp src/analyze_medcp.cpp)
+target_include_directories(analyze_medcp PUBLIC include)
+target_link_libraries(analyze_medcp PRIVATE neoalzette)
+
+add_executable(analyze_melcc src/analyze_melcc.cpp)
+target_include_directories(analyze_melcc PUBLIC include)
+target_link_libraries(analyze_melcc PRIVATE neoalzette)

@@ -1,0 +1,133 @@
+#include <cstdint>
+#include <cstdio>
+#include <vector>
+#include <queue>
+#include <tuple>
+#include <string>
+#include <limits>
+#include <algorithm>
+#include "neoalzette.hpp"
+#include "lm_fast.hpp"
+#include "lb_round_full.hpp"
+#include "suffix_lb.hpp"
+#include "highway_table.hpp"
+#include "threshold_search.hpp"
+
+namespace neoalz {
+
+struct DiffPair { uint32_t dA, dB; };
+
+// Linearised cross-branch injectors (delta); constants vanish for diffs
+static inline uint32_t l1_forward(uint32_t x) noexcept {
+    return x ^ rotl(x,2) ^ rotl(x,10) ^ rotl(x,18) ^ rotl(x,24);
+}
+static inline uint32_t l2_forward(uint32_t x) noexcept {
+    return x ^ rotl(x,8) ^ rotl(x,14) ^ rotl(x,22) ^ rotl(x,30);
+}
+static inline std::pair<uint32_t,uint32_t> cd_from_B_delta(uint32_t B) noexcept {
+    uint32_t c = l2_forward(B);
+    uint32_t d = l1_forward(rotr(B,3));
+    uint32_t t = rotl(c ^ d, 31);
+    c ^= rotl(d,17);
+    d ^= rotr(t,16);
+    return {c,d};
+}
+static inline std::pair<uint32_t,uint32_t> cd_from_A_delta(uint32_t A) noexcept {
+    uint32_t c = l1_forward(A);
+    uint32_t d = l2_forward(rotl(A,24));
+    uint32_t t = rotr(c ^ d, 31);
+    c ^= rotr(d,17);
+    d ^= rotl(t,16);
+    return {c,d};
+}
+
+static constexpr uint32_t RC[16] = {
+    0x16B2C40B, 0xC117176A, 0x0F9A2598, 0xA1563ACA,
+    0x243F6A88, 0x85A308D3, 0x13198102, 0xE0370734,
+    0x9E3779B9, 0x7F4A7C15, 0xF39CC060, 0x5CEDC834,
+    0xB7E15162, 0x8AED2A6A, 0xBF715880, 0x9CF4F3C7
+};
+
+} // namespace neoalz
+
+int main(int argc, char** argv){
+    using namespace neoalz;
+    if (argc < 3){
+        std::fprintf(stderr, "Usage: %s R Wcap [highway.bin]\n", argv[0]);
+        return 1;
+    }
+    int R = std::stoi(argv[1]);
+    int Wcap = std::stoi(argv[2]);
+
+    HighwayTable HW; bool use_hw = false;
+    if (argc >= 4){ use_hw = HW.load(argv[3]); }
+
+    LbFullRound LBF;
+    SuffixLB SFX;
+
+    auto next_states = [&](const DiffPair& d, int r, int slack_w){
+        std::vector<std::pair<DiffPair,int>> out;
+        const int n = 32;
+        uint32_t dA0 = d.dA, dB0 = d.dB;
+
+        // Subround 0 - Add 1 (var-var)
+        uint32_t alpha0 = dB0;
+        uint32_t beta0  = rotl(dA0,31) ^ rotl(dA0,17);
+        enumerate_lm_gammas_fast(alpha0, beta0, n, slack_w, [&](uint32_t gB1, int w1){
+            int slack1 = slack_w - w1; if (slack1 < 0) return;
+            // Add 2 (var-const)
+            uint32_t bconst1 = (uint32_t)(-int32_t(RC[1]));
+            enumerate_lm_gammas_fast(dA0, bconst1, n, slack1, [&](uint32_t gA1, int w2){
+                int slack2 = slack1 - w2; if (slack2 < 0) return;
+                // Linear mix
+                uint32_t A2 = gA1 ^ rotl(gB1,24);
+                uint32_t B2 = gB1 ^ rotl(A2,16);
+                A2 = l1_forward(A2);
+                B2 = l2_forward(B2);
+                auto [C0, D0] = cd_from_B_delta(B2);
+                uint32_t Astar = A2 ^ rotl(C0,24) ^ rotl(D0,16);
+                uint32_t Bkeep = B2;
+                // Subround 1 - Add 3 (var-var)
+                uint32_t alpha1 = Astar;
+                uint32_t beta1  = rotl(Bkeep,31) ^ rotl(Bkeep,17);
+                enumerate_lm_gammas_fast(alpha1, beta1, n, slack2, [&](uint32_t gA3, int w3){
+                    int slack3 = slack2 - w3; if (slack3 < 0) return;
+                    // Add 4 (var-const)
+                    uint32_t bconst2 = (uint32_t)(-int32_t(RC[6]));
+                    enumerate_lm_gammas_fast(Bkeep, bconst2, n, slack3, [&](uint32_t gB3, int w4){
+                        int slack4 = slack3 - w4; if (slack4 < 0) return;
+                        uint32_t Bhat = gB3 ^ rotl(gA3,24);
+                        uint32_t Ahat = gA3 ^ rotl(Bhat,16);
+                        uint32_t Aplus = l2_forward(Ahat);
+                        uint32_t Bplus = l1_forward(Bhat);
+                        auto [C1, D1] = cd_from_A_delta(Aplus);
+                        uint32_t Bstar = Bplus ^ rotl(C1,24) ^ rotl(D1,16);
+                        DiffPair dn{Aplus, Bstar};
+                        out.push_back({dn, w1+w2+w3+w4});
+                    });
+                });
+            });
+        });
+        return out;
+    };
+
+    auto lower_bound = [&](const DiffPair& d, int r){
+        int rem = R - r;
+        int lb_round = LBF.lb_full(d.dA, d.dB, 4,4, 32, Wcap);
+        int lb_tail = 0;
+        if (rem > 1){
+            lb_tail = use_hw ? HW.query(d.dA, d.dB, rem-1)
+                             : SFX.bound(d.dA, d.dB, rem-1, Wcap);
+        }
+        return lb_round + lb_tail;
+    };
+
+    DiffPair start{0u,0u};
+    auto res = matsui_threshold_search<DiffPair>(R, start, Wcap, next_states, lower_bound);
+    int best_w = res.first;
+    (void)best_w;
+    // No runtime output here when used in CI. Keep a printf for manual runs.
+    std::fprintf(stderr, "[analyze_medcp] best weight = %d (prob >= 2^-%d)\n", best_w, best_w);
+    return 0;
+}
+
