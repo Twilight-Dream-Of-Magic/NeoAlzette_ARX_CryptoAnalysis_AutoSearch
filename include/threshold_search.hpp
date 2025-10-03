@@ -33,9 +33,9 @@ namespace neoalz {
 template<typename DiffT>
 struct TrailNode {
     DiffT diff;
-    int   r;       // depth (round)
-    int   w;       // accumulated weight
-    int   lb;      // lower bound (for PQ ordering)
+    int   r;       // depth (round index)
+    int   w;       // accumulated weight so far
+    int   lb;      // lower bound for remaining suffix (for PQ ordering)
     bool operator<(const TrailNode& other) const {
         return lb > other.lb; // min-heap by lb
     }

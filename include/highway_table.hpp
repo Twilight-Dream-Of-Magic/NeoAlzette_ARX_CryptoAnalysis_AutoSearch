@@ -1,4 +1,15 @@
 #pragma once
+/*
+ * Differential Highway Table (suffix lower bound oracle)
+ *
+ * Idea:
+ *   Compress a state (dA,dB) into a small feature key (here 14 bits: wt/parity),
+ *   and precompute a conservative suffix lower bound for remaining rounds r=1..R.
+ *   Lookup is O(1) and space is O(R · 2^14), enabling linear-space global pruning.
+ *
+ * Key format (14 bits): [ wt(dA):6 | wt(dB):6 | parity(dA):1 | parity(dB):1 ]
+ * Values: 16-bit lower bounds (additive weights) per remaining rounds.
+ */
 #include <cstdint>
 #include <vector>
 #include <string>

@@ -1,4 +1,10 @@
 #pragma once
+/*
+ * Linear Highway Table (suffix lower bound oracle for MELCC)
+ *
+ * Same concept as differential Highway but in mask space. Feature key is kept
+ * compatible (wt/parity) to simplify memory footprint while remaining conservative.
+ */
 #include <cstdint>
 #include <vector>
 #include <string>
