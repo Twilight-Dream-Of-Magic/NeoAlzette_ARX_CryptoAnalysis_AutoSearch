@@ -15,6 +15,9 @@
 #include <vector>
 #include <functional>
 #include <optional>
+#include <cmath>
+#include <algorithm>
+#include <memory>
 #include "pddt.hpp"
 #include "neoalzette.hpp"
 
@@ -40,7 +43,8 @@ private:
     OptConfig config_;
     
 public:
-    explicit PDDTOptimized(OptConfig cfg = {}) : config_(cfg) {}
+    PDDTOptimized() : config_{} {}
+    explicit PDDTOptimized(OptConfig cfg) : config_(cfg) {}
     
     // Main computation with structure-specific optimizations
     std::vector<PDDTTriple> compute_optimized() const {

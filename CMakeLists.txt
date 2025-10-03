@@ -82,6 +82,11 @@ add_executable(paper_algorithms_demo src/paper_algorithms_demo.cpp)
 target_include_directories(paper_algorithms_demo PUBLIC include)
 target_link_libraries(paper_algorithms_demo PRIVATE neoalzette)
 
+# Complete Matsui algorithms implementation
+add_executable(complete_matsui_demo src/complete_matsui_demo.cpp)
+target_include_directories(complete_matsui_demo PUBLIC include)
+target_link_libraries(complete_matsui_demo PRIVATE neoalzette)
+
 option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo threshold_demo search_beam_diff milp_diff threshold_lin gen_round_lb_table highway_table_build highway_table_build_lin)" OFF)
 if(NOT NA_BUILD_DEMOS)
   set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)

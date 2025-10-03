@@ -10,6 +10,7 @@
 #include <iostream>
 #include <chrono>
 #include <iomanip>
+#include <cmath>
 #include "pddt.hpp"
 #include "pddt_optimized.hpp"
 #include "matsui_original.hpp"

@@ -14,11 +14,12 @@
 #include <algorithm>
 #include <limits>
 #include <optional>
+#include <cmath>
 #include "pddt.hpp"
 
 namespace neoalz {
 
-class MATSUIOriginal {
+class MatsuiOriginal {
 public:
     struct SearchState {
         std::vector<PDDTTriple> trail;
@@ -46,7 +47,7 @@ private:
     std::map<uint32_t, std::vector<PDDTTriple>> highways_by_alpha_;  // Fast lookup
     
 public:
-    explicit MATSUIOriginal(SearchParams params) : params_(std::move(params)) {
+    explicit MatsuiOriginal(SearchParams params) : params_(std::move(params)) {
         build_highways_index();
     }
     
@@ -314,11 +315,11 @@ public:
     }
     
     // Algorithm 2: Direct interface matching paper
-    static MATSUIOriginal::SearchResult algorithm2_threshold_search(
+    static MatsuiOriginal::SearchState algorithm2_threshold_search(
         int n, const std::vector<PDDTTriple>& H, double threshold) {
         
-        MATSUIOriginal::SearchParams params(n, H, threshold);
-        MATSUIOriginal searcher(params);
+        MatsuiOriginal::SearchParams params(n, H, threshold);
+        MatsuiOriginal searcher(params);
         
         return searcher.threshold_search();
     }
