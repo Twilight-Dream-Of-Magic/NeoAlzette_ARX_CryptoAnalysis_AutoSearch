@@ -14,6 +14,7 @@
 #include "lb_round_lin.hpp"
 #include "suffix_lb_lin.hpp"
 #include "canonicalize.hpp"
+#include "highway_table_lin.hpp"
 
 namespace neoalz {
 
@@ -30,14 +31,14 @@ struct Cmp { bool operator()(const LinPair& a, const LinPair& b) const noexcept 
 int main(int argc, char** argv){
     using namespace neoalz;
     if (argc < 3){
-        std::fprintf(stderr, "Usage: %s R Wcap [--start-hex mA mB] [--export out.csv]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s R Wcap [--start-hex mA mB] [--export out.csv] [--lin-highway H.bin]\n", argv[0]);
         return 1;
     }
     int R = std::stoi(argv[1]);
     int Wcap = std::stoi(argv[2]);
 
     uint32_t start_mA = 0u, start_mB = 0u;
-    std::string export_path;
+    std::string export_path; std::string lin_hw_path;
     for (int i=3; i<argc; ++i){
         std::string t = argv[i];
         if (t == "--start-hex" && i+2 < argc){
@@ -45,11 +46,15 @@ int main(int argc, char** argv){
             start_mB = (uint32_t)std::stoul(argv[++i], nullptr, 16);
         } else if (t == "--export" && i+1 < argc){
             export_path = argv[++i];
+        } else if (t == "--lin-highway" && i+1 < argc){
+            lin_hw_path = argv[++i];
         }
     }
 
     LbFullRoundLin LBL;
     SuffixLBLin SFX;
+    HighwayTableLin HWL; bool use_hwl = false;
+    if (!lin_hw_path.empty()) use_hwl = HWL.load(lin_hw_path);
 
     std::priority_queue<LinPair, std::vector<LinPair>, Cmp> pq;
     auto cs = canonical_rotate_pair(start_mA, start_mB);
@@ -64,7 +69,12 @@ int main(int argc, char** argv){
         // Lower bound prune (use canonical state)
         auto cc = canonical_rotate_pair(cur.mA, cur.mB);
         int lb1 = LBL.lb_full(cc.first, cc.second, 3,3, 32, std::min(best, Wcap) - cur.w);
-        int lbTail = (R - cur.r - 1 > 0)? SFX.bound(cc.first, cc.second, R - cur.r - 1, std::min(best, Wcap) - cur.w - lb1) : 0;
+        int lbTail = 0;
+        int remTail = R - cur.r - 1;
+        if (remTail > 0){
+            lbTail = use_hwl ? HWL.query(cc.first, cc.second, remTail)
+                             : SFX.bound(cc.first, cc.second, remTail, std::min(best, Wcap) - cur.w - lb1);
+        }
         if (cur.w + lb1 + lbTail >= std::min(best, Wcap)) continue;
 
         // Subround 0 - Add 1: B += F(A)
