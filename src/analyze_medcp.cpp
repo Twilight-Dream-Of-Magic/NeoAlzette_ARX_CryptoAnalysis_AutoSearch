@@ -15,6 +15,7 @@
 #include "highway_table.hpp"
 #include "threshold_search.hpp"
 #include "neoalz_lin.hpp"
+#include "canonicalize.hpp"
 
 namespace neoalz {
 
@@ -67,7 +68,7 @@ int main(int argc, char** argv){
     auto next_states = [&](const DiffPair& d, int r, int slack_w){
         std::vector<std::pair<DiffPair,int>> out;
         const int n = 32;
-        uint32_t dA0 = d.dA, dB0 = d.dB;
+        auto [dA0, dB0] = canonical_rotate_pair(d.dA, d.dB);
 
         // Subround 0 - Add 1 (var-var)
         uint32_t alpha0 = dB0;
@@ -101,7 +102,8 @@ int main(int argc, char** argv){
                         uint32_t Bplus = l1_forward(Bhat);
                         auto [C1, D1] = cd_from_A_delta(Aplus);
                         uint32_t Bstar = Bplus ^ rotl(C1,24) ^ rotl(D1,16);
-                        DiffPair dn{Aplus, Bstar};
+                        auto cn = canonical_rotate_pair(Aplus, Bstar);
+                        DiffPair dn{cn.first, cn.second};
                         out.push_back({dn, w1+w2+w3+w4});
                     });
                 });
@@ -111,12 +113,13 @@ int main(int argc, char** argv){
     };
 
     auto lower_bound = [&](const DiffPair& d, int r){
+        auto c = canonical_rotate_pair(d.dA, d.dB);
         int rem = R - r;
-        int lb_round = LBF.lb_full(d.dA, d.dB, K1, K2, 32, Wcap);
+        int lb_round = LBF.lb_full(c.first, c.second, K1, K2, 32, Wcap);
         int lb_tail = 0;
         if (rem > 1){
-            lb_tail = use_hw ? HW.query(d.dA, d.dB, rem-1)
-                             : SFX.bound(d.dA, d.dB, rem-1, Wcap);
+            lb_tail = use_hw ? HW.query(c.first, c.second, rem-1)
+                             : SFX.bound(c.first, c.second, rem-1, Wcap);
         }
         return lb_round + lb_tail;
     };
@@ -124,7 +127,6 @@ int main(int argc, char** argv){
     DiffPair start{start_dA,start_dB};
     auto res = matsui_threshold_search<DiffPair>(R, start, Wcap, next_states, lower_bound);
     int best_w = res.first;
-    // Optional CSV export (single-line summary)
     if (!export_path.empty()){
         std::ofstream ofs(export_path, std::ios::app);
         if (ofs){

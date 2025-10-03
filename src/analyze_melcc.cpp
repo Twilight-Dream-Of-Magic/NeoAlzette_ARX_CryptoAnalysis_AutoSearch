@@ -13,6 +13,7 @@
 #include "mask_backtranspose.hpp"
 #include "lb_round_lin.hpp"
 #include "suffix_lb_lin.hpp"
+#include "canonicalize.hpp"
 
 namespace neoalz {
 
@@ -51,7 +52,8 @@ int main(int argc, char** argv){
     SuffixLBLin SFX;
 
     std::priority_queue<LinPair, std::vector<LinPair>, Cmp> pq;
-    pq.push({start_mA,start_mB,0,0});
+    auto cs = canonical_rotate_pair(start_mA, start_mB);
+    pq.push({cs.first, cs.second, 0, 0});
     int best = std::numeric_limits<int>::max();
 
     while (!pq.empty()){
@@ -59,9 +61,10 @@ int main(int argc, char** argv){
         if (cur.w >= std::min(best, Wcap)) continue;
         if (cur.r == R){ best = std::min(best, cur.w); continue; }
 
-        // Lower bound prune
-        int lb1 = LBL.lb_full(cur.mA, cur.mB, 3,3, 32, std::min(best, Wcap) - cur.w);
-        int lbTail = (R - cur.r - 1 > 0)? SFX.bound(cur.mA, cur.mB, R - cur.r - 1, std::min(best, Wcap) - cur.w - lb1) : 0;
+        // Lower bound prune (use canonical state)
+        auto cc = canonical_rotate_pair(cur.mA, cur.mB);
+        int lb1 = LBL.lb_full(cc.first, cc.second, 3,3, 32, std::min(best, Wcap) - cur.w);
+        int lbTail = (R - cur.r - 1 > 0)? SFX.bound(cc.first, cc.second, R - cur.r - 1, std::min(best, Wcap) - cur.w - lb1) : 0;
         if (cur.w + lb1 + lbTail >= std::min(best, Wcap)) continue;
 
         // Subround 0 - Add 1: B += F(A)
@@ -89,7 +92,8 @@ int main(int argc, char** argv){
                         uint32_t A4in = A3_mask ^ rotl(B4in,16);
                         uint32_t Aout = l2_backtranspose(A4in);
                         uint32_t Bout = l1_backtranspose(B4in);
-                        LinPair nxt{Aout, Bout, cur.w + w1+w2+w3+w4, cur.r+1};
+                        auto cn = canonical_rotate_pair(Aout, Bout);
+                        LinPair nxt{cn.first, cn.second, cur.w + w1+w2+w3+w4, cur.r+1};
                         if (nxt.w < std::min(best, Wcap)) pq.push(nxt);
                     });
                 });
