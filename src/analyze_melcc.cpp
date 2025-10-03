@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <algorithm>
+#include <unordered_map>
 #include "neoalzette.hpp"
 #include "wallen_fast.hpp"
 #include "neoalz_lin.hpp"
@@ -61,6 +62,9 @@ int main(int argc, char** argv){
     pq.push({cs.first, cs.second, 0, 0});
     int best = std::numeric_limits<int>::max();
 
+    std::unordered_map<uint64_t,int> lb_memo; lb_memo.reserve(1<<14);
+    auto lb_key = [&](uint32_t a, uint32_t b, int r){ return ( (uint64_t)(r & 0xFF) << 56) ^ ( (uint64_t)a << 24) ^ (uint64_t)b; };
+
     while (!pq.empty()){
         auto cur = pq.top(); pq.pop();
         if (cur.w >= std::min(best, Wcap)) continue;
@@ -68,8 +72,11 @@ int main(int argc, char** argv){
 
         // Lower bound prune (use canonical state)
         auto cc = canonical_rotate_pair(cur.mA, cur.mB);
-        int lb1 = LBL.lb_full(cc.first, cc.second, 3,3, 32, std::min(best, Wcap) - cur.w);
-        int lbTail = 0;
+        uint64_t lk = lb_key(cc.first, cc.second, cur.r);
+        int lb1 = 0; int lbTail = 0; bool have=false;
+        auto it = lb_memo.find(lk);
+        if (it != lb_memo.end()){ lb1 = it->second; have=true; }
+        if (!have){ lb1 = LBL.lb_full(cc.first, cc.second, 3,3, 32, std::min(best, Wcap) - cur.w); lb_memo.emplace(lk, lb1); }
         int remTail = R - cur.r - 1;
         if (remTail > 0){
             lbTail = use_hwl ? HWL.query(cc.first, cc.second, remTail)

@@ -14,7 +14,7 @@ struct RNG { std::mt19937_64 eng{std::random_device{}()}; uint32_t word(){ retur
 
 int main(int argc, char** argv){
     if (argc < 5){
-        std::cerr << "Usage: " << argv[0] << " R samples_per_bucket out.bin nbits(=32)\n";
+        std::cerr << "Usage: " << argv[0] << " R samples_per_bucket out.bin nbits(=32) [seed]\n";
         return 1;
     }
     int R = std::stoi(argv[1]);
@@ -24,7 +24,7 @@ int main(int argc, char** argv){
 
     HighwayTableLin HT; HT.init(R);
     neoalz::LbFullRoundLin LBL;
-    RNG rng;
+    RNG rng; if (argc>5){ rng.eng.seed( (uint64_t)std::stoull(argv[5]) ); }
 
     for (int rem=1; rem<=R; ++rem){
         std::vector<uint16_t> best( (size_t)HighwayTableLin::BLOCK, 0xFFFFu );

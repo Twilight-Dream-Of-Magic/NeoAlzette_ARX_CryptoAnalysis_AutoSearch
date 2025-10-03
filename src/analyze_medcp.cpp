@@ -8,6 +8,7 @@
 #include <sstream>
 #include <limits>
 #include <algorithm>
+#include <unordered_map>
 #include "neoalzette.hpp"
 #include "lm_fast.hpp"
 #include "lb_round_full.hpp"
@@ -66,6 +67,9 @@ int main(int argc, char** argv){
     LbFullRound LBF;
     SuffixLB SFX;
 
+    std::unordered_map<uint64_t,int> lb_memo; lb_memo.reserve(1<<14);
+    auto lb_key = [&](uint32_t a, uint32_t b, int r){ return ( (uint64_t)(r & 0xFF) << 56) ^ ( (uint64_t)a << 24) ^ (uint64_t)b; };
+
     auto next_states = [&](const DiffPair& d, int r, int slack_w){
         std::vector<std::pair<DiffPair,int>> out;
         const int n = 32;
@@ -78,7 +82,6 @@ int main(int argc, char** argv){
             int slack1 = slack_w - w1; if (slack1 < 0) return;
             // Add 2: A = A - RC[1]  (var-const) -> use add-constant model with c = -RC[1]
             uint32_t c1 = (uint32_t)(-int32_t(RC[1]));
-            // best gamma and weight for add-constant
             auto best1 = addconst_best(dA0, c1, n);
             if (best1.weight <= slack1){
                 uint32_t gA1 = best1.gamma; int w2 = best1.weight;
@@ -120,14 +123,13 @@ int main(int argc, char** argv){
 
     auto lower_bound = [&](const DiffPair& d, int r){
         auto c = canonical_rotate_pair(d.dA, d.dB);
+        uint64_t k = lb_key(c.first, c.second, r);
+        auto it = lb_memo.find(k); if (it != lb_memo.end()) return it->second;
         int rem = R - r;
         int lb_round = LBF.lb_full(c.first, c.second, K1, K2, 32, Wcap);
         int lb_tail = 0;
-        if (rem > 1){
-            lb_tail = use_hw ? HW.query(c.first, c.second, rem-1)
-                             : SFX.bound(c.first, c.second, rem-1, Wcap);
-        }
-        return lb_round + lb_tail;
+        if (rem > 1){ lb_tail = use_hw ? HW.query(c.first, c.second, rem-1) : SFX.bound(c.first, c.second, rem-1, Wcap); }
+        int v = lb_round + lb_tail; lb_memo.emplace(k, v); return v;
     };
 
     DiffPair start{start_dA,start_dB};

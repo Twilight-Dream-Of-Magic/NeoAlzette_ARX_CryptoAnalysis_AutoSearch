@@ -47,27 +47,31 @@ struct LbFullRound {
         auto it = cache.find(key);
         if (it != cache.end()) return it->second;
 
+        // adapt K based on slack cap to balance time/space
+        int K1eff = std::min(K1, std::max(1, cap/8));
+        int K2eff = std::min(K2, std::max(1, cap/8));
+
         struct Cand { uint32_t A2, B2; int w; };
-        std::vector<Cand> stage1; stage1.reserve(K1*K2);
+        std::vector<Cand> stage1; stage1.reserve(K1eff*K2eff);
 
         // (1) var–var
         uint32_t alpha0 = dB0;
         uint32_t beta0  = rotl(dA0,31) ^ rotl(dA0,17);
 
-        std::vector<std::pair<uint32_t,int>> G1; G1.reserve(K1);
+        std::vector<std::pair<uint32_t,int>> G1; G1.reserve(K1eff);
         enumerate_lm_gammas_fast(alpha0, beta0, n, cap, [&](uint32_t g, int w){ G1.emplace_back(g,w); });
         std::sort(G1.begin(), G1.end(), [](auto&x, auto&y){ return x.second<y.second; });
-        if ((int)G1.size() > K1) G1.resize(K1);
+        if ((int)G1.size() > K1eff) G1.resize(K1eff);
 
         // (2) var–const via add-constant model
         uint32_t c1 = (uint32_t)(-int32_t(RC1));
-        std::vector<std::pair<uint32_t,int>> G2; G2.reserve(K2);
+        std::vector<std::pair<uint32_t,int>> G2; G2.reserve(K2eff);
         // enumerate best single candidate (greedy) and a few neighbors by flipping low bits heuristically
         auto best1 = addconst_best(dA0, c1, n);
         G2.emplace_back(best1.gamma, best1.weight);
 
         std::sort(G2.begin(), G2.end(), [](auto&x, auto&y){ return x.second<y.second; });
-        if ((int)G2.size() > K2) G2.resize(K2);
+        if ((int)G2.size() > K2eff) G2.resize(K2eff);
 
         for (auto [gB1, w1] : G1){
             for (auto [gA1, w2] : G2){
