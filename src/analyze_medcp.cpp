@@ -16,6 +16,7 @@
 #include "threshold_search.hpp"
 #include "neoalz_lin.hpp"
 #include "canonicalize.hpp"
+#include "diff_add_const.hpp"
 
 namespace neoalz {
 
@@ -75,9 +76,12 @@ int main(int argc, char** argv){
         uint32_t beta0  = rotl(dA0,31) ^ rotl(dA0,17);
         enumerate_lm_gammas_fast(alpha0, beta0, n, slack_w, [&](uint32_t gB1, int w1){
             int slack1 = slack_w - w1; if (slack1 < 0) return;
-            // Add 2 (var-const)
-            uint32_t bconst1 = (uint32_t)(-int32_t(RC[1]));
-            enumerate_lm_gammas_fast(dA0, bconst1, n, slack1, [&](uint32_t gA1, int w2){
+            // Add 2: A = A - RC[1]  (var-const) -> use add-constant model with c = -RC[1]
+            uint32_t c1 = (uint32_t)(-int32_t(RC[1]));
+            // best gamma and weight for add-constant
+            auto best1 = addconst_best(dA0, c1, n);
+            if (best1.weight <= slack1){
+                uint32_t gA1 = best1.gamma; int w2 = best1.weight;
                 int slack2 = slack1 - w2; if (slack2 < 0) return;
                 // Linear mix
                 uint32_t A2 = gA1 ^ rotl(gB1,24);
@@ -92,9 +96,11 @@ int main(int argc, char** argv){
                 uint32_t beta1  = rotl(Bkeep,31) ^ rotl(Bkeep,17);
                 enumerate_lm_gammas_fast(alpha1, beta1, n, slack2, [&](uint32_t gA3, int w3){
                     int slack3 = slack2 - w3; if (slack3 < 0) return;
-                    // Add 4 (var-const)
-                    uint32_t bconst2 = (uint32_t)(-int32_t(RC[6]));
-                    enumerate_lm_gammas_fast(Bkeep, bconst2, n, slack3, [&](uint32_t gB3, int w4){
+                    // Add 4: B = B - RC[6]  (var-const)
+                    uint32_t c2 = (uint32_t)(-int32_t(RC[6]));
+                    auto best2 = addconst_best(Bkeep, c2, n);
+                    if (best2.weight <= slack3){
+                        uint32_t gB3 = best2.gamma; int w4 = best2.weight;
                         int slack4 = slack3 - w4; if (slack4 < 0) return;
                         uint32_t Bhat = gB3 ^ rotl(gA3,24);
                         uint32_t Ahat = gA3 ^ rotl(Bhat,16);
@@ -105,9 +111,9 @@ int main(int argc, char** argv){
                         auto cn = canonical_rotate_pair(Aplus, Bstar);
                         DiffPair dn{cn.first, cn.second};
                         out.push_back({dn, w1+w2+w3+w4});
-                    });
+                    }
                 });
-            });
+            }
         });
         return out;
     };
