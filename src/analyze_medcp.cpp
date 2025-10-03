@@ -4,6 +4,8 @@
 #include <queue>
 #include <tuple>
 #include <string>
+#include <fstream>
+#include <sstream>
 #include <limits>
 #include <algorithm>
 #include "neoalzette.hpp"
@@ -53,14 +55,34 @@ static constexpr uint32_t RC[16] = {
 int main(int argc, char** argv){
     using namespace neoalz;
     if (argc < 3){
-        std::fprintf(stderr, "Usage: %s R Wcap [highway.bin]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s R Wcap [highway.bin] [--start-hex dA dB] [--export out.csv] [--k1 K] [--k2 K]\n", argv[0]);
         return 1;
     }
     int R = std::stoi(argv[1]);
     int Wcap = std::stoi(argv[2]);
 
     HighwayTable HW; bool use_hw = false;
-    if (argc >= 4){ use_hw = HW.load(argv[3]); }
+    if (argc >= 4 && argv[3][0] != '-') { use_hw = HW.load(argv[3]); }
+
+    // defaults
+    uint32_t start_dA = 0u, start_dB = 0u;
+    std::string export_path;
+    int K1 = 4, K2 = 4;
+
+    // parse options
+    for (int i=3; i<argc; ++i){
+        std::string t = argv[i];
+        if (t == "--start-hex" && i+2 < argc){
+            start_dA = (uint32_t)std::stoul(argv[++i], nullptr, 16);
+            start_dB = (uint32_t)std::stoul(argv[++i], nullptr, 16);
+        } else if (t == "--export" && i+1 < argc){
+            export_path = argv[++i];
+        } else if (t == "--k1" && i+1 < argc){
+            K1 = std::stoi(argv[++i]);
+        } else if (t == "--k2" && i+1 < argc){
+            K2 = std::stoi(argv[++i]);
+        }
+    }
 
     LbFullRound LBF;
     SuffixLB SFX;
@@ -113,7 +135,7 @@ int main(int argc, char** argv){
 
     auto lower_bound = [&](const DiffPair& d, int r){
         int rem = R - r;
-        int lb_round = LBF.lb_full(d.dA, d.dB, 4,4, 32, Wcap);
+        int lb_round = LBF.lb_full(d.dA, d.dB, K1, K2, 32, Wcap);
         int lb_tail = 0;
         if (rem > 1){
             lb_tail = use_hw ? HW.query(d.dA, d.dB, rem-1)
@@ -122,11 +144,24 @@ int main(int argc, char** argv){
         return lb_round + lb_tail;
     };
 
-    DiffPair start{0u,0u};
+    DiffPair start{start_dA,start_dB};
     auto res = matsui_threshold_search<DiffPair>(R, start, Wcap, next_states, lower_bound);
     int best_w = res.first;
-    (void)best_w;
-    // No runtime output here when used in CI. Keep a printf for manual runs.
+    // Optional CSV export (single-line summary)
+    if (!export_path.empty()){
+        std::ofstream ofs(export_path, std::ios::app);
+        if (ofs){
+            ofs << "algo,MEDCP"
+                << ",R," << R
+                << ",Wcap," << Wcap
+                << ",start_dA,0x" << std::hex << start_dA << std::dec
+                << ",start_dB,0x" << std::hex << start_dB << std::dec
+                << ",K1," << K1
+                << ",K2," << K2
+                << ",best_w," << best_w
+                << "\n";
+        }
+    }
     std::fprintf(stderr, "[analyze_medcp] best weight = %d (prob >= 2^-%d)\n", best_w, best_w);
     return 0;
 }

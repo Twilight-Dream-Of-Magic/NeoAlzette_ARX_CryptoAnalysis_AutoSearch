@@ -4,6 +4,7 @@
 #include <queue>
 #include <tuple>
 #include <string>
+#include <fstream>
 #include <limits>
 #include <algorithm>
 #include "neoalzette.hpp"
@@ -42,14 +43,26 @@ struct Cmp { bool operator()(const LinPair& a, const LinPair& b) const noexcept 
 int main(int argc, char** argv){
     using namespace neoalz;
     if (argc < 3){
-        std::fprintf(stderr, "Usage: %s R Wcap\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s R Wcap [--start-hex mA mB] [--export out.csv]\n", argv[0]);
         return 1;
     }
     int R = std::stoi(argv[1]);
     int Wcap = std::stoi(argv[2]);
 
+    uint32_t start_mA = 0u, start_mB = 0u;
+    std::string export_path;
+    for (int i=3; i<argc; ++i){
+        std::string t = argv[i];
+        if (t == "--start-hex" && i+2 < argc){
+            start_mA = (uint32_t)std::stoul(argv[++i], nullptr, 16);
+            start_mB = (uint32_t)std::stoul(argv[++i], nullptr, 16);
+        } else if (t == "--export" && i+1 < argc){
+            export_path = argv[++i];
+        }
+    }
+
     std::priority_queue<LinPair, std::vector<LinPair>, Cmp> pq;
-    pq.push({0u,0u,0,0});
+    pq.push({start_mA,start_mB,0,0});
     int best = std::numeric_limits<int>::max();
 
     while (!pq.empty()){
@@ -90,6 +103,18 @@ int main(int argc, char** argv){
         });
     }
 
+    if (!export_path.empty()){
+        std::ofstream ofs(export_path, std::ios::app);
+        if (ofs){
+            ofs << "algo,MELCC"
+                << ",R," << R
+                << ",Wcap," << Wcap
+                << ",start_mA,0x" << std::hex << start_mA << std::dec
+                << ",start_mB,0x" << std::hex << start_mB << std::dec
+                << ",best_w," << best
+                << "\n";
+        }
+    }
     std::fprintf(stderr, "[analyze_melcc] best linear weight = %d\n", best);
     return 0;
 }
