@@ -18,6 +18,7 @@
 #include "neoalz_lin.hpp"
 #include "canonicalize.hpp"
 #include "diff_add_const.hpp"
+#include "trail_export.hpp"
 
 namespace neoalz {
 
@@ -154,18 +155,16 @@ int main(int argc, char** argv){
     auto res = matsui_threshold_search<DifferentialState>(R, start, Wcap, next_states, lower_bound);
     int best_w = res.first;
     if (!export_path.empty()){
-        std::ofstream ofs(export_path, std::ios::app);
-        if (ofs){
-            ofs << "algo,MEDCP"
-                << ",R," << R
-                << ",Wcap," << Wcap
-                << ",start_dA,0x" << std::hex << start_dA << std::dec
-                << ",start_dB,0x" << std::hex << start_dB << std::dec
-                << ",K1," << K1
-                << ",K2," << K2
-                << ",best_w," << best_w
-                << "\n";
-        }
+        std::ostringstream ss;
+        ss << "algo,MEDCP"
+           << ",R," << R
+           << ",Wcap," << Wcap
+           << ",start_dA,0x" << std::hex << start_dA << std::dec
+           << ",start_dB,0x" << std::hex << start_dB << std::dec
+           << ",K1," << K1
+           << ",K2," << K2
+           << ",best_w," << best_w;
+        TrailExport::append_csv(export_path, ss.str());
     }
     std::fprintf(stderr, "[analyze_medcp] best weight = %d (prob >= 2^-%d)\n", best_w, best_w);
     return 0;

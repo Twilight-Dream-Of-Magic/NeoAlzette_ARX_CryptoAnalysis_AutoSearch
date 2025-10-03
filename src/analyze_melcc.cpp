@@ -16,6 +16,7 @@
 #include "suffix_lb_lin.hpp"
 #include "canonicalize.hpp"
 #include "highway_table_lin.hpp"
+#include "trail_export.hpp"
 
 namespace neoalz {
 
@@ -133,16 +134,14 @@ int main(int argc, char** argv){
     }
 
     if (!export_path.empty()){
-        std::ofstream ofs(export_path, std::ios::app);
-        if (ofs){
-            ofs << "algo,MELCC"
-                << ",R," << R
-                << ",Wcap," << Wcap
-                << ",start_mA,0x" << std::hex << start_mA << std::dec
-                << ",start_mB,0x" << std::hex << start_mB << std::dec
-                << ",best_w," << best
-                << "\n";
-        }
+        std::ostringstream ss;
+        ss << "algo,MELCC"
+           << ",R," << R
+           << ",Wcap," << Wcap
+           << ",start_mA,0x" << std::hex << start_mA << std::dec
+           << ",start_mB,0x" << std::hex << start_mB << std::dec
+           << ",best_w," << best;
+        TrailExport::append_csv(export_path, ss.str());
     }
     std::fprintf(stderr, "[analyze_melcc] best linear weight = %d\n", best);
     return 0;
