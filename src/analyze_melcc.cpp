@@ -32,7 +32,21 @@ struct Cmp { bool operator()(const LinearState& a, const LinearState& b) const n
 int main(int argc, char** argv){
     using namespace neoalz;
     if (argc < 3){
-        std::fprintf(stderr, "Usage: %s R Wcap [--start-hex mA mB] [--export out.csv] [--lin-highway H.bin]\n", argv[0]);
+        std::fprintf(stderr,
+            "\nMELCC Analyzer - Linear Trail Search for NeoAlzette (build only)\n"
+            "Usage:\n"
+            "  %s R Wcap [--start-hex mA mB] [--export out.csv] [--lin-highway H.bin]\n\n"
+            "Arguments:\n"
+            "  R                    Number of rounds\n"
+            "  Wcap                 Global weight cap for threshold/beam search\n\n"
+            "Options:\n"
+            "  --start-hex mA mB      Initial masks in hex (e.g., 0x1 0x0)\n"
+            "  --export out.csv        Append a one-line summary (algo, R, Wcap, start, best_w)\n"
+            "  --lin-highway H.bin     Optional linear Highway suffix-LB file\n\n"
+            "Notes:\n"
+            "  - Exact (L^{-1})^T is used for mask transport; Wallén model for adds.\n"
+            "  - Only builds; do not run heavy searches in this environment.\n\n",
+            argv[0]);
         return 1;
     }
     int R = std::stoi(argv[1]);

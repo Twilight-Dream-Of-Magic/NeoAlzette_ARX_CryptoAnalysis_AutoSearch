@@ -35,7 +35,23 @@ static constexpr uint32_t RC[16] = {
 int main(int argc, char** argv){
     using namespace neoalz;
     if (argc < 3){
-        std::fprintf(stderr, "Usage: %s R Wcap [highway.bin] [--start-hex dA dB] [--export out.csv] [--k1 K] [--k2 K]\n", argv[0]);
+        std::fprintf(stderr,
+            "\nMEDCP Analyzer - Differential Trail Search for NeoAlzette (build only)\n"
+            "Usage:\n"
+            "  %s R Wcap [highway.bin] [--start-hex dA dB] [--export out.csv] [--k1 K] [--k2 K]\n\n"
+            "Arguments:\n"
+            "  R                 Number of rounds\n"
+            "  Wcap              Global weight cap for threshold search\n"
+            "  highway.bin       Optional differential Highway suffix-LB file\n\n"
+            "Options:\n"
+            "  --start-hex dA dB   Initial differences in hex (e.g., 0x1 0x0)\n"
+            "  --export out.csv     Append a one-line summary (algo, R, Wcap, start, K1, K2, best_w)\n"
+            "  --k1 K               Top-K candidates for var–var in one-round LB (default 4)\n"
+            "  --k2 K               Top-K candidates for var–const in one-round LB (default 4)\n\n"
+            "Notes:\n"
+            "  - Only builds; do not run heavy searches in this environment.\n"
+            "  - Highway provides O(1) suffix lower bounds with linear space.\n\n",
+            argv[0]);
         return 1;
     }
     int R = std::stoi(argv[1]);
