@@ -7,8 +7,9 @@ namespace neoalz {
 
 struct AddConstBest { uint32_t gamma; int weight; };
 
-// Compute next carry of full-adder for bit values (x, c, k)
-static inline int carry_next_bit(int x, int c, int k) noexcept {
+// Compute the next carry bit for full-adder at one bit position:
+// k_{i+1} = MAJ(x_i, c_i, k_i)
+static inline int compute_carry_next_bit(int x, int c, int k) noexcept {
     return ( (x & c) | (x & k) | (c & k) );
 }
 
@@ -27,8 +28,8 @@ static inline AddConstBest addconst_best(uint32_t alpha, uint32_t c, int n){
             for (int kp=0;kp<2;++kp){
                 uint32_t best = 0;
                 for (int x=0;x<=1;++x){
-                    int kn = carry_next_bit(x, cbit, k);
-                    int kpn = carry_next_bit(x^a, cbit, kp);
+                    int kn = compute_carry_next_bit(x, cbit, k);
+                    int kpn = compute_carry_next_bit(x^a, cbit, kp);
                     uint32_t cnt = f[i+1][kn][kpn];
                     if (cnt > best) best = cnt;
                 }
@@ -48,8 +49,8 @@ static inline AddConstBest addconst_best(uint32_t alpha, uint32_t c, int n){
         // choose x that maximizes suffix count
         uint32_t best = 0; int bestx = 0; int best_kn=0, best_kpn=0;
         for (int x=0;x<=1;++x){
-            int kn = carry_next_bit(x, cbit, k);
-            int kpn = carry_next_bit(x^a, cbit, kp);
+            int kn = compute_carry_next_bit(x, cbit, k);
+            int kpn = compute_carry_next_bit(x^a, cbit, kp);
             uint32_t cnt = f[i+1][kn][kpn];
             if (cnt > best){ best = cnt; bestx = x; best_kn = kn; best_kpn = kpn; }
         }
@@ -78,8 +79,8 @@ static inline std::optional<int> addconst_weight(uint32_t alpha, uint32_t gamma,
                 if ( (a ^ k ^ kp) != gi ){ g[i][k][kp] = 0; continue; }
                 uint32_t sum = 0;
                 for (int x=0;x<=1;++x){
-                    int kn = carry_next_bit(x, cbit, k);
-                    int kpn = carry_next_bit(x^a, cbit, kp);
+                    int kn = compute_carry_next_bit(x, cbit, k);
+                    int kpn = compute_carry_next_bit(x^a, cbit, kp);
                     sum += g[i+1][kn][kpn];
                 }
                 g[i][k][kp] = sum;

@@ -13,7 +13,7 @@
 
 namespace neoalz {
 
-struct LinPair { uint32_t mA, mB; int w; int r; };
+struct LinearState { uint32_t mA, mB; int w; int r; };
 
 constexpr uint32_t rotl(uint32_t x, int r) noexcept { r&=31; return (x<<r)|(x>>(32-r)); }
 constexpr uint32_t rotr(uint32_t x, int r) noexcept { r&=31; return (x>>r)|(x<<(32-r)); }
@@ -33,7 +33,7 @@ static inline uint32_t l2_backtranspose(uint32_t x) noexcept {
 }
 
 struct Cmp {
-    bool operator()(const LinPair& a, const LinPair& b) const noexcept {
+    bool operator()(const LinearState& a, const LinearState& b) const noexcept {
         return a.w > b.w; // min-heap by weight
     }
 };
@@ -50,13 +50,13 @@ int main(int argc, char** argv){
     int Wcap = std::stoi(argv[2]);
 
     // Initial masks (can be parameterised; use nonzero seeds)
-    LinPair root{0u, 0u, 0, 0};
-    std::priority_queue<LinPair, std::vector<LinPair>, Cmp> pq;
+    LinearState root{0u, 0u, 0, 0};
+    std::priority_queue<LinearState, std::vector<LinearState>, Cmp> pq;
     pq.push(root);
 
     int best = std::numeric_limits<int>::max();
 
-    auto lower_bound = [&](const LinPair& s){
+    auto lower_bound = [&](const LinearState& s){
         // very conservative for now: 0
         return 0;
     };
@@ -100,7 +100,7 @@ int main(int argc, char** argv){
                         uint32_t Aout = l2_backtranspose(A4in);
                         uint32_t Bout = l1_backtranspose(B4in);
 
-                        LinPair nxt{Aout, Bout, cur.w + w1+w2+w3+w4, cur.r+1};
+                        LinearState nxt{Aout, Bout, cur.w + w1+w2+w3+w4, cur.r+1};
                         int lb = lower_bound(nxt);
                         if (nxt.w + lb < std::min(best, Wcap)) pq.push(nxt);
                     });

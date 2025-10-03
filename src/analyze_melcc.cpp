@@ -19,13 +19,13 @@
 
 namespace neoalz {
 
-struct LinPair { uint32_t mA, mB; int w; int r; };
+struct LinearState { uint32_t mA, mB; int w; int r; };
 
 // Backtranspose via exact (L^{-1})^T using Gauss–Jordan constructed rows
 static inline uint32_t l1_backtranspose(uint32_t x) noexcept { return l1_backtranspose_exact(x); }
 static inline uint32_t l2_backtranspose(uint32_t x) noexcept { return l2_backtranspose_exact(x); }
 
-struct Cmp { bool operator()(const LinPair& a, const LinPair& b) const noexcept { return a.w > b.w; } };
+struct Cmp { bool operator()(const LinearState& a, const LinearState& b) const noexcept { return a.w > b.w; } };
 
 } // namespace neoalz
 
@@ -57,7 +57,7 @@ int main(int argc, char** argv){
     HighwayTableLin HWL; bool use_hwl = false;
     if (!lin_hw_path.empty()) use_hwl = HWL.load(lin_hw_path);
 
-    std::priority_queue<LinPair, std::vector<LinPair>, Cmp> pq;
+    std::priority_queue<LinearState, std::vector<LinearState>, Cmp> pq;
     auto cs = canonical_rotate_pair(start_mA, start_mB);
     pq.push({cs.first, cs.second, 0, 0});
     int best = std::numeric_limits<int>::max();
@@ -110,7 +110,7 @@ int main(int argc, char** argv){
                         uint32_t Aout = l2_backtranspose(A4in);
                         uint32_t Bout = l1_backtranspose(B4in);
                         auto cn = canonical_rotate_pair(Aout, Bout);
-                        LinPair nxt{cn.first, cn.second, cur.w + w1+w2+w3+w4, cur.r+1};
+                        LinearState nxt{cn.first, cn.second, cur.w + w1+w2+w3+w4, cur.r+1};
                         if (nxt.w < std::min(best, Wcap)) pq.push(nxt);
                     });
                 });

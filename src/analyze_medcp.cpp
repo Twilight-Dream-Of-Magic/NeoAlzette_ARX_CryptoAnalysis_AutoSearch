@@ -21,7 +21,7 @@
 
 namespace neoalz {
 
-struct DiffPair { uint32_t dA, dB; };
+struct DifferentialState { uint32_t dA, dB; };
 
 static constexpr uint32_t RC[16] = {
     0x16B2C40B, 0xC117176A, 0x0F9A2598, 0xA1563ACA,
@@ -70,8 +70,8 @@ int main(int argc, char** argv){
     std::unordered_map<uint64_t,int> lb_memo; lb_memo.reserve(1<<14);
     auto lb_key = [&](uint32_t a, uint32_t b, int r){ return ( (uint64_t)(r & 0xFF) << 56) ^ ( (uint64_t)a << 24) ^ (uint64_t)b; };
 
-    auto next_states = [&](const DiffPair& d, int r, int slack_w){
-        std::vector<std::pair<DiffPair,int>> out;
+    auto next_states = [&](const DifferentialState& d, int r, int slack_w){
+        std::vector<std::pair<DifferentialState,int>> out;
         const int n = 32;
         auto [dA0, dB0] = canonical_rotate_pair(d.dA, d.dB);
 
@@ -112,7 +112,7 @@ int main(int argc, char** argv){
                         auto [C1, D1] = cd_from_A_delta(Aplus);
                         uint32_t Bstar = Bplus ^ rotl(C1,24) ^ rotl(D1,16);
                         auto cn = canonical_rotate_pair(Aplus, Bstar);
-                        DiffPair dn{cn.first, cn.second};
+                        DifferentialState dn{cn.first, cn.second};
                         out.push_back({dn, w1+w2+w3+w4});
                     }
                 });
@@ -121,7 +121,7 @@ int main(int argc, char** argv){
         return out;
     };
 
-    auto lower_bound = [&](const DiffPair& d, int r){
+    auto lower_bound = [&](const DifferentialState& d, int r){
         auto c = canonical_rotate_pair(d.dA, d.dB);
         uint64_t k = lb_key(c.first, c.second, r);
         auto it = lb_memo.find(k); if (it != lb_memo.end()) return it->second;
@@ -132,8 +132,8 @@ int main(int argc, char** argv){
         int v = lb_round + lb_tail; lb_memo.emplace(k, v); return v;
     };
 
-    DiffPair start{start_dA,start_dB};
-    auto res = matsui_threshold_search<DiffPair>(R, start, Wcap, next_states, lower_bound);
+    DifferentialState start{start_dA,start_dB};
+    auto res = matsui_threshold_search<DifferentialState>(R, start, Wcap, next_states, lower_bound);
     int best_w = res.first;
     if (!export_path.empty()){
         std::ofstream ofs(export_path, std::ios::app);
