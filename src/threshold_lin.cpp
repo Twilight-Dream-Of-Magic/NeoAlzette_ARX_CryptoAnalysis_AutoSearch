@@ -15,22 +15,9 @@ namespace neoalz {
 
 struct LinearState { uint32_t mA, mB; int w; int r; };
 
-constexpr uint32_t rotl(uint32_t x, int r) noexcept { r&=31; return (x<<r)|(x>>(32-r)); }
-constexpr uint32_t rotr(uint32_t x, int r) noexcept { r&=31; return (x>>r)|(x<<(32-r)); }
+// Use functions from neoalzette.hpp and neoalz_lin.hpp
 
-static inline uint32_t l1_forward(uint32_t x) noexcept {
-    return x ^ rotl(x,2) ^ rotl(x,10) ^ rotl(x,18) ^ rotl(x,24);
-}
-static inline uint32_t l2_forward(uint32_t x) noexcept {
-    return x ^ rotl(x,8) ^ rotl(x,14) ^ rotl(x,22) ^ rotl(x,30);
-}
-
-static inline uint32_t l1_backtranspose(uint32_t x) noexcept {
-    return l1_backtranspose_exact(x);
-}
-static inline uint32_t l2_backtranspose(uint32_t x) noexcept {
-    return l2_backtranspose_exact(x);
-}
+// Use l1_backtranspose_exact and l2_backtranspose_exact from neoalz_lin.hpp
 
 struct Cmp {
     bool operator()(const LinearState& a, const LinearState& b) const noexcept {
@@ -78,11 +65,11 @@ int main(int argc, char** argv){
             uint32_t nu2 = 0u;
             enumerate_wallen_omegas(mu2, nu2, Wcap - (cur.w + w1), [&](uint32_t Ap_mask, int w2){
                 // Linear diffusion (choose consistent forward masks)
-                uint32_t A2_mask = l1_backtranspose( Ap_mask ^ rotl(Bp_mask,24) );
-                uint32_t B2_mask = l2_backtranspose( Bp_mask ^ rotl(Ap_mask ^ rotl(Bp_mask,24),16) );
+                uint32_t A2_mask = l1_backtranspose_exact( Ap_mask ^ rotl(Bp_mask,24) );
+                uint32_t B2_mask = l2_backtranspose_exact( Bp_mask ^ rotl(Ap_mask ^ rotl(Bp_mask,24),16) );
                 // Cross-branch injection into A*
-                uint32_t C0m = l2_backtranspose( B2_mask );
-                uint32_t D0m = l1_backtranspose( rotr(B2_mask,3) );
+                uint32_t C0m = l2_backtranspose_exact( B2_mask );
+                uint32_t D0m = l1_backtranspose_exact( rotr(B2_mask,3) );
                 uint32_t Astar_mask = A2_mask ^ rotl(C0m,24) ^ rotl(D0m,16);
 
                 // ---- Subround 1 ----
@@ -97,8 +84,8 @@ int main(int argc, char** argv){
                         // Linear diffusion to round output
                         uint32_t B4in = B3_mask ^ rotl(A3_mask,24);
                         uint32_t A4in = A3_mask ^ rotl(B4in,16);
-                        uint32_t Aout = l2_backtranspose(A4in);
-                        uint32_t Bout = l1_backtranspose(B4in);
+                        uint32_t Aout = l2_backtranspose_exact(A4in);
+                        uint32_t Bout = l1_backtranspose_exact(B4in);
 
                         LinearState nxt{Aout, Bout, cur.w + w1+w2+w3+w4, cur.r+1};
                         int lb = lower_bound(nxt);

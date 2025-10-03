@@ -370,64 +370,153 @@ for r in {6..12}; do
 done
 ```
 
-## Performance Characteristics & Computational Complexity
+## 🖥️ Personal Computer vs 🏢 Computing Cluster: Usage Scenarios
 
-### Algorithm Complexity Analysis
+### ⚠️ **Critical Resource Requirements**
 
-#### Core Algorithm Complexities
-- **Lipmaa-Moriai Enumeration**: Average << 2^n (highly efficient prefix infeasibility pruning)
-- **Wallén Linear Computation**: O(log n) time with incremental popcount optimization
-- **Highway Table Queries**: O(1) time, O(4^rounds) space precomputation
-- **Threshold Search**: O(state_space × branching_factor^rounds), actual depends on pruning efficiency
+**Reality of Personal Computer Limitations**:
+- 💻 **Memory Capacity**: Usually 8-16GB, severely insufficient for research-grade analysis
+- ⏱️ **Computation Time**: Limited single-core performance, multi-round searches may take days
+- 🌡️ **Thermal Constraints**: Extended high-load may cause throttling or overheating
+- 📊 **Parameter Limits**: Can only run very low parameter "validation" tests
 
-#### Practical Performance Estimation
-```
-Search space size ≈ (valid differences) × (rounds) × (branching factor)
-Where:
-- Valid differences ≈ 2^{32} × pruning_rate (typically < 1%)
-- Branching factor ≈ average successors per state (50-500)
-- Pruning efficiency ≈ lower bound pruning hit rate (90%+)
-```
+**Computing Cluster Necessity**:
+- 🎯 **Real Research Analysis** (8+ rounds) requires cluster resource allocation
+- 📈 **Breakthrough Discoveries** (10+ rounds) mandate high-performance computing environments
+- 💾 **Memory Requirements**: 32GB+ RAM needed to handle complex search tasks
+- 🔄 **Parallel Scaling**: Hundreds of cores working simultaneously for reasonable completion times
 
-### Detailed Resource Consumption Table
+### Detailed Usage Scenario Comparison
 
-| Configuration | Rounds | Weight Cap | Memory Usage | CPU Time | Disk I/O | Use Case |
-|---------------|--------|------------|--------------|----------|----------|-----------|
-| **Entry Level** | 4-6 | 15-25 | 100MB-500MB | 30sec-5min | Minimal | Algorithm validation, teaching demos |
-| **Standard** | 6-8 | 25-35 | 500MB-2GB | 5min-2hr | Medium | Paper experiments, method comparison |
-| **Professional** | 8-10 | 35-45 | 2GB-8GB | 2hr-1day | High | Deep analysis, optimal trails |
-| **Research** | 10-12+ | 45+ | 8GB-32GB | 1day-1week | Extreme | Breakthrough research, cluster computing |
+#### 👨‍💻 **Personal Computer Applicable Scenarios**
 
-### Memory Usage Pattern
+| Parameter Config | Rounds | Weight Cap | Memory Required | Time Range | Purpose |
+|------------------|--------|------------|----------------|-------------|---------|
+| **Validation** | 4 | 15-20 | 50-200MB | 10sec-2min | Algorithm validation, tool understanding |
+| **Learning** | 4-5 | 20-25 | 200-500MB | 2-10min | Learning cryptanalysis, parameter understanding |
+| **Testing** | 6 | 25-30 | 500MB-1GB | 10-60min | Tool testing, method verification |
 
-```
-Memory component analysis
-Memoization hash table: O(search states) ≈ 10MB - 1GB
-Priority queue:         O(active nodes) ≈ 1MB - 100MB
-Highway tables:         O(4^max_rounds) ≈ 16MB - 4GB
-Trail path storage:     O(max_rounds × Top-N) ≈ 1MB - 10MB
-Temporary comp cache:   O(single round expansion) ≈ 10MB - 100MB
-```
-
-### Personal Computer Usage Recommendations
-
-#### **4-Round Search - Completely Feasible**
-- ⏱️ **Time**: 10 seconds to 10 minutes (depending on weight cap)
-- 💾 **Memory**: 50MB to 1GB (typically <500MB)
-- 💻 **CPU**: Moderate usage, won't freeze computer
-- 📁 **Storage**: Almost no disk I/O required
-
-#### Recommended Testing Process
+**Personal Computer Practical Limitations**:
 ```bash
-# Step 1: Minimal test (guaranteed to succeed)
-time ./analyze_medcp_optimized 4 15
+# ✅ Feasible: Verify tools work correctly
+./analyze_medcp_optimized 4 15    # ~30 seconds
 
-# Step 2: Standard test  
-time ./analyze_medcp_optimized 4 20 --threads 2
+# 🟡 Barely manageable: Need to close other programs
+./analyze_medcp_optimized 4 25    # ~5-15 minutes, memory pressure
 
-# Step 3: Challenge test (if hardware allows)
-time ./analyze_medcp_optimized 4 25 --threads 4
+# ❌ Not recommended: May cause system freeze or out-of-memory
+./analyze_medcp_optimized 6 30    # May take hours, likely insufficient memory
 ```
+
+#### 🏢 **Computing Cluster Required Scenarios**
+
+| Research Type | Rounds | Weight Cap | Memory Required | Compute Nodes | Resource Application |
+|---------------|--------|------------|----------------|---------------|---------------------|
+| **Paper Experiments** | 6-8 | 25-35 | 4-8GB | 1-2 nodes | Medium compute resources |
+| **Deep Analysis** | 8-10 | 35-45 | 8-16GB | 2-4 nodes | High-performance resources |
+| **Breakthrough Research** | 10-12+ | 45+ | 16-64GB | 4-16 nodes | Supercomputing center resources |
+
+**Cluster Resource Application Guide**:
+```bash
+# Medium research tasks
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1  
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+#SBATCH --time=24:00:00
+
+# Heavy research tasks  
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=2
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=128G
+#SBATCH --time=168:00:00  # 1 week
+```
+
+### 📊 **Realistic Performance Expectation Management**
+
+#### **What Personal Computers Can Do**:
+```
+✅ Algorithm validation: Confirm tools work correctly
+✅ Parameter understanding: Learn effects of different parameters
+✅ Method verification: Verify correctness of analysis methods
+✅ Small-scale experiments: Obtain basic analysis data
+✅ Tool familiarization: Master usage methods and interfaces
+
+❌ Cannot do: Real cryptographic research-grade analysis
+❌ Cannot do: Discover new cryptographic results
+❌ Cannot do: Comparative verification with literature results
+❌ Cannot do: Complete security assessments
+```
+
+#### **What Cluster Computing Can Do**:
+```
+🎯 Real Research:
+- Discover new optimal differential/linear trails
+- Verify or challenge existing security claims
+- Develop new attack methods
+- Publish breakthrough results at top-tier conferences
+
+📈 Large-scale Analysis:
+- Complete parameter space exploration
+- Statistically significant experimental validation
+- Comparative analysis with existing literature
+- Security assessment of new ARX ciphers
+```
+
+### 💰 **Resource Cost Estimation**
+
+#### **Personal Computer Costs**:
+- 💻 **Hardware Cost**: 0 (use existing equipment)
+- ⏱️ **Time Cost**: Low (short-term validation)
+- 🎯 **Research Value**: Limited (learning and validation only)
+
+#### **Cluster Resource Costs**:
+- 💰 **Application Difficulty**: Requires formal research project support
+- 📝 **Resource Application**: Detailed computational requirement documentation
+- ⏱️ **Wait Time**: May require queuing for resources
+- 🎯 **Research Value**: High (genuine breakthrough discoveries)
+
+### 🎓 **Recommendations for Different Research Stages**
+
+#### **Learning Stage (Personal Computer Sufficient)**:
+```bash
+# Understand basic tool functionality
+./analyze_medcp_optimized 4 15 --export test1.csv
+./analyze_melcc_optimized 4 15 --export test2.csv
+
+# Understand parameter effects
+for w in {15..25}; do 
+  time ./analyze_medcp_optimized 4 $w
+done
+
+# Master export and analysis features
+./analyze_medcp_optimized 4 20 \
+  --export-trace trail.csv \
+  --export-hist hist.csv
+```
+
+#### **Research Stage (Cluster Application Required)**:
+```bash
+# Actual research after cluster resource allocation
+sbatch run_analysis.sbatch 8 35    # Discover new trails
+sbatch run_analysis.sbatch 10 40   # Challenge security boundaries  
+sbatch run_comparison.sbatch       # Compare with literature
+```
+
+### 🚨 **Critical Warnings**
+
+**Do NOT attempt on personal computers**:
+- ❌ 8+ round searches (may cause out-of-memory)
+- ❌ Weight cap >30 tasks (may run for days)
+- ❌ Large searches without Highway tables (extremely inefficient)
+- ❌ Running multiple tools simultaneously (resource competition)
+
+**Requirements for cluster application**:
+- 📚 **Clear research objectives**: Explain what cryptographic problems to solve
+- 📊 **Detailed resource requirements**: Reasonable estimates based on small-scale tests
+- ⏱️ **Realistic time expectations**: Large searches may require weeks
+- 💾 **Storage planning**: Result data storage and management schemes
 
 ## Development and Extension
 
