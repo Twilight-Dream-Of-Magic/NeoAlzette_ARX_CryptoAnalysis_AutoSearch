@@ -96,6 +96,7 @@ NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点�
 │   ├── MILP-Based Automatic Search Algorithms for Differential...pdf
 │   └── ... (共11篇核心论文)
 ├── papers_txt/                      # 论文文本提取版本（便于分析）
+├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 11篇论文完全理解指南（25,000+字）
 ├── CMakeLists.txt                   # 构建配置文件
 ├── LICENSE                          # GPL v3.0 开源许可证
 └── .gitignore                       # Git 忽略配置
@@ -116,6 +117,15 @@ NeoAlzette 是基于 Alzette 64位 ARX-box 的改进版本，具有以下特点�
 - **`highway_table_build*.cpp`** - Highway表预计算工具（可选，用于大规模搜索加速）
 - **`gen_round_lb_table.cpp`** - 轮下界表生成器（优化单轮剪枝）
 - **`trail_export.hpp`** - 统一的CSV导出格式（便于后续分析）
+
+#### 📚 核心文档
+- **`PAPERS_COMPLETE_ANALYSIS_CN.md`** - **🔥 11篇论文完全理解指南**
+  - 25,000+字的深度技术分析
+  - 从数学公式到代码实现的完整链条
+  - Alzette三步流水线设计的工程艺术解析
+  - Lipmaa-Moriai、Wallén等核心算法的层层剖析
+  - 常见困惑的澄清和学习路径指导
+  - **每当遇到算法理解困难时的必读文档**
 
 ## 构建说明
 
@@ -522,6 +532,22 @@ auto result = matsui_threshold_search(rounds, start, cap,
 ## 许可证
 
 本项目采用 GNU General Public License v3.0 许可证。详情请参阅 [LICENSE](LICENSE) 文件。
+
+## 📚 学习资源导引
+
+### **文档使用建议**
+- **想快速上手？** → 阅读本README的"使用方法"章节
+- **遇到算法困惑？** → 查阅 `PAPERS_COMPLETE_ANALYSIS_CN.md`
+- **需要深入理解？** → 从MnT操作符开始，逐层理解算法封装
+- **优化遇到瓶颈？** → 参考论文分析文档中的"性能优化"章节
+
+### **学习路径推荐** 
+```
+第1步：熟悉工具 → 运行4轮小测试，理解基本概念
+第2步：理解算法 → 阅读论文分析，掌握数学原理
+第3步：深入应用 → 尝试8轮分析，探索参数优化  
+第4步：进阶研究 → 扩展到其他ARX密码，发表成果
+```
 
 ## 引用
 

@@ -95,7 +95,8 @@ NeoAlzette is an improved version based on the Alzette 64-bit ARX-box, featuring
 │   ├── Linear Approximations of Addition Modulo 2^n...pdf
 │   ├── MILP-Based Automatic Search Algorithms for Differential...pdf
 │   └── ... (11 core papers total)
-├── papers_txt/                      # Text-extracted versions of papers (for analysis)
+├── papers_txt/                      # Text-extracted versions of papers (for analysis)  
+├── PAPERS_COMPLETE_ANALYSIS_CN.md   # 🔥 Complete analysis of 11 papers (25,000+ words, Chinese)
 ├── CMakeLists.txt                   # Build configuration file
 ├── LICENSE                          # GPL v3.0 open source license
 └── .gitignore                       # Git ignore configuration
