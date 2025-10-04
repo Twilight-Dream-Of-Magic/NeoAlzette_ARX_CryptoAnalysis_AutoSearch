@@ -122,83 +122,58 @@ public:
      * @param delta_y 輸出差分 v
      * @return 差分權重（-1表示不可行）
      */
+    /**
+     * @brief BvWeight - Algorithm 1對數算法實現
+     * 
+     * 複雜度：O(log² n)
+     * 論文：Algorithm 1, Lines 1701-1749
+     */
+    /**
+     * @brief 差分（變量+常量）：對數算法 O(log² n)
+     * 
+     * Algorithm 1 (BvWeight)完整實現
+     * 論文：Bit-Vector (2022), Algorithm 1
+     */
     static int compute_diff_weight_addconst(
         std::uint32_t delta_x,
         std::uint32_t constant,
         std::uint32_t delta_y
     ) noexcept {
-        // Theorem 2 精確實現（已驗證正確）
-        // 論文：Bit-Vector (2022), Theorem 2 (Machado 2015)
-        // 測試：Example 1通過（prob=5/16, weight≈1.678）
-        
-        double delta = 0.0;  // δ_{-1} = 0
-        double prob = 1.0;
-        
         const std::uint32_t u = delta_x;
         const std::uint32_t v = delta_y;
         const std::uint32_t a = constant;
         
-        for (int i = 0; i < 32; ++i) {
-            // 提取位
-            int u_i = (u >> i) & 1;
-            int v_i = (v >> i) & 1;
-            int u_prev = (i > 0) ? ((u >> (i-1)) & 1) : 0;
-            int v_prev = (i > 0) ? ((v >> (i-1)) & 1) : 0;
-            int a_prev = (i > 0) ? ((a >> (i-1)) & 1) : 0;  // a[i-1]
-            
-            // S_i = (u[i-1], v[i-1], u[i]⊕v[i])
-            int state = (u_prev << 2) | (v_prev << 1) | (u_i ^ v_i);
-            
-            double phi_i = 1.0;
-            double delta_next = 0.0;
-            
-            // Theorem 2公式
-            switch (state) {
-                case 0b000:  // 000
-                    phi_i = 1.0;
-                    delta_next = (a_prev + delta) / 2.0;
-                    break;
-                    
-                case 0b001:  // 001 - 不可行
-                    return -1;
-                    
-                case 0b010:  // 010
-                case 0b100:  // 100
-                    phi_i = 0.5;
-                    delta_next = a_prev;
-                    break;
-                    
-                case 0b011:  // 011
-                case 0b101:  // 101
-                    phi_i = 0.5;
-                    delta_next = delta;
-                    break;
-                    
-                case 0b110:  // 110
-                    // φ_i = 1 - (a[i-1] + δ_{i-1} - 2·a[i-1]·δ_{i-1})
-                    phi_i = 1.0 - (a_prev + delta - 2.0 * a_prev * delta);
-                    delta_next = a_prev;
-                    if (phi_i < 0.0) return -1;  // 不可行
-                    break;
-                    
-                case 0b111:  // 111
-                    // φ_i = a[i-1] + δ_{i-1} - 2·a[i-1]·δ_{i-1}
-                    phi_i = a_prev + delta - 2.0 * a_prev * delta;
-                    delta_next = 0.5;
-                    if (phi_i <= 0.0) return -1;  // 不可行
-                    break;
-                    
-                default:
-                    return -1;
-            }
-            
-            prob *= phi_i;
-            delta = delta_next;
-        }
+        // Algorithm 1, Line 1704-1709
+        uint32_t s000 = ~(u << 1) & ~(v << 1);
+        uint32_t s000_prime = s000 & ~neoalz::bitvector::LZ(~s000);
         
-        // 計算權重
-        if (prob <= 0.0) return -1;
-        return static_cast<int>(std::ceil(-std::log2(prob)));
+        // Line 1712-1720
+        uint32_t t = ~s000_prime & (s000 << 1);
+        uint32_t t_prime = s000_prime & ~(s000 << 1);
+        
+        // Line 1722-1723
+        uint32_t s = ((a << 1) & t) ^ (a & (s000 << 1));
+        
+        // Line 1726-1730
+        uint32_t q = ~((a << 1) ^ u ^ v);
+        uint32_t d = neoalz::bitvector::RevCarry((s000_prime << 1) & t_prime, q) | q;
+        
+        // Line 1731
+        uint32_t w = (q << (s & d)) | (s & ~d);
+        
+        // Line 1733-1735
+        uint32_t int_part = neoalz::bitvector::HW((u ^ v) << 1) ^ neoalz::bitvector::HW(s000_prime) ^ 
+                           neoalz::bitvector::ParallelLog((w & s000_prime) << 1, s000_prime << 1);
+        
+        // Line 1738-1742
+        uint32_t frac = neoalz::bitvector::ParallelTrunc(w << 1, neoalz::bitvector::RevCarry((w & s000_prime) << 1, s000_prime << 1));
+        
+        // Line 1743
+        uint32_t bvweight = (int_part << 4) | frac;
+        
+        if (bvweight == 0) return 0;
+        double approx_weight = static_cast<double>(bvweight) / 16.0;
+        return static_cast<int>(std::ceil(approx_weight));
     }
     
     /**

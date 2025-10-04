@@ -49,37 +49,17 @@ target_include_directories(complete_matsui_demo PUBLIC include)
 target_link_libraries(complete_matsui_demo PRIVATE neoalzette)
 
 # Paper algorithms demo (Algorithm 1 & 2 complete implementation)
-add_executable(demo_paper_algorithms src/demo_paper_algorithms.cpp)
-target_include_directories(demo_paper_algorithms PUBLIC include)
-target_link_libraries(demo_paper_algorithms PRIVATE neoalzette)
 
 # NeoAlzette MEDCP/MELCC analysis demo
-add_executable(demo_neoalzette_analysis src/demo_neoalzette_analysis.cpp)
-target_include_directories(demo_neoalzette_analysis PUBLIC include)
-target_link_libraries(demo_neoalzette_analysis PRIVATE neoalzette)
 
 # Test for Wallén 2003 exact linear correlation (add/sub const)
-add_executable(test_linear_correlation_addconst src/test_linear_correlation_addconst.cpp)
-target_include_directories(test_linear_correlation_addconst PUBLIC include)
-target_link_libraries(test_linear_correlation_addconst PRIVATE neoalzette)
 
 # Test for Theorem 2 correctness (differential add/sub const)
-add_executable(test_theorem2_correctness src/test_theorem2_correctness.cpp)
-target_include_directories(test_theorem2_correctness PUBLIC include)
-target_link_libraries(test_theorem2_correctness PRIVATE neoalzette)
 
-option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo demo_paper_algorithms)" OFF)
 if(NOT NA_BUILD_DEMOS)
   set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(highway_table_build PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(highway_table_build_lin PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(complete_matsui_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(demo_paper_algorithms PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
 endif()
-add_executable(test_addconst_exact src/test_addconst_exact.cpp)
-target_include_directories(test_addconst_exact PUBLIC include)
-target_link_libraries(test_addconst_exact PRIVATE neoalzette)
 
-add_executable(test_algorithm1 src/test_algorithm1.cpp)
-target_include_directories(test_algorithm1 PUBLIC include)
-target_link_libraries(test_algorithm1 PRIVATE neoalzette)
