@@ -7,6 +7,8 @@
  * 
  * 算法：LM-2001 Algorithm 2
  * 複雜度：O(1) 位運算
+ * 
+ * 注意：論文使用eq函數，不是psi函數！
  */
 
 #pragma once
@@ -19,34 +21,29 @@ namespace neoalz {
 namespace arx_operators {
 
 /**
- * @brief ψ函数：LM-2001的psi-constraint
+ * @brief eq函数：論文中的核心函數
  * 
- * Python实现：
- * not_alpha = (~alpha) & mask
- * term1 = (not_alpha ^ beta) & mask
- * term2 = (not_alpha ^ gamma) & mask
- * return term1 & term2
+ * 定義：eq(α,β,γ) = ~(α ⊕ β ⊕ γ)
  * 
  * @param alpha 输入差分α
  * @param beta 输入差分β
  * @param gamma 输出差分γ
- * @return ψ值
+ * @return eq值
  */
-inline std::uint32_t psi_32(
+inline std::uint32_t eq_func(
     std::uint32_t alpha,
     std::uint32_t beta,
     std::uint32_t gamma
 ) noexcept {
-    std::uint32_t not_alpha = ~alpha;
-    std::uint32_t term1 = not_alpha ^ beta;
-    std::uint32_t term2 = not_alpha ^ gamma;
-    return term1 & term2;
+    return ~(alpha ^ beta ^ gamma);
 }
 
 /**
  * @brief LM-2001 Algorithm 2: 計算xdp⁺的權重（32位）
  * 
- * 直接翻译Python实现，不做任何修改
+ * 論文Algorithm 2 (Lines 321-327):
+ * Step 1: If eq(α<<1,β<<1,γ<<1) ∧ (xor(α,β,γ) ⊕ (β<<1)) = 0 then return 0
+ * Step 2: Return 2^{-wh(¬eq(α,β,γ) ∧ mask(n-1))}
  * 
  * @param alpha 輸入差分α
  * @param beta 輸入差分β  
@@ -58,36 +55,26 @@ inline int xdp_add_lm2001(
     std::uint32_t beta,
     std::uint32_t gamma
 ) noexcept {
-    // Python: mask = (1 << n) - 1
-    // n = 32, mask = 0xFFFFFFFF
-    
-    // Python: alpha_shifted = ((alpha << 1) & mask)
+    // Step 1: Good check
     std::uint32_t alpha_shifted = alpha << 1;
     std::uint32_t beta_shifted = beta << 1;
     std::uint32_t gamma_shifted = gamma << 1;
     
-    // Python: psi_shifted = psi(alpha_shifted, beta_shifted, gamma_shifted, n)
-    std::uint32_t psi_shifted = psi_32(alpha_shifted, beta_shifted, gamma_shifted);
+    std::uint32_t eq_shifted = eq_func(alpha_shifted, beta_shifted, gamma_shifted);
+    std::uint32_t xor_val = alpha ^ beta ^ gamma;
+    std::uint32_t check = eq_shifted & (xor_val ^ beta_shifted);
     
-    // Python: xor_condition = (alpha ^ beta ^ gamma ^ beta_shifted) & mask
-    std::uint32_t xor_condition = alpha ^ beta ^ gamma ^ beta_shifted;
-    
-    // Python: if (psi_shifted & xor_condition) != 0: return float('inf')
-    if ((psi_shifted & xor_condition) != 0) {
-        return -1;  // C++用-1表示不可能
+    // If check == 0, differential is impossible
+    if (check == 0) {
+        return -1;
     }
     
-    // Python: psi_val = psi(alpha, beta, gamma, n)
-    std::uint32_t psi_val = psi_32(alpha, beta, gamma);
+    // Step 2: Compute weight
+    std::uint32_t eq_val = eq_func(alpha, beta, gamma);
+    constexpr std::uint32_t mask_lower = 0x7FFFFFFF;  // n-1 = 31 bits
+    std::uint32_t not_eq_masked = (~eq_val) & mask_lower;
     
-    // Python: mask_lower = (1 << (n - 1)) - 1
-    constexpr std::uint32_t mask_lower = 0x7FFFFFFF;  // 31位
-    
-    // Python: masked_psi = psi_val & mask_lower
-    std::uint32_t masked_psi = psi_val & mask_lower;
-    
-    // Python: return masked_psi.bit_count()
-    return __builtin_popcount(masked_psi);
+    return __builtin_popcount(not_eq_masked);
 }
 
 /**
@@ -116,8 +103,6 @@ inline bool is_xdp_add_possible(
 
 /**
  * @brief LM-2001 Algorithm 2: 支持任意位宽n
- * 
- * 直接翻译Python实现
  */
 inline int xdp_add_lm2001_n(
     std::uint32_t alpha,
@@ -134,24 +119,19 @@ inline int xdp_add_lm2001_n(
     std::uint32_t beta_shifted = (beta << 1) & mask;
     std::uint32_t gamma_shifted = (gamma << 1) & mask;
     
-    // psi_shifted
-    std::uint32_t not_alpha_s = (~alpha_shifted) & mask;
-    std::uint32_t psi_shifted = (not_alpha_s ^ beta_shifted) & (not_alpha_s ^ gamma_shifted) & mask;
+    std::uint32_t eq_shifted = (~(alpha_shifted ^ beta_shifted ^ gamma_shifted)) & mask;
+    std::uint32_t xor_val = (alpha ^ beta ^ gamma) & mask;
+    std::uint32_t check = eq_shifted & (xor_val ^ beta_shifted);
     
-    std::uint32_t xor_condition = (alpha ^ beta ^ gamma ^ beta_shifted) & mask;
-    
-    if ((psi_shifted & xor_condition) != 0) {
+    if (check == 0) {
         return -1;
     }
     
-    // psi_val
-    std::uint32_t not_alpha = (~alpha) & mask;
-    std::uint32_t psi_val = (not_alpha ^ beta) & (not_alpha ^ gamma) & mask;
-    
+    std::uint32_t eq_val = (~(alpha ^ beta ^ gamma)) & mask;
     std::uint32_t mask_lower = (n == 32) ? 0x7FFFFFFFu : ((1u << (n - 1)) - 1);
-    std::uint32_t masked_psi = psi_val & mask_lower;
+    std::uint32_t not_eq_masked = (~eq_val) & mask_lower;
     
-    return __builtin_popcount(masked_psi);
+    return __builtin_popcount(not_eq_masked);
 }
 
 } // namespace arx_operators
