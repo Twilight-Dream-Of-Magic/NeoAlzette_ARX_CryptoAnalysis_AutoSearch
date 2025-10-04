@@ -38,7 +38,7 @@
 // 底層ARX算子
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
-#include "arx_analysis_operators/linear_cor_add.hpp"
+#include "arx_analysis_operators/linear_cor_add_logn.hpp"  // ✅ 使用精確的對數版本
 #include "arx_analysis_operators/linear_cor_addconst.hpp"
 
 // 搜索框架

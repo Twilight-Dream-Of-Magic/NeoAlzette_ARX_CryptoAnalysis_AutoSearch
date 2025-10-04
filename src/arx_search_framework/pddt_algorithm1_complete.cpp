@@ -96,19 +96,11 @@ void PDDTAlgorithm1Complete::pddt_recursive(
                 std::uint32_t beta_k1 = beta_k | (static_cast<std::uint32_t>(y) << k);
                 std::uint32_t gamma_k1 = gamma_k | (static_cast<std::uint32_t>(z) << k);
                 
-                // Early pruning using feasibility check (optimization)
-                if (config.enable_pruning) {
-                    if (check_prefix_impossible(alpha_k1, beta_k1, gamma_k1, k + 1)) {
-                        stats.nodes_pruned++;
-                        continue;
-                    }
-                }
-                
                 // Line 7: p_{k+1} = DP(α_{k+1}, β_{k+1} → γ_{k+1})
                 auto weight_opt = compute_lm_weight(alpha_k1, beta_k1, gamma_k1, k + 1);
                 
                 if (!weight_opt) {
-                    // Differential is impossible
+                    // Differential is impossible (detected by Algorithm 2's "good" check)
                     stats.nodes_pruned++;
                     continue;
                 }
@@ -117,10 +109,12 @@ void PDDTAlgorithm1Complete::pddt_recursive(
                 // Equivalently: if w_{k+1} ≤ w_thresh then
                 if (*weight_opt <= config.weight_threshold) {
                     // Line 9: Recursive call
+                    // Proposition 1 guarantees: if w_{k+1} > threshold, 
+                    // all extensions will also exceed threshold (monotonicity)
                     pddt_recursive(config, k + 1, alpha_k1, beta_k1, gamma_k1, 
                                  output, stats);
                 } else {
-                    // Pruned by threshold (monotonicity ensures all extensions also fail)
+                    // Pruned by threshold (Proposition 1: monotonicity)
                     stats.nodes_pruned++;
                 }
             }
@@ -219,96 +213,56 @@ std::optional<int> PDDTAlgorithm1Complete::compute_lm_weight(
     /**
      * Lipmaa-Moriai weight computation:
      * 
-     * w_k = hw(AOP(α_k, β_k, γ_k))
+     * 🔧 修復：當k=32時，使用完整的Algorithm 2（包含"good"檢查）
      * 
-     * where AOP(α, β, γ) = α ⊕ β ⊕ γ ⊕ ((α∧β) ⊕ ((α⊕β)∧γ)) << 1
-     * 
-     * The weight equals the Hamming weight of AOP for the k-bit prefix.
+     * For k < 32: Use AOP for k-bit prefix
+     * For k = 32: Use full xdp_add_lm2001 (with "good" check)
      */
+    
+    // ✅ 當k=32時，直接調用底層精確算子！
+    if (k == 32) {
+        int weight = arx_operators::xdp_add_lm2001(alpha_k, beta_k, gamma_k);
+        if (weight < 0) return std::nullopt;  // Impossible differential
+        return std::optional<int>(weight);
+    }
     
     // Special case: all zeros
     if (alpha_k == 0 && beta_k == 0) {
         return (gamma_k == 0) ? std::optional<int>(0) : std::nullopt;
     }
     
+    /**
+     * Paper formula (Line 333-335):
+     * 
+     * xdp⁺(α, β → γ) = 2^(-Σ_{i=0}^{n-1} ¬eq(α[i],β[i],γ[i]))
+     * where eq(α[i], β[i], γ[i]) = 1 ⇐⇒ α[i] = β[i] = γ[i]
+     * 
+     * For k-bit prefix:
+     * weight = Σ_{i=0}^{k-1} ¬eq(α[i],β[i],γ[i])
+     * 
+     * Implementation via AOP (equivalent):
+     * AOP(α, β, γ) = α ⊕ β ⊕ γ ⊕ ((α∧β) ⊕ ((α⊕β)∧γ)) << 1
+     * weight = hw(AOP ∧ mask(k))
+     */
+    
     // Compute AOP for k-bit prefix
     std::uint32_t aop = compute_aop(alpha_k, beta_k, gamma_k);
     
-    // Mask to k bits
+    // Mask to k bits (count only first k bits)
     std::uint32_t mask = (1ULL << k) - 1;
     aop &= mask;
     
-    // Weight is Hamming weight of AOP
+    // Weight is Hamming weight of AOP (Proposition 1 guarantees monotonicity)
     int weight = __builtin_popcount(aop);
-    
-    // Additional feasibility check using eq function
-    // eq(α[i], β[i], γ[i]) = 1 iff α[i] = β[i] = γ[i]
-    // This provides necessary condition for valid differential
-    
-    for (int i = 0; i < k; ++i) {
-        int a_bit = (alpha_k >> i) & 1;
-        int b_bit = (beta_k >> i) & 1;
-        int g_bit = (gamma_k >> i) & 1;
-        
-        // Check consistency with carry propagation
-        // (This is a simplified check; full check is more complex)
-        if (i > 0) {
-            int prev_aop_bit = (aop >> (i - 1)) & 1;
-            
-            // If previous AOP bit is 1, carry is possible
-            // Check if current bits are consistent with carry
-            if (prev_aop_bit == 1) {
-                // Carry propagation condition
-                int xor_part = a_bit ^ b_bit ^ g_bit;
-                int and_part = (a_bit & b_bit) ^ ((a_bit ^ b_bit) & g_bit);
-                
-                // Consistency check (simplified)
-                if (xor_part != 0 && and_part != 0) {
-                    // Potential inconsistency
-                    continue;
-                }
-            }
-        }
-    }
     
     return std::optional<int>(weight);
 }
 
-bool PDDTAlgorithm1Complete::check_prefix_impossible(
-    std::uint32_t alpha_k,
-    std::uint32_t beta_k,
-    std::uint32_t gamma_k,
-    int k
-) {
-    /**
-     * Early impossibility detection using necessary conditions
-     * 
-     * Uses properties of Lipmaa-Moriai eq function:
-     * eq(α[i], β[i], γ[i]) = 1 iff α[i] = β[i] = γ[i]
-     * 
-     * If carry chain would require inconsistent bit values, differential is impossible
-     */
-    
-    if (k == 0) return false;
-    
-    // Check last bit added
-    int i = k - 1;
-    int a_bit = (alpha_k >> i) & 1;
-    int b_bit = (beta_k >> i) & 1;
-    int g_bit = (gamma_k >> i) & 1;
-    
-    // Simple impossibility check: if bits don't satisfy basic XOR relation
-    // This is a simplified version; full check would use complete carry logic
-    
-    if (i == 0) {
-        // First bit: α[0] ⊕ β[0] should equal γ[0] (no carry in)
-        if ((a_bit ^ b_bit) != g_bit && (a_bit & b_bit) == 0) {
-            return true; // Impossible
-        }
-    }
-    
-    return false; // Cannot determine impossibility with simple check
-}
+// ⚠️ REMOVED: check_prefix_impossible()
+// This function implemented early pruning optimization NOT mentioned in the paper.
+// Removed to strictly follow Algorithm 1 as published (Lines 349-365).
+// The paper only specifies pruning via Line 8: if pk+1 >= pthres
+// (implemented via compute_lm_weight and threshold check in pddt_recursive)
 
 double PDDTAlgorithm1Complete::compute_xdp_add_exact(
     std::uint32_t alpha,

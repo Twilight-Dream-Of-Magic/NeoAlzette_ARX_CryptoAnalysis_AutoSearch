@@ -87,7 +87,11 @@ public:
     /**
      * @brief 計算模加差分的權重
      * 
-     * 基於Lipmaa-Moriai公式：DP(α,β→γ) = 2^{-HW(AOP(α,β,γ))}
+     * 🔧 修復：直接調用底層精確算子，確保一致性！
+     * 
+     * 基於Lipmaa-Moriai Algorithm 2 (2001)
+     * - Step 1: "good" differential check
+     * - Step 2: Compute 2^{-wh(¬eq(α,β,γ) ∧ mask(n-1))}
      * 
      * @param alpha, beta 輸入差分
      * @param gamma 輸出差分
@@ -98,10 +102,8 @@ public:
         std::uint32_t beta,
         std::uint32_t gamma
     ) noexcept {
-        std::uint32_t aop = compute_aop(alpha, beta, gamma);
-        // 檢查可行性（bit-0必須正確）
-        if ((aop & 1) != 0) return -1;  // 不可行
-        return __builtin_popcount(aop & 0x7FFFFFFF);
+        // ✅ 直接調用修復後的底層算子，包含完整的"good"檢查！
+        return arx_operators::xdp_add_lm2001(alpha, beta, gamma);
     }
     
     // ========================================================================

@@ -17,7 +17,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 # ============================================================================
 # 底層ARX分析算子（Header-only）
 # ============================================================================
-# arx_analysis_operators/ 文件夾下的所有算子都是header-only
+# 所有算子都是header-only，包括Algorithm 4（全inline實現）
 # 無需編譯，直接include即可使用
 
 # ============================================================================
@@ -29,6 +29,8 @@ set(NEOALZETTE_SOURCES
     src/neoalzette/neoalzette_linear.cpp
     src/neoalzette/neoalzette_medcp.cpp
     src/neoalzette/neoalzette_melcc.cpp
+    src/neoalzette/neoalzette_differential_search.cpp
+    src/neoalzette/neoalzette_linear_search.cpp
 )
 
 add_library(neoalzette STATIC ${NEOALZETTE_SOURCES})
@@ -98,10 +100,11 @@ message(STATUS "  include/arx_search_framework/    - 自動化搜索框架")
 message(STATUS "  include/neoalzette/              - NeoAlzette專用")
 message(STATUS "")
 message(STATUS "📚 底層算子：")
-message(STATUS "  • differential_xdp_add.hpp       - LM-2001 (O(1))")
-message(STATUS "  • differential_addconst.hpp      - BvWeight (O(log²n))")
-message(STATUS "  • linear_cor_add.hpp             - Wallén M_n^T (O(n))")
-message(STATUS "  • linear_cor_addconst.hpp        - Wallén DP (O(n))")
+message(STATUS "  • differential_xdp_add.hpp          - LM-2001 Alg 2 (O(1))")
+message(STATUS "  • differential_optimal_gamma.hpp    - LM-2001 Alg 4 (Θ(log n)) 🆕")
+message(STATUS "  • differential_addconst.hpp         - BvWeight (O(log²n))")
+message(STATUS "  • linear_cor_add_logn.hpp           - Wallén Θ(log n)")
+message(STATUS "  • linear_cor_addconst.hpp           - Wallén DP (O(n))")
 message(STATUS "")
 message(STATUS "🔍 搜索框架：")
 message(STATUS "  • pddt/                          - pDDT構建")
