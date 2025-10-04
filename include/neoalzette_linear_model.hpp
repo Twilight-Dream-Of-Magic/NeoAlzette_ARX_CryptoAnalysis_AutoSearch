@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include "neoalzette_core.hpp"
+#include "linear_correlation_addconst.hpp"  // Wallén精確方法
 
 namespace neoalz {
 
@@ -154,11 +155,11 @@ public:
     }
     
     /**
-     * @brief 計算線性逼近的相關性
+     * @brief 計算線性逼近的相關性（變量+變量）
      * 
      * 基於Wallén論文的精確公式
      * 
-     * @param mu, nu 輸入掩碼
+     * @param mu, nu 輸入掩碼（兩個變量）
      * @param omega 輸出掩碼
      * @return 相關性（-1表示不可行）
      */
@@ -178,6 +179,46 @@ public:
         int k = __builtin_popcount(v & z_star);
         
         return std::pow(2.0, -k);
+    }
+    
+    /**
+     * @brief 計算模加常量的線性相關性（變量+常量）
+     * 
+     * 使用Wallén 2003的按位進位DP方法
+     * Y = X + K (mod 2^32)，線性逼近 α·X ⊕ β·Y
+     * 
+     * 精確、O(n)時間
+     * 
+     * @param alpha 輸入掩碼（變量X）
+     * @param beta 輸出掩碼（變量Y）
+     * @param K 固定常量
+     * @return 線性相關性結果
+     */
+    static LinearCorrelation compute_linear_correlation_addconst(
+        std::uint32_t alpha,
+        std::uint32_t beta,
+        std::uint32_t K
+    ) noexcept {
+        return corr_add_x_plus_const32(alpha, beta, K, 32);
+    }
+    
+    /**
+     * @brief 計算模減常量的線性相關性（變量-常量）
+     * 
+     * Y = X - C (mod 2^32) = X + (~C + 1)
+     * 轉換為模加問題
+     * 
+     * @param alpha 輸入掩碼（變量X）
+     * @param beta 輸出掩碼（變量Y）
+     * @param C 被減的常量
+     * @return 線性相關性結果
+     */
+    static LinearCorrelation compute_linear_correlation_subconst(
+        std::uint32_t alpha,
+        std::uint32_t beta,
+        std::uint32_t C
+    ) noexcept {
+        return corr_add_x_minus_const32(alpha, beta, C, 32);
     }
     
     // ========================================================================

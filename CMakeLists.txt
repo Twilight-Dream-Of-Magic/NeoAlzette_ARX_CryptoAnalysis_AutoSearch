@@ -83,6 +83,11 @@ add_executable(demo_neoalzette_analysis src/demo_neoalzette_analysis.cpp)
 target_include_directories(demo_neoalzette_analysis PUBLIC include)
 target_link_libraries(demo_neoalzette_analysis PRIVATE neoalzette)
 
+# Test for Wallén 2003 exact linear correlation (add/sub const)
+add_executable(test_linear_correlation_addconst src/test_linear_correlation_addconst.cpp)
+target_include_directories(test_linear_correlation_addconst PUBLIC include)
+target_link_libraries(test_linear_correlation_addconst PRIVATE neoalzette)
+
 option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo demo_paper_algorithms)" OFF)
 if(NOT NA_BUILD_DEMOS)
   set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
