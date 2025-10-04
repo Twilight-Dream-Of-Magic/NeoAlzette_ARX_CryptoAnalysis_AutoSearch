@@ -35,6 +35,9 @@ public:
         int weight_cap = 30;
         std::uint32_t initial_dA = 1;
         std::uint32_t initial_dB = 0;
+        bool use_optimal_gamma = true;  // 使用Algorithm 4优化
+        std::uint32_t c0 = NeoAlzetteCore::ROUND_CONSTANTS[0];
+        std::uint32_t c1 = NeoAlzetteCore::ROUND_CONSTANTS[1];
     };
     
     struct SearchResult {
