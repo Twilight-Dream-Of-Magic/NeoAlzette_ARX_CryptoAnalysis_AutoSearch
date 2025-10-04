@@ -1,0 +1,15 @@
+build/
+cmake-build*/
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.out
+*.log
+*.bin
+*.csv
+*.lp

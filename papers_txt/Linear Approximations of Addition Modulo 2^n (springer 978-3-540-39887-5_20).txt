@@ -1,0 +1,798 @@
+Linear Approximations of Addition Modulo 2n
+Johan Wallén
+Laboratory for Theoretical Computer Science
+Helsinki University of Technology
+P.O.Box 5400, FIN-02015 HUT, Espoo, Finland
+johan@tcs.hut.fi
+
+Abstract. We present an in-depth algorithmic study of the linear approximations of addition modulo 2n . Our results are based on a fairly
+simple classiﬁcation of the linear approximations of the carry function.
+Using this classiﬁcation, we derive an Θ(log n)-time algorithm for computing the correlation of linear approximation of addition modulo 2n , an
+optimal algorithm for generating all linear approximations with a given
+non-zero correlation coeﬃcient, and determine the distribution of the
+correlation coeﬃcients. In the generation algorithms, one or two of the
+selection vectors can optionally be ﬁxed. The algorithms are practical
+and easy to implement.
+Keywords: Linear approximations, correlation, modular addition, linear
+cryptanalysis.
+
+1
+
+Introduction
+
+Linear cryptanalysis [8] is one of the most powerful general cryptanalytic methods for block ciphers proposed by date. Since its introduction, resistance against
+this attack has been a standard design goal for block ciphers. Although some
+design methodologies to achieve this goal have been proposed—for example [12,
+10, 4, 13]—many block ciphers are still designed in a rather ad hoc manner, or
+dictated by other primary design goals. For these ciphers, it it important to have
+eﬃcient methods for evaluating their resistance against linear cryptanalysis.
+At the heart of linear cryptanalysis lies the study of the correlation of linear
+approximate relations between the input and output of functions. Good linear
+approximations of ciphers are usually found heuristically by forming trails consisting of linear approximations of the components of the cipher. In order to
+search the space of linear trails, e.g. using a Branch-and-bound algorithm (see
+e.g. [5, 9, 1]), we need eﬃcient methods for computing the correlation of linear
+approximations of the simplest components of the cipher, as well as methods for
+generating the relevant approximations of the components. Towards this goal,
+we study a few basic functions often used in block ciphers.
+Currently, block ciphers are usually build from local nonlinear mappings,
+global linear mappings, and arithmetic operations. The mixture of linear mappings and arithmetic operations seems fruitful, since they are suitable for software implementation, and their mixture is diﬃcult to analyse mathematically.
+T. Johansson (Ed.): FSE 2003, LNCS 2887, pp. 261–273, 2003.
+c International Association for Cryptologic Research 2003
+
+
+262
+
+Johan Wallén
+
+While the latter property intuitively should make standard cryptanalysis intractable , it also makes it diﬃcult to say something concrete about the security
+of the cipher.
+Perhaps the simplest arithmetic operations in wide use are addition and subtraction modulo 2n . Interestingly, good tools for studying linear approximations
+of even these simple mappings have not appeared in the literature to date. In this
+paper, we consider algorithms for two important problems for linear approximations of these operations: for computing the correlation of any given linear approximation and for generating all approximations with a correlation coeﬃcient
+of a given absolute value. Our results are based on a fairly simple classiﬁcation
+of the linear approximations of the carry function. Using this classiﬁcation, we
+derive Θ(log n)-time algorithms for computing the correlation of of linear approximations of addition and subtraction modulo 2n in a standard RAM model
+of computation. The classiﬁcation also gives optimal (that is, linear in the size
+of the output) algorithms for generating all linear approximations of addition or
+subtraction with a given non-zero correlation. In the generation algorithms, one
+or two of the selection vectors may optionally be ﬁxed. As a simple corollary, we
+determine closed-form expressions for the distribution of the correlation coeﬃcients. We hope that our result will facilitate advanced linear cryptanalysis of
+ciphers using modular arithmetic.
+Similar results with respect to diﬀerential cryptanalysis [2] are discussed in [7,
+6]. The simpler case with one addend ﬁxed is considered in [11] with respect to
+both linear and diﬀerential cryptanalysis.
+In the next section, we discuss linear approximations and some preliminary
+results. In Sect. 3, we derive our classiﬁcation of linear approximations of the
+carry function, and the corresponding results for addition and subtraction. Using
+this classiﬁcation, we then present the Θ(log n)-time algorithm for computing
+the correlation of linear approximations in Sect. 4, and the generation algorithms
+in Sect. 5.
+
+2
+
+Preliminaries
+
+2.1
+
+Linear Approximations
+
+Linear cryptanalysis [8] views (a part of) the cipher as a relation between the
+plaintext, the ciphertext and the key, and tries to approximate this relation using
+linear relations. The following standard terminology is convenient for discussing
+these linear approximations.
+Let f, g : IFn2 → IF2 be Boolean functions. The correlation between f and g
+is deﬁned by
+
+
+c(f, g) = 21−n {x ∈ IFn2 | f (x) = g(x)} − 1 .
+This is simply the probability taken over x that f (x) = g(x) scaled to a value in
+n
+t
+[−1, 1]. Let u = (um−1 , . . . , u0 )t ∈ IFm
+2 and w = (wn−1 , . . . , w0 ) ∈ IF2 be binary
+n
+m
+column vectors, and let h : IF2 → IF2 . Let w · x = wn−1 xn−1 + · · · + w1 x1 + w0 x0
+denote the standard dot product. Deﬁne the linear function lw : IFn2 → IF2 by
+lw (x) = w · x for all w ∈ IFn2 . A linear approximation of h is an approximate
+
+Linear Approximations of Addition Modulo 2n
+
+263
+
+relation of the form u · h(x) = w · x. Such a linear approximation will be denoted
+h
+
+− w, or simply u ←
+− w when h is clear from context.
+by the formal expression u ←
+h
+Its eﬃciency is measured by its correlation C(u ←
+− w) deﬁned by
+h
+
+− w) = c(lu ◦ h, lw ) .
+C(u ←
+Here, u and w are the output and input selection vectors, respectively.
+2.2
+
+Fourier Analysis
+
+There is a well-known Fourier-based framework for studying linear approximations [3]. Let f : IFn2 → IF2 be a Boolean function. The corresponding realvalued function fˆ: IFn2 → IR is deﬁned by fˆ(x) = (−1)f (x) . With this notation,
+
+c(f, g) = 2−n x∈IFn fˆ(x)ĝ(x). Note also that f + g ↔ fˆĝ. Recall that an al2
+gebra A over a ﬁeld IF is a ring, such that A is a vector space over IF, and
+a(xy) = (ax)y = x(ay) for all a ∈ IF and x, y ∈ A.
+Deﬁnition 1. Let Bn = fˆ | f : IFn2 → IF2  be the real algebra generated by the
+n-variable Boolean functions. As usual, the addition, multiplication, and multiplication by scalars are given by (ξ + η)(x) = ξ(x) + η(x), (ξη)(x) = ξ(x)η(x)
+and (aξ)(x) = a(ξ(x)) for all ξ, η ∈ Bn and a ∈ IR.
+The algebra Bn is of course unital and commutative.
+The vector space Bn is turned into an inner product space by adopting the
+standard inner product for real-valued discrete functions. This inner product is
+deﬁned by
+
+ξ, η = 2−n
+(ξη)(x) , ∀ξ, η ∈ Bn .
+x∈IFn
+2
+
+For Boolean functions, f, g : IFn2 → IF2 , fˆ, ĝ = c(f, g). Since the set of linear
+functions {ˆlw | w ∈ IFn2 } forms an orthonormal basis for Bn , every ξ ∈ Bn has a
+unique representation as
+
+αw ˆlw , where αw = ξ, ˆlw  ∈ IR .
+ξ=
+w∈IFn
+2
+
+The corresponding Fourier transform F : Bn → Bn is given by
+F(ξ) = Ξ , where Ξ is the mapping w → ξ, ˆlw  .
+This is usually called the Walsh-Hadamard transform of ξ. For a Boolean function f : IFn2 → IF2 , the Fourier transform F̂ = F(fˆ) simply gives the correlation
+between f and the linear functions: F̂ (w) = c(f, lw ).
+For ξ, η ∈ Bn , their convolution ξ ⊗ η ∈ Bn is given by
+
+ξ(x + t)η(t) .
+(ξ ⊗ η)(x) =
+t∈IFn
+2
+
+264
+
+Johan Wallén
+
+Clearly, Bn is a commutative, unital real algebra also under convolution as multiplication. The unity is the function δ such that δ(0) = 1 and δ(x) = 0 for
+x = 0. As usual, the Fourier transform is an algebra isomorphism between the
+commutative, unital real algebras Bn , +, · and Bn , +, ⊗.
+Let f : IFn2 → IFm
+2 be a Boolean function. Since the correlation of a linear
+f
+approximation of f is given by C(u ←
+− w) = F(l
+u f )(w), the correlation of linear
+approximations can conveniently
+be
+studied
+using
+the Fourier transform. Since
+
+lu f can be expressed as i:ui =1 fi , where fi denotes the ith component of f , we
+have the convolutional representation
+f
+
+C(u ←
+− w) =
+
+
+
+F̂i ,
+
+i:ui =1
+
+where F̂i = F(fˆi ). Especially when using the convolutional representation, it
+f
+
+will be convenient to consider C(u ←
+− w) as a function of w with u ﬁxed.
+
+3
+
+Linear Approximations of Addition Modulo 2n
+
+3.1
+
+k-Independent Recurrences
+
+We will take a slightly abstract approach to deriving algorithms for studying
+linear approximations of addition modulo 2n , since this approach might turn
+out to be useful also for some related mappings. The key to the algorithms are
+a certain class of k-independent recurrences. The name comes from the fact that
+they will be used to express the correlation of linear approximations of functions
+whose ith output bit is independent of the (i + k)th input bit an higher.
+We let ei ∈ IFn2 denote a vector whose ith component is 1 and the other 0.
+If x ∈ IFn2 , x denotes the component-wise complement of x: xi = xi + 1. Let
+eq : IFn2 × IFn2 → IFn2 be deﬁned by eq(x, y)i = 1 if and only if xi = yi . That is,
+eq(x, y) = x + y. For x, y ∈ IFn2 , we let xy = (xn−1 yn−1 , . . . , x1 y1 , x0 y0 )t denote
+their component-wise product.
+Deﬁnition 2. A function f : IFn2 × IFn2 → IR is k-independent, if f (x, y) = 0
+whenever xj = 0 or yj = 0 for some j ≥ k. Let r0 , r : IFn2 × IFn2 → IR be kindependent functions. A recurrence Ri = Rir0 ,r is k-independent, if it has the
+form
+R0 (x, y) = r0 (x, y) , and
+
+1  i+k
+r(x , y) + r(x, y i+k ) + Ri (x, y) − Ri (xi+k , y i+k
+Ri+1 (x, y) =
+2
+for i > 0, where we for compactness have denoted z i+k = z + ei+k . Note that Rj
+is a k + j-independent function for all j.
+Note that k-independent recurrences can be eﬃciently computed, provided that
+we eﬃciently can compute the base cases r and r0 . The crucial observation is
+
+Linear Approximations of Addition Modulo 2n
+
+265
+
+that at most one of the terms in the expression for Ri+1 is non-zero, and that
+we can determine which of the four terms might be non-zero by looking only
+at xi+k and yi+k . The four terms consider the cases (xi+k , yi+k ) = (1, 0), (0, 1),
+(0, 0), and (1, 1), respectively. This observation yields the following lemma.
+Lemma 1. Let Ri = Rir0 ,r be a k-independent recurrence. Then
+R0 (x, y) = r0 (x, y) , and
+
+1
+r(xei+k , yei+k ) ,
+Ri+1 (x, y) = 21
+xi+k
+Ri (xei+k , yei+k ) ,
+2 (−1)
+
+if xi+k = yi+k and
+if xi+k = yi+k .
+
+It turns out that the k-independent recurrences of interest can be solved by
+ﬁnding a certain type of common preﬁx of the arguments. Towards this end, we
+deﬁne the common preﬁx mask of a vector.
+Deﬁnition 3. The common preﬁx mask cpmki : IFn2 → IFn2 is for all j deﬁned
+by cpmki (x)j = 1 if and only if k ≤ j < k + i and x = 1 for all j <  < k + i.
+
+
+Let wH (x) = {i | xi = 0} denote the Hamming weight of x ∈ IFn2 .
+Lemma 2. Let Ri = Rir0 ,r be a k-independent recurrence. Denote r1 = r, and
+let z = cpmki (eq(x, y)),  = wH (z) and s = (−1)wH (zxy) . Let b = 0, if xz = yz
+and let b = 1 otherwise. Then
+Ri (x, y) = s · 2 rb (xz, yz) .
+Proof. For i = 0, cpmk0 (eq(x, y)) = 0,  = 0, s = 1, and b = 0. Thus, the
+lemma holds for i = 0, so consider i + 1. Let x = xei+k , y  = yei+k , z  =
+  
+cpmki (eq(x , y  )),  = wH (z  ), s = (−1)wH (z x y ) , and b = 0, if x z  = y  z  and
+b = 1 otherwise. By Lemma 1, there are two cases to consider. If xi+k = yi+k ,
+z = ei+k ,  = 1, s = 1, and b = 1. In this case s·2 rb (xz, yz) = 12 r(xei+k , yei+k ) =
+Ri+1 (x, y). If xi+k = yi+k , z = ei+k +z  ,  =  +1, s = s (−1)xi+k , and b = b . In
+
+this case, s·2 rb (xz, yz) = 12 (−1)xi+k ·s 2 rb (x z  , y  z  ) = 12 (−1)xi+k Ri (x , y  ) =
+Ri+1 (x, y).
+
+
+We will next consider the convolution of k-independent recurrences.
+Lemma 3. Let Ri = Riδ,δ be a 0-independent recurrence, and let f : IFn2 → IR be
+k-independent. Deﬁne Si = Ri+k ⊗ f , s = f , and s0 = Rk ⊗ f . Then Si = Sis0 ,s
+is a k-independent recurrence.
+Proof. Clearly, s0 and s are k-independent. Furthermore, S0 = Rk ⊗ f = s0
+by deﬁnition. Finally, 2Si+1 (x, y) = 2R(i+k)+1 (x, y) ⊗ f (x, y) = (δ(xi+k , y) +
+δ(x, y i+k ) + Ri+k (x, y) − Ri+k (xi+k , y i+k )) ⊗ f (x, y) = f (xi+k , y) + f (x, y i+k ) +
+(Ri+k ⊗ f )(x, y) − (Ri+k ⊗ f )(xi+k , y i+k ), where we have used the notation
+z i+k = z + ei+k .
+
+
+
+266
+
+3.2
+
+Johan Wallén
+
+Linear Approximations of the Carry Function
+
+In this subsection, we derive a classiﬁcation of the linear approximations of the
+carry function modulo 2n . It will turn out that the correlation of arbritrary
+linear approximations of the carry function can be expressed as a recurrence of
+the type studied in the previous subsection. We will identify the vectors in IFn2
+and the elements in ZZ 2n using the natural correspondence
+(xn−1 , . . . , x1 , x0 )t ∈ IFn2 ↔ xn−1 2n−1 + · · · + x1 21 + x0 20 ∈ ZZ 2n .
+To avoid confusion, we sometimes use ⊕ and  to denote addition in IFn2 and
+ZZ 2n , respectively.
+Deﬁnition 4. Let carry : IFn2 × IFn2 → IFn2 be the carry function for addition
+modulo 2n deﬁned by carry(x, y) = x ⊕ y ⊕ (x  y), and let ci = carryi denote
+the ith component of the carry function for i = 0, . . . , n − 1.
+Note that the ith component of the carry function can be recursively computed
+as c0 (x, y) = 0, and ci+1 (x, y) = 1 if and only if at least two of xi , yi and ci (x, y)
+are 1. By considering the 8 possible values of xi , yi and ci (x, y), we see that
+ĉ0 (x, y) = 1 and ĉi+1 (x, y) = 12 (−1)xi + (−1)yi + ĉi (x, y) − (−1)xi +yi ĉi (x, y) .
+Thus we have
+Lemma 4. The Fourier transform of the carry function ĉi is given by the recurrence
+Ĉ0 (v, w) = δ(v, w) , and
+
+1
+δ(v + ei , w) + δ(v, w + ei ) + Ĉi (v, w) − Ĉi (v + ei , w + ei ) ,
+Ĉi+1 (v, w) =
+2
+for i = 0, . . . , n − 1.
+Note that this indeed is a 0-independent recurrence.
+In the sequel, we will need a convenient notation for stripping oﬀ ones from
+the high end of vectors.
+Deﬁnition 5. Let x ∈ IFn2 and  ∈ {0, . . . , n}. Deﬁne strip(x) to be the vector
+in IFn2 that results when the highest component that is 1 in x (if any) is set to
+0. By convention, strip(0) = 0. Similarly, let strip(, x) denote the vector that
+results when all but the  lowest ones in x have been set to zero. For example,
+strip(2, 1011101) = 0000101.
+Let u ∈ IFn2 and let {i | ui = 1} = {k1 , . . . , km } with k < k+1 . Deﬁne j0 = 0
+and j+1 = k+1 − k for  = 0, . . . , m − 1. Then
+carry
+
+C(u ←−−− v, w) =
+
+
+
+Ĉi (v, w) =
+
+i:ui =1
+
+m
+
+i=1
+
+Deﬁne a sequence of recurrences S0,i , . . . , Sm,i by
+S0,i = δ , and
+S+1,i = Ĉi+k ⊗ S,j ,
+
+Ĉki (v, w) .
+
+Linear Approximations of Addition Modulo 2n
+
+267
+
+for  = 0, . . . , m − 1. The crucial observation is that
+carry
+
+S,j (v, w) = C(strip(, u) ←−−− v, w)
+carry
+
+for all . Thus, C(u ←−−− v, w) = Sm,jm (v, w).
+Lemma 5. Let S,i , j , and k be as above. Deﬁne s , s by s1 = s1 = δ, and for
+s ,s
+
+ > 0 by s+1 = S,j and s+1 = s . Then S,i = S,i  is a k−1 -independent
+recurrence for all  > 0, where k0 = 0.
+s ,s
+
+Proof. For  = 1, the result is clear. If S,i = S,i  is a k−1 -independent
+recurrence for some  ≥ 1, then S,j is a j +k−1 = k -independent function. By
+f0 ,f
+is a k -independent recurrence with f = S,j = s+1
+Lemma 3, S+1,i = S+1,i
+and f0 = Ĉk ⊗ S,j = Ĉk ⊗ (Ĉj +k−1 ⊗ S−1,j−1 ) = Ĉk ⊗ Ĉk ⊗ S−1,j−1 =
+S−1,j−1 = s+1 .
+
+
+For any function f , we let f 0 denote the identity function and f i+1 = f ◦ f i .
+Lemmas 2 and 5 now give
+Lemma 6. The correlation of any linear approximation of the carry function is
+carry
+given recursively as follows. First, C(0 ←−−− v, w) = δ(v, w). Second, if u = 0,
+let j ∈ {0, . . . , n − 1} be maximal such that uj = 1. If strip(u) = 0, let k be
+maximal such that strip(u)k = 1. Otherwise, let k = 0. Denote i = j − k. Let
+z = cpmki (eq(v, w)),  = wH (z), and s = (−1)wH (zvw) . If vz = wz, set b = 2. Set
+b = 1 otherwise. Then
+carry
+
+carry
+
+C(u ←−−− v, w) = s · 2− C(stripb (u) ←−−− vz, wz) .
+Our next goal is to extract all the common preﬁx masks computed in the
+previous lemma, and combine them into a single common preﬁx mask depending
+on u. This gives a more convenient formulation of the previous lemma.
+Deﬁnition 6. The common preﬁx mask cpm : IFn2 × IFn2 → IFn2 is deﬁned recursively as follows. First, cpm(0, y) = 0. Second, if x = 0, let j be maximal such
+that xj = 1. If strip(x) = 0, let k be maximal such that strip(x)k = 1. Otherwise,
+let k = 0. Denote i = j − k and z = cpmki (y) If zy = z, set b = 2. Set b = 1
+otherwise. Then
+cpm(x, y) = cpmki (y) + cpm(stripb (x), y) .
+Theorem 1. Let u, v, w ∈ IFn2 , and let z = cpm(u, eq(v, w)). Then
+
+0 ,
+if vz = 0 or wz = 0, and
+carry
+C(u ←−−− v, w) =
+wH (vw)
+−wH (z)
+·2
+, otherwise.
+(−1)
+Since the only nonlinear part of addition modulo 2n is the carry function, it
+should be no surprise that the linear properties of addition completely reduce
+to those of the carry function. Subtraction is also straightforward. When we are
+
+− v, w, we are actually approximating
+approximating the relation xy = z by u ←
+
+− u, w. With this observation, it is trivial to prove
+the relation z  y = x by v ←
+
+268
+
+Johan Wallén
+
+Lemma 7. Let u, v, w ∈ IFn2 . The correlations of linear approximations of addition and subtraction modulo 2n are given by
+
+
+carry
+
+
+
+carry
+
+− v, w) = C(u ←−−− v + u, w + u) , and
+C(u ←
+C(u ←
+− v, w) = C(v ←−−− u + v, w + v) .
+Moreover, the mappings (u, v, w) → (u, v + u, w + u) and (u, v, w) → (v, u +
+v, w + v) are permutations in (IFn2 )3 .
+
+4
+
+The Common Preﬁx Mask
+
+4.1
+
+RAM Model
+
+We will use a standard RAM model of computation consisting of n-bit memory
+cells, logical and arithmetic operations, and conditional branches. Speciﬁcally,
+we will use bitwise and (∧), or (∨), exclusive or (⊕) and negation (·), logical
+shifts ( and ), and addition and subtraction modulo 2n ( and ). As a
+notational convenience, we will allow our algorithms to return values of the form
+s2−k , where s ∈ {0, 1, −1}. In our RAM model, this can be handled by returning
+s and k in two registers.
+4.2
+
+Computing cpm
+
+To make the domain of cpm clear, we write cpmn = cpm : IFn2 × IFn2 → IFn2 . We
+will extend the deﬁnition of cpm to a 3-parameter version.
+Deﬁnition 7. Let cpmn : {0, 1} × IFn2 × IFn2 → IFn2 be deﬁned by cpmn (b, x, y) =
+(zn−1 , . . . , z0 )t , where z = cpmn+1 ((b, x)t , (0, y)t ).
+Lemma 8 (Splitting lemma). Let n = k +  with k,  > 0. For any vector
+x ∈ IFn2 , let xL ∈ IFk2 and xR ∈ IF2 be such that x = (xL , xR )t . Then
+cpmn (x, y) = (cpmk (xL , y L ), cpm (b, xR , y R ))t ,
+L
+L L
+where b = xL
+0 if and only if (y0 , cpmk (x , y )0 ) = (1, 1).
+
+Proof. Let w = wH (xL ) and z L = cpmk (xL , y L ). If w = 0, the result is trivial.
+L
+If w = 1 and xL
+0 = 1, b = 1 and the result holds. If w = 1 and x0 = 0, b = 1
+L
+L
+L
+if and only if z0 = 1 and y0 = 1. If w = 2 and x0 = 1, b = 0 if and only if
+z0L = 1 and y0L = 1. Finally, if w = 2 and xL
+0 = 0, or w > 2, the result follows by
+induction.
+
+
+Using this lemma, we can easily come up with an Θ(log n)-time algorithm
+for computing cpmn (x, y). For simplicity, we assume that n is a power of two (if
+not, the arguments can be padded with zeros). The basic idea is to compute both
+cpmn (0, x, y) and cpmn (1, x, y) by splitting the arguments in halves, recursively
+compute the masks for the halves in parallel in a bit-sliced manner, and then
+combine the correct upper halves with the correct lower halves using the splitting
+lemma. Applying this idea bottom-up gives the following algorithm.
+
+Linear Approximations of Addition Modulo 2n
+
+269
+
+Theorem 2. Let n be a power of 2, let α(i) ∈ IFn2 consist of blocks of 2i ones
+and zeros starting from the lest signiﬁcant end (e.g. α(1) = 0011 · · · 0011), and
+let x, y ∈ IFn2 . The following algorithm computes cpm(x, y) using Θ(log n) time
+and constant space in addition to the Θ(log n) space used for the constants α(i) .
+1. Initialise β = 1010 · · · 1010, z0 = 0, and z1 = 1.
+2. For i = 0, . . . , log2 n − 1, do
+(a) Let γb = ((y ∧ zb ∧ x) ∨ (y ∧ zb ∧ x)) ∧ β for b ∈ {0, 1}.
+(b) Set γb ← γb  (γb  2i ) for b ∈ {0, 1}.
+(c) Let tb = (zb ∧ α(i) ) ∨ (z0 ∧ γb ∧ α(i) ) ∨ (z1 ∧ γb ) for b ∈ {0, 1}.
+(d) Set zb ← tb for b ∈ {0, 1}.
+(e) Set β ← (β  2i ) ∧ α(i+1) .
+3. Return z0 .
+Note that α(i) and the values of β used in the algorithm only depend on n. For
+convenience, we introduce the following notation. Let β (i) ∈ IFn2 be such that
+(i)
+β = 1 iﬀ −2i is a non-negative multiple of 2i+1 (e.g. β (1) = 0100 · · · 01000100).
+For b ∈ {0, 1}, let
+i
+
+i
+
+z (i) (b, x, y) = (cpm2i (b, x(n/2 −1) , y (n/2 −1) ), . . . , cpm2i (b, x(0) , y (0) ))t ,
+i
+
+i
+
+where x = (x(n/2 −1) , . . . , x(0) )t and y = (y (n/2 −1) , . . . , y (0) )t . We also let x →
+y, z denote the function “if x then y else z”. That is, x → y, z = (x ∧ y) ∨ (x ∧ z).
+Proof (of Theorem 2). The algorithm clearly terminates in time Θ(log n) and
+uses constant space in addition to the masks α(i) . The initial value of β can also
+be constructed in logarithmic time. We show by induction on i that β = β (i)
+and zb = z (i) (b, x, y) at the start of the ith iteration of the for-loop. For i = 0,
+this clearly holds, so let i ≥ 0. Consider the vectors x, y and zb split into
+2i+1 -bit blocks, and let x , y  , and zb denote one of these blocks. After step 2a,
+γb, = (y ∧ zb, ) → x , x when  − 2i is a multiple of 2i+1 , and γb, = 0
+otherwise. Let ξ denote the bit of γb corresponding to the middle bit of the
+block under consideration. By induction and the splitting lemma, cpm(b, x , y  ) =
+L
+L
+R
+R
+(cpm(b, x , y  ), cpm(ξ, x , y  ))t . After step 2b, a block of the form χ00 · · · 0
+in γb has been transformed to a block of the form 0χχ · · · χ. In step 2c, the upper
+half of each block zb is combined with the corresponding lower half of the block
+zξ to give tb = cpm(b, x , y  ). That is, tb = z (i+1) (b, x, y). Finally, β = β (i+1)
+after step 2e.
+
+
+Since the Hamming weight can be computed in time O(log n), we have the
+following corollary.
+
+
+Corollary 1. Let u, v, w ∈ IFn2 . The correlation coeﬃcients C(u ←
+− v, w) and
+
+
+C(u ←
+− v, w) can be computed in time Θ(log n) (using the algorithm in Theorem 2
+and the expressions in Theorem 1 and Lemma 7).
+
+270
+
+5
+
+Johan Wallén
+
+Generating Approximations
+
+In this section, we derive a recursive description of the linear approximations
+carry
+u ←−−− v, w with a given non-zero correlation coeﬃcient. For simplicity, we
+only consider the absolute values of the correlation coeﬃcients. The recursive
+description immediately gives optimal generation algorithms for the linear apcarry
+proximations. By Theorem 1, the magnitude of C(u ←−−− v, w) is either zero or
+1
+a power of 2 . Thus, we start by considering the set of vectors (u, v, w) ∈ (IFn2 )3
+carry
+such that C(u ←−−− v, w) = ±2−k .
+carry
+We will use the splitting lemma to determine the approximations u ←−−− v, w
+with non-zero correlation and wH (cpmn (u, eq(v, w))) = k. Note that
+cpmn (x, y) = (cpmn−1 (xL , y L ), cpm1 (b, x0 , y0 ))t ,
+L
+L L
+where b = xL
+0 iﬀ (y0 , cpmn−1 (x , y )0 ) = (1, 1). Now, cpm1 (b, x0 , y0 ) = 1 iﬀ
+L
+b = 1 iﬀ either x0 = 1 and (y0L , cpmn−1 (xL , y L )0 ) = (1, 1) or xL
+0 = 0 and
+(y0L , cpmn−1 (xL , y L )0 ) = (1, 1). Let the {0, 1}-valued bn (x, y) = 1 iﬀ x0 = 1
+and (y0 , cpmn (x, y)0 ) = (1, 1) or x0 = 0 and (y0 , cpmn (x, y)0 ) = (1, 1), let
+− v, w) = ±2−k , bn (u, eq(v, w)) = 1}, and
+F (n, k) = {(u, v, w) ∈ (IFn2 )3 | C(u ←
+n 3
+let G(n, k) = {(u, v, w) ∈ (IF2 ) | C(u ←
+− v, w) = ±2−k , bn (u, eq(v, w)) = 0}.
+Let A(n, k) = {(u, v, w) ∈ (IFn2 )3 | C(u ←
+− v, w) = ±2−k }. Then A(n, k) is
+formed from F (n − 1, k − 1) and G(n − 1, k) by appending any three bits to
+the approximations in F (n − 1, k − 1) (since u0 and eq(v, w)0 are arbitrary, and
+cpmn (u, eq(v, w))0 = 1) and by appending {(0, 0, 0), (1, 0, 0)} to the approximations in G(n − 1, k) (since u0 is arbitrary and cpmn (u, eq(v, w))0 = 0). Let S =
+{(0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0)}, T = {(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 1)}, and
+denote y = eq(v, w). We denote concatenation simply by juxtaposition.
+The set F (n, k) can be divided into two cases.
+
+1. The vectors with wH (cpmn−1 (uL , y L )) = k, bn−1 (uL , y L ) = 0, and bn (u, y) =
+1. Since (u0 , y0 ) ∈ {(1, 0), (1, 1)} and cpmn (u, y)0 = 0, this set equals G(n −
+1, k)(1, 0, 0).
+2. The vectors with wH (cpmn−1 (uL , y L )) = k − 1, bn−1 (uL , y L ) = 1 and
+bn (x, y) = 1. Since (u0 , y0 ) ∈ {(0, 1), (1, 0)} and cpmn (u, y)0 = 1, this set
+equals F (n − 1, k − 1)S.
+That is,
+F (n, k) = G(n − 1, k)(1, 0, 0) ∪ F (n − 1, k − 1)S .
+Clearly, F (1, 0) = {(1, 0, 0)} and F (n, k) = ∅ when k < 0 or k ≥ n.
+Similarly, G(n, k) can be divided into two cases:
+1. The vectors with wH (cpmn−1 (uL , y L )) = k, bn−1 (uL , y L ) = 0, and bn (u, y) =
+0. Since (u0 , y0 ) ∈ {(0, 0), (0, 1)} and cpmn (u, y)0 = 0, this set equals G(n −
+1, k)(0, 0, 0).
+2. The vectors with wH (cpmn−1 (uL , y L )) = k − 1, bn−1 (uL , y L ) = 1 and
+bn (u, y) = 0. Since (u0 , y0 ) ∈ {(0, 0), (1, 1)} and cpmn (u, y)0 = 1, this set
+equals F (n − 1, k − 1)T .
+
+Linear Approximations of Addition Modulo 2n
+
+271
+
+That is,
+G(n, k) = G(n − 1, k)(0, 0, 0) ∪ F (n − 1, k − 1)T .
+Clearly, G(1, 0) = {(0, 0, 0)} and G(n, k) = ∅ when k < 0 or k ≥ n.
+Theorem 3. Let A(n, k) = {(u, v, w) ∈ (IFn2 )3 | C(u ←−−− v, w) = ±2−k }.
+Then
+carry
+
+A(n, k) = F (n − 1, k − 1)(IF2 × IF2 × IF2 ) ∪ G(n − 1, k){(0, 0, 0), (1, 0, 0)} ,
+where F and G are as follows. Let S = {(0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0)} and
+T = {(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 1)}. First, F (1, 0) = {(1, 0, 0)}, G(1, 0) =
+{(0, 0, 0)}, and F (n, k) = G(n, k) = ∅ when k < 0 or k ≥ n. Second, when
+0 ≤ k < n,
+F (n, k) = G(n − 1, k)(1, 0, 0) ∪ F (n − 1, k − 1)S , and
+G(n, k) = G(n − 1, k)(0, 0, 0) ∪ F (n − 1, k − 1)T .
+Here, juxtaposition denotes concatenation.
+From this theorem, it can be seen that there are 8(n − 1) linear approximations
+carry
+u ←−−− v, w with correlation ± 12 . In the notation of formal languages, these are
+the 8 approximations of the form
+carry
+
+0n−2 1a ←−−− 0n−2 0b, 0n−2 0c
+for arbritrary a, b, c ∈ {0, 1}, and the 8(n − 2) approximations of the form
+carry
+
+0n−i−3 1d0i g ←−−− 0n−i−3 0e0i 0, 0n−i−3 0f 0i 0
+for (d, e, f ) ∈ {(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 1)}, g ∈ {0, 1} and i ∈ {0, . . . , n −
+3}.
+The recursive description in Theorem 3 can easily be used to generate all
+linear approximations with a given correlation. The straightforward algorithm
+uses O(n) space and is linear-time in the number of generated approximations.
+Clearly, this immediately generalise to the case where one or two of the selection
+vectors are ﬁxed. By Lemma 7, this also generalise to addition and subtraction
+modulo 2n .
+Corollary 2. The set of linear approximations with correlation ±2−k of the
+carry function, addition, or subtraction modulo 2n can be generated in optimal
+time (that is, linear in the size of the output) and O(n) space in the RAM
+model (by straightforward application of the recurrence in Theorem 3 and the
+expressions in Lemma 7). Moreover, one or two of the selection vectors can be
+optionally ﬁxed.
+Theorem 3 can also be used to determine the distribution of the correlation
+coeﬃcients.
+
+272
+
+Johan Wallén
+
+
+
+Corollary 3. Let N (n, k) = {(u, v, w) ∈ (IFn2 )3 | C(u ←
+− v, w) = ±2−k }. Then
+N (n, k) = 22k+1
+
+n−1
+k
+
+for all 0 ≤ k < n and N (n, k) = 0 otherwise. Thus, the number of linear
+approximations with non-zero correlation is 2 · 5n−1 .
+Proof. Based on Theorem 3, it is easy to see that
+
+
+0 ,
+N (n, k) = 2 ,
+
+
+4N (n − 1, k − 1) + N (n − 1, k) ,
+
+if k < 0 or k ≥ n,
+if n = 1 and k = 0, and
+otherwise.
+
+The claim clearly holds for n = 1. By induction, N (n, k) = 4N (n − 1, k −
+1) + N (n − 1, k) = 4 · 22(k−1)+1 n−2
++ 22k+1 n−2
+= 22k+1 n−1
+k
+k . Finally,
+n−1 n−1 k k−1 n−1
+n−1
+.
+
+
+k=0 N (n, k) = 2
+k=0
+k 4 =2·5
+If we let X be a random variable with the distribution
+Pr[X = k] = Pr [− log2 |C(u ←
+− v, w)| = k | C(u ←
+− v, w) = 0] ,
+u,v,w
+
+we see that
+Pr[X = k] =
+
+n−1
+k
+
+4
+5
+k
+
+k
+
+1
+5
+
+n−1−k
+
+n−1−k
+
+4
+1
+for all 0 ≤ k < n, since 2 · 5n−1 n−1
+= 22k+1 n−1
+k
+k . Thus, X is
+5
+5
+4
+4
+binomially distributed with mean 5 (n − 1) and variance 25
+(n − 1).
+
+6
+
+Conclusions
+
+In this paper, we have considered improved algorithms for several combinatorial
+problems related to linear approximations of addition modulo 2n . Our approach
+might seem unnecessarily complicated considering the surprising simplicity of
+the results (especially Theorem 3), but should lead to natural generalisations to
+other recursively deﬁned function. This generalisation and applications to block
+ciphers are, however, left to later papers. A reference implementation of the
+algorithms is available from the author.
+
+Acknowledgements
+This work was supported by the Finnish Defence Forces Research Institute of
+Technology.
+
+Linear Approximations of Addition Modulo 2n
+
+273
+
+References
+1. Kazumaro Aoki, Kunio Kobayashi, and Shiho Moriai. Best diﬀerential characteristic search for FEAL. In Fast Software Encryption 1997, volume 1267 of LNCS,
+pages 41–53. Springer-Verlag, 1997.
+2. Eli Biham and Adi Shamir. Diﬀerential Cryptanalysis of the Data Encryption
+Standard. Springer-Verlag, 1993.
+3. Florent Chabaud and Serge Vaudenay. Links between diﬀerential and linear cryptanalysis. In Advances in Cryptology–Eurocrypt 1994, volume 950 of LNCS, pages
+356–365. Springer-Verlag, 1995.
+4. Joan Daemen. Cipher and Hash Function Design: Methods Based on Linear and
+Diﬀerential Cryptanalysis. PhD thesis, Katholieke Universiteit Leuven, March
+1995.
+5. E.L. Lawler and D.E. Wood. Branch-and-bound methods: a survey. Operations
+Research, 14(4):699–719, 1966.
+6. Helger Lipmaa. On diﬀerential properties of Pseudo-Hadamard transform and
+related mappings. In Progress in Cryptology–Indocrypt 2002, volume 2551 of LNCS,
+pages 48–61. Springer-Verlag, 2002.
+7. Helger Lipmaa and Shiho Moriai. Eﬃcient algorithms for computing diﬀerential
+properties of addition. In Fast Software Encryption 2001, volume 2355 of LNCS,
+pages 336–350. Springer-Verlag, 2002.
+8. Mitsuru Matsui. Linear cryptanalysis method for DES cipher. In Advances in
+Cryptology–Eurocrypt 1993, volume 765 of LNCS, pages 386–397. Springer-Verlag,
+1993.
+9. Mitsuru Matsui. On correlation between the order of S-boxes and the strength
+of DES. In Advances in Cryptology–Eurocrypt 1994, volume 950 of LNCS, pages
+366–375. Springer-Verlag, 1995.
+10. Mitsuru Matsui. New structure of block ciphers with provable security against
+diﬀerential and linear cryptanalysis. In Fast Software Encryption 1996, volume
+1039 of LNCS, pages 205–218. Springer-Verlag, 1996.
+11. Hiroshi Miyano. Addend dependency of diﬀerential/linear probability of addition.
+IEICE Trans. Fundamentals, E81-A(1):106–109, 1998.
+12. Kaisa Nyberg. Linear approximations of block ciphers. In Advances in Cryptology–
+Eurocrypt 1994, volume 950 of LNCS, pages 439–444. Springer-Verlag, 1995.
+13. Serge Vaudenay. Provable security for block ciphers by decorrelation. In STACS
+1998, volume 1373 of LNCS, pages 249–275. Springer-Verlag, 1998.
+
+

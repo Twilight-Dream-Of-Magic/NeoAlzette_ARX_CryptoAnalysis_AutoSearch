@@ -1,0 +1,2053 @@
+MILP-Based Automatic Search Algorithms for
+Differential and Linear Trails for Speck
+Kai Fu1 , Meiqin Wang?1,2 , Yinghua Guo1 , Siwei Sun3,4 , Lei Hu3,4
+1
+
+Key Laboratory of Cryptologic Technology and Information Security,
+Ministry of Education, Shandong University, Jinan 250100, China
+2
+State Key Laboratory of Cryptology, P.O. Box 5159, Beijing 100878, China
+3
+State Key Laboratory of Information Security,
+Institute of Information Engineering, Chinese Academy of Sciences, Beijing 100093,
+China
+4
+Data Assurance and Communication Security Research Center, Chinese Academy
+of Sciences, Beijing 100093, China
+
+Abstract. In recent years, Mixed Integer Linear Programming (MILP)
+has been successfully applied in searching for differential characteristics
+and linear approximations in block ciphers and has produced the
+significant results for some ciphers such as SIMON (a family of
+lightweight and hardware-optimized block ciphers designed by NSA)
+etc. However, in the literature, the MILP-based automatic search
+algorithm for differential characteristics and linear approximations is
+still infeasible for block ciphers such as ARX constructions. In this
+paper, we propose an MILP-based method for automatic search for
+differential characteristics and linear approximations in ARX ciphers.
+By researching the properties of differential characteristic and linear
+approximation of modular addition in ARX ciphers, we present a method
+to describe the differential characteristic and linear approximation with
+linear inequalities under the assumptions of independent inputs to the
+modular addition and independent rounds. We use this representation as
+an input to the publicly available MILP optimizer Gurobi to search for
+differential characteristics and linear approximations for ARX ciphers. As
+an illustration, we apply our method to Speck, a family of lightweight and
+software-optimized block ciphers designed by NSA, which results in the
+improved differential characteristics and linear approximations compared
+with the existing ones. Moreover, we provide the improved differential
+attacks on Speck48, Speck64, Speck96 and Speck128, which are the best
+attacks on them in terms of the number of rounds.
+
+Keywords:
+Automatic Search, Differential Characteristic, Linear
+Approximation, ARX, Speck
+?
+
+Corresponding author.
+
+1
+
+Introduction
+
+Differential attacks [3] and linear attacks [15] are the most fundamental
+cryptanalytic methods. They have been used in the cryptanalysis of numerous
+symmetric ciphers. Since the first and most important thing for the two methods
+is to identify differential characteristics and linear approximations, the automatic
+search algorithms for differential characteristics and linear approximations
+have been a focus of cryptographer’s concern. At EUROCRYPT’94, Matsui
+[16] presented the branch-and-bound search algorithm and found the
+differential characteristics and linear approximations for DES block cipher. The
+branch-and-bound search algorithm is one of the most powerful and classic search
+tools and is still widely used now. Another research line for the application of
+automatic search algorithm is to provide the provable security against differential
+cryptanalysis and linear cryptanalysis, which is usually achieved by automatic
+searching for the minimal number of active S-boxes.
+Mixed-Integer Linear Programming (MILP) has been explicitly applied in
+constructing automatic search algorithm in differential and linear cryptanalysis.
+The problem of MILP is a class of optimization problems derived from Linear
+Programming which aims to optimize an objective function under certain
+constrains. Mouha et al. [18] and Wu et al. [28] translated the problem of
+counting the minimal number of differentially active S-boxes to an MILP problem
+which can be solved automatically with open source or commercially available
+MILP solvers. Their method has been applied in searching for the differential
+and linear characteristics with specific patterns [14,29] and counting the minimal
+number of active S-boxes of bit-oriented block ciphers by introducing bit-level
+representations [21, 27].
+Recently, the MILP-based method has been developed to be a general
+method to automatically search for the real differential characteristics. Sun
+et al. [22] constructed the MILP-based model to search for (related-key)
+differential characteristics by generating linear inequalities from the differential
+distribution table of S-box, where only partial linear inequalities are used in
+MILP model to make it solvable in practical time. Their search algorithm,
+however, is heuristic, since the identified differential characteristics may not
+be consistent. By computing a small number of inequalities which can exactly
+describe the differential distribution table of an S-box with the greedy algorithm,
+Sun et al. [24] transformed the heuristic searching method to the exact and
+practical searching method. Moreover, they constructed the MILP-based model
+for automatically searching for linear approximations and extended these models
+to search for differential and linear hull. Sun et al.’s method [22,24] is applicable
+to block ciphers involving bitwise XOR, S-box operation and the linear layer
+with bit permutation5 . Although the general linear layer can be transformed
+into bit XOR operations, it makes the MILP problem much more difficult to be
+5
+
+Although SIMON has no S-box, the And and XOR operations for SIMON could be
+regarded as one S-box. So they also applied the method to SIMON.
+
+solved in practical time since more XOR operations result in more variables and
+constraints.
+Due to the excellent performance of ARX-based ciphers in software, many
+symmetric-key ciphers are designed based on ARX operations6 . It is worth
+noting that the cryptanalytic techniques for ARX ciphers are very different
+from those for ciphers with S-boxes such as AES and DES. In particular,
+the search algorithms for differential characteristics and linear approximations
+for ARX cipher utilize the different principle compared with those for ciphers
+with S-boxes. In [10, 12, 17], the methods of automatic search for differential
+characteristics in ARX designs are provided, but the methods are only
+compatible with ARX-based Hash functions where the key is known and can
+be freely chosen. By using the partial differential distribution table and Matsui’s
+branch-and-bound algorithm, Biryukov and Velichkov [4] presented the first
+automatic search algorithm for differential characteristics in ARX block ciphers,
+such as (X)TEA and Speck. In a very recent paper [5] appearing in this volume
+of FSE’16, Biryukov et al. proposed the first adaptation of Matsui’s algorithm
+for finding the best differential and linear trails in ARX ciphers.
+Although MILP-based search algorithm has got extremely remarkable
+application for some block ciphers, the current method cannot be applied to
+ARX block ciphers. A straightforward method to apply MILP model for ARX
+constructions is to regard the modular addition in Fn2 as a 2n × n S-box and
+compute a small number of linear inequalities to exactly represent the differential
+or linear pattern of the modular addition. However, in this way the number of
+linear inequalities is too large to be solved in practical time for real ARX ciphers
+where n is typically at least 16. This motivates us to study MILP-based search
+method for ARX block ciphers.
+1.1
+
+Our Contributions.
+
+In this paper, we revisit the differential property and linear property for
+modular addition and provide a new framework of constructing the MILP model.
+Concretely, we transform the differential property of modular addition shown
+in [13] into linear inequalities to describe all possible differential patterns and
+the corresponding differential probabilities. Moreover, we use linear inequalities
+to capture all possible linear patterns and the corresponding correlations based
+on the automaton algorithm for correlation of modular addition in [19, 25]. The
+number of the resulting linear inequalities is significantly less than that of linear
+inequalities produced by regarding modular addition as one S-box. With the
+linear inequalities, we can construct the MILP model to automatically search for
+differential characteristics and linear approximations using the the commercial
+optimizer Gurobi, where the object function is the probability of differential
+characteristic or the correlation of linear approximation.
+During constructing MILP models, we assume that the two inputs to modular
+addition and the consecutive rounds are independent. However, as demonstrated
+6
+
+ARX operation: modular addition, bit rotation and XOR.
+
+in [26], for some ARX constructions, the inputs to modular addition and the
+consecutive rounds are not independent, which will result that the practical
+probability (resp. correlation) of our identified differential (resp. linear) tails for
+some fixed key may vary significantly from that derived from our model. This
+deviation will have effect on the success rate of the attacks from practitioner’s
+perspective.
+As an illustration, we apply our method to the block cipher Speck, which
+is a family of lightweight block ciphers publicly released by the National
+Security Agency (NSA) and has been optimized for performance in software
+implementations [2]. A variety of block sizes and key sizes for different
+implementations are provided for it. Since its publication, Speck has received
+much attention and many cryptanalytic results have been given. Abed et al.
+presented differential and rectangle attacks for almost all variants of Speck [1].
+At FSE’14 [6], Biryukov et al. searched for the differential characteristics, which
+cover 9, 11 and 14 rounds for Speck32, Speck48 and Speck64, respectively, and
+are better than the differential characteristics in [1]. In [9], Dinur proposed the
+sub-cipher attack and improved the key recovery attacks on all variants of Speck
+using the differential characteristics in [6]. In [5], Biryukov et al. presented the
+probabilities of the best differential trails for up to 10, 9, 8, 7, and 6 rounds
+of Speck32, Speck48, Speck64, Speck96 and Speck128 respectively and evaluate
+the security bounds of Speck against single-trail differential cryptanalysis under
+the Markov assumption. As regards to linear cryptanalysis, Yao et al. identified
+9, 9, 12, 6 and 6 rounds linear approximations for Speck32, Speck48, Speck64,
+Speck96 and Speck128, respectively [30], and gave the key recovery attacks.
+We use our models to search for the differential and linear trails for Speck.
+In order for the MILP tool to run in reasonable time for larger block sizes (>
+48 bits), we split the block cipher into two or three parts – upper (middle) and
+lower. We then search for trails independently in each part, by ensuring that
+the output difference (mask) for one part is the same as the input difference
+(mask) for its following part. For Speck48, Speck64, Speck96 and Speck128, we
+find better differential characteristics and linear approximations than those of
+previous works under the assumptions of independent inputs to the modular
+addition and independent rounds. With the new differential characteristics, we
+improve the differential attacks on the four variants of Speck. Comparing with
+the previous best attacks for them [9], we can attack one, one, three and five
+more rounds for Speck48, Speck64, Speck96 and Speck128 with any key size,
+respectively. We summarize known attacks on Speck in Table 1. We compare
+our identified differential characteristics and linear approximations with those of
+previous works in Table 2.
+Outline. The remainder of this paper is organized as follows. Section 2 gives
+a brief description of the existing MILP-based search methods for block cipher.
+Section 3 and Section 4 introduce MILP-based algorithm for automatic searching
+for differential characteristics and linear approximations for ARX ciphers. We
+apply the new search tools in Speck and give the improved differential attacks
+
+Table 1: Summary of Attacks on Speck
+Variant Rounds Attacked/ Time
+2n/mn
+Total Rounds
+
+Data Memory
+
+Method
+
+Ref.
+
+48/72
+
+11/22
+12/22
+12/22
+14/22
+15/22
+
+267.93 243.727
+258.8 243.2
+245.3
+245
+265
+241
+270
+246
+
+245.8
+224
+222
+222
+
+Linear
+[30]
+Rectangle
+[1]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+48/96
+
+12/23
+12/23
+12/23
+15/23
+16/23
+
+291.93 243.727
+258.8 243.2
+245.3
+245
+289
+241
+294
+246
+
+245.8
+224
+222
+222
+
+Linear
+[30]
+Rectangle
+[1]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+64/96
+
+14/26
+14/26
+15/26
+18/26
+19/26
+
+294.9
+289.4
+261.1
+293
+295
+
+262.7
+263.6
+261
+261
+263
+
+265.6
+232
+222
+222
+
+Linear
+[30]
+Rectangle
+[1]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+64/128
+
+15/27
+14/27
+15/27
+19/27
+20/27
+
+2126.9
+289.4
+261.1
+2125
+2127
+
+262.7
+263.6
+261
+261
+263
+
+265.6
+232
+222
+222
+
+Linear
+[30]
+Rectangle
+[1]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+96/96
+
+8/28
+15/28
+16/28
+19/28
+
+274.7
+289.1
+285
+288
+
+227.6
+289
+285
+288
+
+248
+222
+222
+
+Linear
+[30]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+96/144
+
+9/29
+16/29
+15/29
+17/29
+20/29
+
+2122.7
+2135.9
+289.1
+2133
+2136
+
+227.6
+290.9
+289
+285
+288
+
+294.5
+248
+222
+222
+
+Linear
+[30]
+Rectangle
+[1]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+128/128
+
+8/32
+16/32
+17/32
+22/32
+
+292.7
+2111.1
+2113
+2120
+
+228.3
+2116
+2113
+2120
+
+264
+222
+222
+
+Linear
+[30]
+Differential
+[1]
+Differential
+[9]
+Differential This Paper
+
+128/192
+
+9/33
+16/33
+18/33
+18/33
+23/33
+
+2156.7 228.3
+2111.1 2116
+2182.7 2125.9
+2177
+2113
+2184 2120
+
+264
+
+Linear
+[30]
+Differential
+[1]
+Rectangle
+[1]
+Differential
+[9]
+Differential This Paper
+
+7/34
+16/34
+18/34
+19/34
+24/34
+
+2220.7 228.3
+2111.1 2116
+2182.7 2125.9
+2241
+2113
+2248 2120
+
+128/256
+
+2
+
+121.9
+
+222
+222
+264
+2
+
+121.9
+
+222
+222
+
+Linear
+[30]
+Differential
+[1]
+Rectangle
+[1]
+Differential
+[9]
+Differential This Paper
+
+Table 2: Summary of Differential Characteristics and Linear Approximations for Speck
+Differential Characteristic
+Linear Approximation
+Cipher # Rounds log2 p
+Ref.
+# Rounds log2 c
+Ref.
+Speck32
+9
+-31
+[1]
+9
+-14
+[30]
+9
+-30
+[6]
+9
+-14 This paper
+9
+-30 This paper
+Speck48
+
+10
+11
+11
+
+-41
+[1]
+-47
+[6]
+-45 This paper
+
+9
+10
+
+-20
+[30]
+-22 This paper
+
+Speck64
+
+13
+13
+14
+14
+15
+
+-59
+[1]
+-51 This paper
+-60
+[6]
+-56 This paper
+-62 This paper
+
+11
+12
+13
+
+-25
+[30]
+-31
+[30]
+-30 This paper
+
+Speck96
+
+13
+13
+16
+
+-84
+[1]
+-67 This paper
+-87 This paper
+
+6
+15
+
+-11
+[30]
+-45 This paper
+
+Speck128
+
+14
+14
+19
+
+-112
+[1]
+-90 This paper
+-119 This paper
+
+6
+16
+
+-11
+[30]
+-58 This paper
+
+on all variants of Speck except Speck32 in Section 5. Finally, we conclude the
+paper in Section 6.
+
+2
+
+Sun et al.’s MILP-Based Automatic Search for
+(Related-Key) Differential and Linear Trails (Hull)
+
+In this section, we briefly recall Sun et al.’s algorithm. For more details of their
+algorithm, we refer to [22, 24].
+Objective Function of Differential Model. Let xi denote the difference
+variable for the bit i. That is, xi = 0 if there is no difference at bit i; Otherwise,
+xi = 1. Another bit variable Aj is used to denote the activity of an S-box, i.e.,
+Aj = 0 if the S-box is non-active; Otherwise,
+Aj = 1. The objective function
+P
+is to minimize the sum of all variables j Aj , which indicates the activities of
+the S-boxes appearing in the schematic description of the encryption and key
+schedule algorithm.
+Constraints of Differential Model. For every XOR operation with bit-level
+input differences a, b and bit-level output difference c, the constraints include
+
+
+d⊕ ≥ a, d⊕ ≥ b, d⊕ ≥ c
+a + b + c ≥ 2d⊕
+(1)
+
+
+a+b+c≤2
+where d⊕ is a dummy bit variable.
+
+Next, we describe the constraints of the differential properties of an S-box in
+a more accurate way. For an ω × ν S-box denoted by At , the input and output
+differences are (x0 , . . . , xω−1 ) and (y0 , . . . , yν−1 ), respectively. Then
+
+
+At − xk ≥ 0, k ∈ {0, . . . , ω − 1}
+ω−1
+P
+(2)
+
+xj ≥ 0
+−At +
+j=0
+
+which ensures that nonzero input difference must activate the S-box.
+Let (x0 , . . . , xω−1 , y0 , . . . , yν−1 ) ∈ {0, 1}ω+ν ⊆ Rω+ν denote an (ω +
+ν)-dimensional vector, where R is the real number field. By computing the
+H-Representation of the convex hull of all possible input-output differential
+patterns of an S-box, many linear inequalities which can be used to remove some
+impossible differential patterns of the S-box are obtained. The greedy algorithm
+in [24] is applied to select a subset of the H-Representation of the convex hull
+with less inequalities. As a result, they generate only a small number of linear
+inequalities, which can be used to exactly describe the differential pattern of
+S-box and construct the MILP problem. Using any MILP optimizer such as
+Gurobi [11], good differential characteristics can be found. If we set the value
+of the object function as N , finish the solving process and output the current
+solution till the value of object function is reduced to N . The corresponding
+solution is the identified differential characteristic with N active S-boxes.
+Note that this exact searching method is also applicable to searching for the
+linear approximations.
+Objective Function of Linear Model. Some notations for differential model
+are also used in linear model, e.g.,PAj denotes the activity of an S-box and the
+objective function is to minimize j Aj .
+Constraints of Linear Model. For every XOR operation with input masks
+a, b and output mask c, the constraints should be
+a = b = c.
+For every three-forked branch with input mask a and output masks b and c, the
+constraints should be
+
+
+di ≥ a, di ≥ b, di ≥ c
+a + b + c ≥ 2di
+(3)
+
+
+a+b+c≤2
+where di is a dummy bit variable.
+For an ω × ν S-box denoted by At , the input and output masks are
+(x0 , . . . , xω−1 ) and (y0 , . . . , yν−1 ), respectively. If the output mask is nonzero,
+At = 1; Otherwise, At = 0. Then, we have
+
+
+At − yk ≥ 0, k ∈ {0, . . . , ν − 1}
+ν−1
+P
+
+yj ≥ 0
+−At +
+j=0
+
+which ensures that nonzero output mask must activate the S-box.
+For an (ω + ν)-dimensional vector (x0 , . . . , xω−1 , y0 , . . . , yν−1 ) ∈ {0, 1}ω+ν ⊆
+ω+ν
+R
+, compute a small number of linear inequalities to exactly represent the
+linear pattern of S-box. The other processes are similar to those in the model of
+searching for differential characteristics.
+In addition, the technique has been extended to find differential or linear
+hull [24]. By adding the constraints imposed by the given properties (such as
+fixed difference or linear mask), they updated the MILP model and obtained all
+trails which consist of the given differential or linear hull.
+
+3
+
+MILP-Based Algorithm for Automatic Search for
+Differential Characteristics in ARX Ciphers
+
+In this section, we analyze the differential characteristics of modular addition
+and identify important properties, which are crucial to the construction of
+our MILP-based models for ARX ciphers. Using our method, we can give the
+linear inequalities which can exactly describe all differential patterns for modular
+addition.
+3.1
+
+XOR-Differential Characteristics of Modular Addition
+
+Definition 1. Let α, β and γ be fixed n-bit XOR differences. The XOR-differential
+probability (DP) of addition modulo 2n (xdp+ ) is the probability with which α
+and β propagate to γ through the ADD operation, computed over all pairs of n-bit
+inputs (x,y):
+xdp+ (α, β → γ) = 2−2n · #{(x, y) : ((x ⊕ α) + (y ⊕ β)) ⊕ (x + y) = γ}.
+In [13], Lipmaa et al. showed Algorithm 2 to compute xdp+ (α, β → γ) which
+consists of two steps: the first step is to verify if the differential characteristic
+is possible and the second step is to compute the differential probability xdp+ .
+More precisely, the above two steps are shown in Theorem 1 and Theorem 2,
+respectively.
+Theorem 1 (see [13]). The differential (α, β → γ) is possible iff (α[0] ⊕ β[0] ⊕
+γ[0]) = 0 and α[i − 1] = β[i − 1] = γ[i − 1] = α[i] ⊕ β[i] ⊕ γ[i] for α[i − 1] =
+β[i − 1] = γ[i − 1], i ∈ [1, n − 1].
+Theorem 2 (see [13]). Assume that (α, β → γ) is a P
+possible differential
+n−2
+characteristic, then the differential probability xdp+ = 2− i=0 ¬eq(α[i],β[i],γ[i]) ,
+where
+(
+1 α[i] = β[i] = γ[i]
+eq(α[i], β[i], γ[i]) =
+.
+0 others
+
+Theorem 1 can be used to decide if the differential characteristic (α, β →
+γ) for modular addition is possible. For instance, the differential (α, β →
+γ) = (11100, 11100 → 11110) is impossible as α[0] = β[0] = γ[0] 6=
+α[1] ⊕ β[1] ⊕ γ[1]. Using Theorem 2, the probability of the differential
+characteristic can be computed efficiently. For example, for the differential
+(α, β → γ) = (11100, 00110 → 10110), the probability xdp+ (α, β →
+γ)=2−(¬eq(0,0,0)+¬eq(0,1,1)+¬eq(1,1,1)+¬eq(1,0,0)) = 2−2 .
+From Theorem 2, if the n-bit differential characteristic is possible, the
+probability is only related with (α[i], β[i], γ[i]) for i ∈ [0, n−2]. Taking advantage
+of this property, we can construct the MILP model to compute the differential
+probability xdp+ . More details are shown in the following.
+3.2
+
+MILP Model for Differential Characteristics of Modular
+Addition
+
+In order to append the first condition α[0] ⊕ β[0] ⊕ γ[0] = 0 in Theorem 1 to the
+set of the linear inequalities, we derive five linear inequalities satisfying the first
+condition. The five linear inequalities are listed as follows,
+
+
+d⊕ ≥ α[0], d⊕ ≥ β[0], d⊕ ≥ γ[0]
+α[0] + β[0] + γ[0] − 2d⊕ ≥ 0
+(4)
+
+
+α[0] + β[0] + γ[0] ≤ 2
+where d⊕ is a dummy bit variable.
+Let the vector (α[i], β[i], γ[i], α[i + 1], β[i + 1], γ[i + 1]) denote the relation
+of the differential values for the i-th and the (i + 1)-th bits. We have that there
+are totally 56 possible patterns for the vector in accordance with Theorem 1.
+For example, the differential pattern (0, 0, 0, 1, 1, 1) is impossible as αi = βi
+= γi 6= αi+1 ⊕ βi+1 ⊕ γi+1 . Moreover, in order to compute the differential
+probability efficiently, we append ¬eq(α[i], β[i], γ[i]) to the vector. As described
+in [23], using the inequality generator() function in the sage. geometry.
+polyhedron class of the SAGE Computer Algebra System [20], we get 65
+linear inequalities satisfying all 56 possible patterns. Based on the greedy
+algorithm in [24], the number of linear inequalities can be reduced from 65 to 13.
+Furthermore, the 13 linear inequalities can be used to compute the probability
+of (α[i]kβ[i]kγ[i] → α[i + 1]kβ[i + 1]kγ[i + 1]) as the variable ¬eq(α[i], β[i], γ[i])
+is involved.
+Actually, the 13 linear inequalities only represent the second condition α[i]
+= β[i] = γ[i] = α[i + 1] ⊕ β[i + 1] ⊕ γ[i + 1], i ∈ [0, n − 2] in Theorem 1. In
+total, there are (13 × (n − 1) + 5) linear inequalities to represent the differential
+property of addition modulo 2n with two inputs of P
+n-bit length. As described in
+n−2
+Theorem 2, the differential probability xdp+ = 2− i=0 ¬eq(α[i],β[i],γ[i]) .
+3.3
+
+MILP Model for Differential Characteristics of ARX Ciphers
+
+Besides modular addition, the XOR operations, three-forked branch and the
+circular shift operations are also involved in ARX ciphers. For each XOR
+
+operation, we can also use Inequalities (4). For each three-forked branch
+operation with input differences a, b and output difference c, the constraints
+should be
+a = b = c.
+For the case of circular shift, we can also list some equations for the related bits.
+So far, we have finished the construction of all linear inequalities or equations
+for each operations in ARX ciphers which compose the constraints of MILP
+model for differential characteristics of ARX ciphers. P
+n−2
+As the differential probability xdp+ = 2− i=0 ¬eq(α[i],β[i],γ[i]) can
+be computed using the method described in Section 3.2, we set the
+objective
+P
+Pn−2 function for the r-round differential characteristic as the
+r
+j=1
+i=0 ¬eq(αj [i], βj [i], γj [i]) where αj , βj and γj are the input differences
+and output difference of modular
+for the j-th round. We aim to
+Pr Paddition
+n−2
+find the minimal value of
+¬eq(α
+j [i], βj [i], γj [i]) which represents
+j=1
+i=0
+the differential probability of the best identified differential characteristic. We
+can use the Gurobi optimizer to solve the system of inequalities to search
+for differential characteristics for ARX ciphers. However, just being able to
+obtain one differential characteristic may be not enough. We can apply Sun’s
+method [24] to our new MILP model and find the differential of ARX ciphers.
+Note that in the above model, we assume that the two inputs to modular
+addition and the consecutive rounds are independent. However, for some ARX
+constructions, they are not independent, which will result that the practical
+probability of our identified differential characteristics for some fixed key may
+vary significantly from that derived from our model.
+
+4
+
+MILP Models for Automatic Search for Linear
+Approximations in ARX Ciphers
+
+In this section, we revisit the property of linear approximations for modular
+addition operation and develop a new MILP-based tool to search for the linear
+approximations for ARX ciphers.
+4.1
+
+Linear Approximations for Modular Addition
+
+Let n be a non-negative integer. Given two vectors x = (an−1 , . . . , a0 ) and y =
+(bn−1 , . . . , b0 )∈ Fn2 , let x·y denote the standard inner product x·y = an−1 bn−1 ⊕
+· · · ⊕ a0 b0 .
+Definition 2. Let Λα , Λβ and Γ be fixed n-bit linear masks. The correlation of
+addition modulo 2n (cor ) with input masks Λα , Λβ and output mask Γ can be
+computed over all pairs of n-bit inputs (x, y):
+cor (Γ, Λα , Λβ ) = cor(Γ · (x + y) ⊕ Λα · x ⊕ Λβ · y)
+= 2−2n (#{x, y ∈ Fn2 : Γ · (x + y) ⊕ Λα · x ⊕ Λβ · y = 0}
+− #{x, y ∈ Fn2 : Γ · (x + y) ⊕ Λα · x ⊕ Λβ · y = 1}).
+
+Based on a fairly simple classification of the linear approximations of the
+carry function, Nyberg and Wallén derive an efficient algorithm for computing
+the correlation of linear approximation of addition modulo 2n with k inputs
+in [19,25]. Since we only consider modular addition with two inputs, we describe
+this method only for two inputs in [19, 25] as follows.
+Theorem 3 (see [19,25]). For the linear approximation of addition modulo 2n
+of two inputs with input masks Λα , Λβ and output mask Γ , Λα , Λβ , Γ ∈ Fn2 and
+Λα = (Λα [n−1], . . . , Λα [0]), Λβ = (Λβ [n−1], . . . , Λβ [0]), Γ = (Γ [n−1], . . . , Γ [0]),
+we define the vector u = (u[n−1], . . . , u[0]) where u[i] = 4Γ [i]+2Λα [i]+Λβ [i], 0 ≤
+u[i] < 8, 0 ≤ i < n. The correlation can be computed with the following linear
+representation,
+cor (Γ, Λα , Λβ ) = LAu[n−1] Au[n−2] · · · Au[1] Au[0] C,
+
+(5)
+
+where Ar , r = 0, . . . , 7, is 2 × 2 matrice,
+ 
+ 
+1 00
+1 20
+, A1 = A2 = −A4 =
+,
+A0 =
+2 01
+2 10
+ 
+ 
+1 02
+1 00
+A7 =
+, −A3 = A5 = A6 =
+,
+2 10
+2 01
+L is a row vector L = (1 0),and C is a column vector C = (1 1)T .
+For example, for the linear approximation with binary vector masks (Γ =
+10100, Λα = 11110, Λβ = 11000), u = 736208 and cor =LA7 A3 A6 A2 A0 C =
+−2−3 .
+In order to provide a fast implementation for Theorem 3, Nyberg and
+Wallén utilized the automaton to calculate LAu[n−1] Au[n−2] · · · Au[1] Au[0] C by
+multiplying from left to right. Let e0 = L = (1 0) and e1 = (0 1), then we
+can show the state transitions in Fig. 1. When reading u from left to right, if
+the automaton ends up in state 0, then LAu[n−1] Au[n−2] · · · Au[1] Au[0] C = 0. If
+the automaton ends up in state e0 or e1 , then LAu[n−1] Au[n−2] · · · Au[1] Au[0] C =
+±2−t , where t is the number of transitions marked by a solid arrow, and the sign
+is determined by the number of occurrences of {3, 4}:
+LAu[n−1] Au[n−2] · · · Au[1] Au[0] C > 0
+if and only if the number of occurrences is even. For example, as u = 736208 ,
+LA7 A3 A6 A2 A0 C = −2−3 .
+Based on the Picture 1, we will give Proposition 1 to calculate the absolute
+value of the correlation cor (Γ, Λα , Λβ ).
+Proposition 1. For the linear approximation of addition modulo 2n of two
+inputs with input masks Λα , Λβ and output mask Γ , the state transitions of
+the automaton are shown in Fig. 2, where u[i] = 4Γ [i] + 2Λα [i] + Λβ [i], 0 ≤
+u[i] < 8, 0 ≤ i < n and j ∈ {e0 , e1 }, 0 ≤ j < n. If the correlation for the linear
+approximation is non-zero, the absolute value of the correlation can be computed
+as follows,
+|cor (Γ, Λα , Λβ )x| = 2−#{0<i<n|i =e1 } .
+(6)
+
+start
+
+e0
+
+1,2,4,7
+0
+7
+
+1,2,3,4,5,6
+
+0
+
+0,
+
+e1
+0,3,5,6
+
+,7
+
+Fig. 1: State Transitions for u = 736208
+
+ n  e0
+
+u  n  1
+
+ n1 u n  2  n2
+
+1
+
+u  0
+
+0
+
+Fig. 2: State Transitions for Addition Modulo 2n
+
+Based on Proposition 1, we construct the MILP model to compute the absolute
+value of correlation of modular addition with two inputs in the following.
+4.2
+
+MILP Model for Linear Approximations of Modular Addition
+
+In this part, we will introduce a method to describe linear property of modular
+addition in Theorem 3 and Proposition 1 as linear inequalities.
+For the state transition from i+1 to i under u[i], 0 ≤ i < n, the bit
+variable si is defined as follows, si = 0 if i = e0 , and si = 1 if i = e1 .
+We utilize the vector (si+1 , Γ [i], Λα [i], Λβ [i], si ) to denote the state transition,
+so esi+1 Au[i] = esi . For the vector (si+1 , Γ [i], Λα [i], Λβ [i], si ), there are only 10
+possible transitions for the vector. As described in Section 3.2, we also use the
+inequality generator() function in the sage. geometry. polyhedron class of
+SAGE and the greedy algorithm in [24] to get eight linear inequalities satisfying
+all 10 possible transitions. Note that there is an additional constraint n = e0
+according to Fig. 2. Hence, for linear approximation of addition modulo 2n with
+two inputs, the constraints containP8 × n + 1 linear inequalities and the absolute
+n−1
+value of correlation is |cor | = 2− i=1 si .
+4.3
+
+MILP Model for Linear Approximations for ARX Ciphers
+
+For each XOR, three-forked branch and circular shift operations, we can also
+use the method in Section 2 to produce the linear inequalities or equations. All
+linear inequalities or equations for each operations in ARX ciphers compose
+the constraints of MILP model for linear approximations of ARX ciphers.
+We can set the objective function for r-round linear approximation as the
+
+Pr
+
+Pn−1
+
+5
+
+Application to Speck
+
+5.1
+
+Description of Speck
+
+i=1 si to find the minimal value of it. It means to find the optimized
+linear approximation. We use the Gurobi optimizer to solve the system of
+inequalities to search for the linear approximations.
+As describe in the model of searching for differential characteristics, we
+assume that the two inputs to modular addition and the consecutive rounds are
+independent. However, for some ARX constructions, they are not independent.
+So the practical correlation of our identified linear approximations for some fixed
+key may vary significantly from that derived from our model.
+j=1
+
+Speck is a family of ARX-based block ciphers proposed by the National
+Security Agency of the USA in [2], which contains 10 variants. The variants
+are characterized by the block size of 2n bits (where n is the word size) and the
+key size of mn bits. The Speck block cipher variant with block size 2n and key
+size mn is denoted as Speck2n/mn. The rotation constants α, β used in round
+functions and the number of rounds r are listed in Table 3 for all variants of the
+Speck.
+The round function of Speck consists of XOR, modular addition in Fn2 and
+rotation operations. If we denote the subkey in the i-th round as ki , the input
+and output of the i-th round as (xi−1 , yi−1 ) and (xi , yi ), the round function is
+operated as follows,
+xi = ((xi−1 ≫ α)  yi−1 ) ⊕ ki ,
+
+yi = (yi−1 ≪ β) ⊕ xi ,
+
+where α and β are rotation constants listed in Table 3.
+Table 3: Parameters for Speck Family of Block Ciphers
+Variant 2n/mn Block Size 2n Word Size n Key Size mn Key Words m Rounds r α β
+32/64
+32
+16
+64
+4
+22
+7 2
+48/72
+48
+24
+72
+3
+22
+8 3
+48/96
+48
+24
+96
+4
+23
+8 3
+64/96
+64
+32
+96
+3
+26
+8 3
+64/128
+64
+32
+128
+4
+27
+8 3
+96/96
+96
+48
+96
+2
+28
+8 3
+96/144
+96
+48
+144
+3
+29
+8 3
+128/128
+128
+64
+128
+2
+32
+8 3
+128/192
+128
+64
+192
+3
+33
+8 3
+128/256
+128
+64
+256
+4
+34
+8 3
+
+5.2
+
+Differential Characteristics and Linear Approximations of
+Speck
+
+In this subsection, we will give the details how to use the models in Section 3 and
+Section 4 to search for the differential characteristics and linear approximations
+for Speck.
+
+Firstly, we produce the system of inequalities to construct the model for
+the differential or linear trails for Speck based on the methods in Section 3
+and Section 4. Then we use Gurobi optimizer to solve our MILP model as [21–
+24]. Indeed, other MILP optimizers, such as CPLEX [8], can also be used. The
+procedure of our method is outlined as follows.
+Step 1: Convert the system of inequalities describing r rounds of Speck into a
+format that is readable by Gurobi.
+Step 2: Use Gurobi to search for the trails with the input from Step 1.
+Without loss of generality, we describe how to construct the model to search
+for the differential characteristic of r-round Speck32. We denote the input
+difference and the output difference for the i-th round as ∆zi−1 and ∆zi ,
+respectively, ∆zi = (∆zi31 , . . . , ∆zi0 ), 0 < i ≤ r.
+If we denote the two input differences of modular addition in the
+i-th round as αi and βi and the output difference as γi , then we have
+22
+16
+31
+23
+15
+0
+αi = (∆zi−1
+, . . . , ∆zi−1
+, ∆zi−1
+, . . . , ∆zi−1
+), βi = (∆zi−1
+, . . . , ∆zi−1
+), γi =
+31
+16
+(∆zi , . . . , ∆zi ). According to Section 3, we can produce 13×(16−1)+5 = 200
+linear inequalities to represent the differential property of (αi , βi → γi ) for
+modular addition in the i-th round.
+For the XOR operation of two branches in the i-th round, the two input
+13
+0
+15
+14
+differences are (∆zi−1
+, . . . , ∆zi−1
+, ∆zi−1
+, ∆zi−1
+) and (∆zi31 , . . . , ∆zi16 ), and the
+15
+0
+output difference is (∆zi , . . . , ∆zi ). Thus we have
+13
+∆zi−1
+⊕ ∆zi31 = ∆zi15 ,
+..
+.
+14
+∆zi−1
+⊕ ∆zi16 = ∆zi0 .
+
+Then we use Inequalities (4) to describe the differential property of XOR
+operation of two branches in the i-th round, so 5 × 16 = 80 linear inequalities
+are produced. Therefore, we use the above produced 200 + 80 = 280 linear
+inequalities to describe the differential property of (∆zi−1 → ∆zi ).
+In the similar way, 280 · r linear inequalities are derived to describe the
+differential property of r rounds (∆z0 → ∆z1 → . . . → ∆zr ). Moreover, one
+P31
+additional condition j=0 ∆z0j > 0 is required to ensure the non-zero plaintext
+difference.
+set the objective function as the minimal value of
+Pr WeP32−2
+j=0 ¬eq(αi [j], βi [j], γi [j]) and convert the above 280 · r + 1 linear
+i=1
+inequalities as constraints into the LP format that is readable by Gurobi.
+Finally, we use the Gurobi to find the the differential characteristic of r rounds
+of Speck32.
+Similarly, the process of constructing the model to search for the linear
+approximations for Speck can be implemented using the model in Section 4.
+Here we will not provide the details about it due to the limited space. The
+source code is published in https://github.com/fukai6/milp speck.git.
+
+As we search for the differential and linear trails for Speck with block size
+greater than 48, we use the splicing heuristic in order to speed up the search
+process. The splicing heuristic is to search two short trails and concatenate
+them to produce a long trail. For example, we can search r1 -round differential
+characteristic with output difference δ and r2 -round differential characteristic
+with input difference δ to construct an (r1 + r2 )-round differential characteristic.
+Based on the observation from our identified differential characteristic for small
+number of rounds and differential characteristics presented in [4], we find that
+the differential probability probably is better when the left of δ is 0x80 and
+the right of δ is 0. In this way, we manually choose different values of r1 and
+r2 , and set δ = 0x80||0 as the output difference or input difference to search
+two differential trails, then concatenate them to produce an (r1 + r2 )-round
+differential characteristic. For the linear approximation, we set the input mask
+or output mask as 0x1||0.
+Finally, the best differential characteristics and linear approximations
+we
+Pr
+found
+are
+listed
+in
+Table
+4,
+Table
+5,
+Table
+6
+and
+Table
+7,
+where
+log
+p
+and
+2 i
+i=1
+Pr
+i=1 log2 ci are the probability of differential characteristic and the correlation
+of linear approximation, respectively.
+
+Table 4: Differential Characteristics for Speck32, Speck48 and Speck64
+Speck32
+
+Pr
+
+i
+
+∆L
+
+∆R
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+
+0211
+2800
+0040
+8000
+8100
+8004
+8532
+5002
+0080
+1001
+
+0A04
+0010
+0000
+8000
+8102
+840E
+9508
+0420
+1000
+5001
+
+i=1 log2 pi
+
+Speck48
+log2 pi
+-4
+-2
+0
+-1
+-3
+-8
+-7
+-3
+-2
+
+-30
+
+∆L
+
+∆R
+
+001202 020002
+000010 100000
+000000 800000
+800000 800004
+808004 808020
+8400A0 8001A4
+608DA4 608080
+042003 002400
+012020 000020
+200100 200000
+202001 202000
+210020 200021
+
+Speck64
+log2 pi
+-3
+-1
+-0
+-2
+-4
+-9
+-11
+-5
+-3
+-3
+-4
+
+-45
+
+∆L
+
+∆R
+
+04092400 20040104
+20000820 20200001
+00000009 01000000
+08000000 00000000
+00080000 00080000
+00080800 00480800
+00480008 02084008
+06080808 164A0848
+F2400040 40104200
+00820200 00001202
+00009000 00000010
+00000080 00000000
+80000000 80000000
+80800000 80800004
+80008004 84008020
+808080A0 A08481A4
+
+log2 pi
+-6
+-4
+-2
+-1
+-2
+-4
+-7
+-13
+-8
+-4
+-2
+0
+-1
+-3
+-5
+-62
+
+Note that the differential characteristics in Table 5 have been produced with
+r1 = 11, r2 = 4 for Speck64 and r1 = 11, r2 = 5 for Speck 96, respectively. For
+Speck128, with the splicing heuristic, we can only get an 18-round differential
+characteristic with the probability 2−126 by setting r1 = r2 = 9 with reasonable
+time. Thus, in order to find a better trail, we firstly search for a 13-round
+differential trail with the splicing heuristic by setting r1 = 9 and r2 = 4,
+then extend six rounds before the 13-round differential trial to get the 19-round
+
+Table 5: Differential Characteristic for Speck96 and Speck128
+i
+
+∆L
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+
+∆R
+
+log2 pi
+
+240004000009 010420040000
+082020000000 000120200000
+000900000000 000001000000
+000008000000 000000000000
+000000080000 000000080000
+000000080800 000000480800
+000000480008 000002084008
+0800FE080808 0800EE4A0848
+000772400040 400000104200
+000000820200 000000001202
+000000009000 000000000010
+000000000080 000000000000
+800000000000 800000000000
+808000000000 808000000004
+800080000004 840080000020
+808080800020 A08480800124
+800400008124 842004008801
+
+Pr
+
+-6
+-4
+-2
+-1
+-2
+-4
+-12
+-21
+-11
+-4
+-2
+0
+-1
+-3
+-5
+-9
+
+∆L
+
+∆R
+
+log2 pi
+
+0124000400000000 0801042004000000
+0800202000000000 4808012020000000
+4800010000000000 0840080100000002
+0808080000000006 4A08480800000016
+4000400000000032 1042004000000080
+0202000000000080 8012020000000480
+0010000000000480 0080100000002084
+8080000000002080 84808000000124A0
+0400000000012440 2004000000080144
+2000000000080220 2020000000480801
+0000000000480001 0100000002084008
+000000000E080808 080000001E4A0848
+00000000F2400040 4000000000104200
+0000000000820200 0000000000001202
+0000000000009000 0000000000000010
+0000000000000080 0000000000000000
+8000000000000000 8000000000000000
+8080000000000000 8080000000000004
+8000800000000004 8400800000000020
+8080808000000020 A084808000000124
+
+−87
+
+i=1 log2 pi
+
+-6
+-6
+-7
+-12
+-7
+-5
+-5
+-9
+-9
+-7
+-8
+-15
+-8
+-4
+-2
+0
+-1
+-3
+-5
+−119
+
+differential characteristic in Table 5, where the 6-round trail has been also found
+with Gurobi.
+The linear approximations in Table 6 and Table 7 have been identified with
+the parameters: r1 = 10, r2 = 3 for Speck64, r1 = 3, r2 = 12 for Speck96 and
+r1 = 6, r2 = 10 for Speck128.
+
+Table 6: Linear Approximations of Speck32, Speck48 and Speck64
+Speck32
+
+Pr
+
+Speck48
+
+i
+
+ΓL
+
+ΓR log2 ci
+
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+
+0380
+4880
+20A0
+40A0
+0080
+0000
+0004
+3810
+2180
+066A
+
+5224
+4885
+2071
+00C1
+4001
+0001
+0004
+3010
+01C0
+0608
+
+i=1 log2 ci
+
+2−14
+
+-1
+-2
+-2
+-3
+0
+0
+-1
+-3
+-2
+
+ΓL
+
+Speck64
+ΓR
+
+000131 050021
+018100 200101
+000100 000001
+000001 000000
+0D0000 0C0000
+606100 606C00
+00024A 00620B
+181040 731042
+D812C0 9802D0
+040600 C4961A
+2484F2 2480F6
+
+2−22
+
+log2 ci
+-2
+-1
+0
+-1
+-2
+-2
+-4
+-3
+-5
+-2
+
+ΓL
+
+ΓR
+
+18600010 10724800
+1B000000 03104000
+18000000 18120000
+C0000000 C0100000
+04000006 04800006
+00260030 04200030
+01010501 21013181
+01800126 00018021
+00018100 20000101
+00000100 00000001
+00000001 00000000
+09800000 08000000
+40610000 40680000
+00024982 00420802
+
+log2 ci
+-3
+-2
+-1
+-1
+-2
+-5
+-4
+-5
+-1
+0
+-1
+-2
+-3
+
+2−30
+
+For the runtime of the searching algorithm, we spent about several hours
+on personal computer (4 Core, Intel(R) Core(TM) i5 CPU 650 @3.20GHz) for
+Speck32 and about one day on IBM server (64 Core, Intel(R)Xeon(R) CPU
+
+Table 7: Linear Approximation of Speck96 and Speck128
+i
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+Pr
+
+i=1 log2 ci
+
+ΓL
+
+ΓR
+
+000001000130 040000010021
+000000018100 200000000101
+000000000100 000000000001
+000000000001 000000000000
+0D0000000000 0C0000000000
+604500000000 604C00000000
+00224D000003 006228000003
+181070001018 1B105A680018
+001200000010 180210400000
+101000000000 00101A000000
+001800000000 000010000000
+000010000000 000000000000
+000000D00000 000000C00000
+000006041800 000006048000
+000030003490 000030043080
+180181910500 800181A10526
+2−45
+
+log2 ci
+-2
+-1
+0
+-1
+-2
+-4
+-12
+-6
+-3
+-2
+-1
+-1
+-2
+-3
+-5
+
+ΓL
+
+ΓR
+
+0001010000018798 6A800101300601C1
+0000018000300720 9400000180300625
+0000000181818100 200000000181B105
+0000000001800120 0000000000018021
+0000000000018100 2000000000000101
+0000000000000100 0000000000000001
+0000000000000001 0000000000000000
+0980000000000000 0800000000000000
+4045000000000000 4048000000000000
+00224D0000000002 0042280000000002
+1810600000000010 1A10536C00000010
+0012000000000080 1002186000000080
+0010000000000406 8010130000000406
+3680000000002000 3080180000002004
+8500000000010181 8524C000000101A1
+8002000000080001 2106000000080100
+01301A0000404401 0030180000404801
+
+log2 ci
+-7
+-4
+-3
+-4
+-1
+0
+-1
+-2
+-4
+-9
+-4
+-3
+-3
+-4
+-6
+-3
+
+2−58
+
+E7330, 2.40GHz) for other variants of Speck. Note that we have searched for all
+the differential characteristics and linear approximations for Speck32, however,
+for other variants we aim to only find better trails than the previous ones but
+we cannot guarantee they are the best trails.
+A summary of the differential characteristics and the linear approximations
+for Speck is provided in Table 2, which shows that we got better differential
+characteristics and linear approximations for Speck48, Speck64, Speck96 and
+Speck128.
+In order to check the effect of the assumptions of independent inputs to
+the modular addition and independent rounds for Speck, we experimentally
+calculate the probability for our identified differential characteristics in Table 4,
+??, 5. As it is not feasible to do this for many rounds, we break down
+the differential characteristics to small overlapping segments according to the
+differential probability of the segments. The calculated probability of each one of
+these segments has been verified experimentally by encrypting sufficiently many
+random plaintext pairs for some arbitrary keys. The test results are shown in
+Table 8. In Table 8, the first column is the tested cipher, the second column
+shows rounds covered by the segment of differential characteristic, the third
+column is the theoretic differential probability of the corresponding segment
+of differential characteristic, the fourth column is the total number of random
+chosen plaintext pairs used in the test, the fifth column is the total number
+of tested key values, and the last column is the number of keys which can
+get the calculated differential probability no less than the theoretic differential
+probability. Note that we only test the last segment from round 12 to round
+19 for Speck-128 because the theoretic differential probabilities for the previous
+segments are too low to be tested. From Table 8, we can see that the number of
+good keys significantly deviates from the mean for some cases, which is due to
+
+the independent assumptions for Speck cipher. Such deviation will have effect
+on the success rate of the attacks in the practitioner’s perspective.
+5.3
+
+Key Recovery Attack on Speck
+
+In [9] Dinur presented a generic key recovery framework for Speck which can
+extend the differential attack for more rounds. The idea of the framework uses
+the guess-and-determine technique instead of counting technique for standard
+key recovery attack. Furthermore, the cryptanalytic technique of ARX cipher is
+utilized to speed up the attack on Speck.
+For Speck2n/mn, if the differential characteristic with probability p for
+r − 1 rounds has been found, the attacker can add one round at the top of
+the differential characteristic and m rounds at the bottom of the differential
+characteristic to cover r + m rounds in total. It is not necessary to guess
+the subkey in the first round as it has no effect on the input difference. At
+last, the attacker can recover the mn-bit secret key of a variant with r + m
+rounds of Speck2n/mn using 2 · p−1 chosen plaintexts with time complexity of
+2 · p−1 · 2(m−2)n and memory complexity of 222 bytes.
+With our identified differential characteristics for Speck, we can give the
+improved key recovery attack. Since the attack is same as that in [9], details are
+omitted. For each variant of Speck, we summarize our attacks and the previous
+differential attacks in Table 1, which shows that our attacks for the variants of
+Speck with block size 48, 64, 96 and 128 are best attacks in terms of the number
+of rounds.
+
+Table 8: Test for Differential Characteristics in Table 4 and 5
+Cipher
+
+Rounds Differential
+Number of
+Total Number of Number of
+of Segment Probability Plaintext Pairs
+Keys
+Good Keys
+0-9
+
+2−30
+
+232
+
+7040
+
+3456
+
+Speck48/96
+
+0-6
+
+−19
+
+2
+
+22
+
+2
+
+10000
+
+4093
+
+Speck48/96
+
+6-11
+
+2−26
+
+230
+
+6400
+
+2989
+
+Speck64/128
+
+0-6
+
+−19
+
+2
+
+22
+
+2
+
+10000
+
+5513
+
+Speck64/128
+
+6-8
+
+2−20
+
+224
+
+10000
+
+4887
+
+Speck64/128
+
+8-15
+
+−23
+
+2
+
+26
+
+2
+
+10000
+
+4918
+
+Spec96/144
+
+0-5
+
+2−15
+
+218
+
+10000
+
+5123
+
+Spec96/144
+
+5-7
+
+2−16
+
+220
+
+10000
+
+5039
+
+Spec96/144
+
+7-8
+
+−21
+
+2
+
+24
+
+2
+
+10000
+
+5454
+
+Spec96/144
+
+8-11
+
+2−17
+
+220
+
+10000
+
+5020
+
+Spec96/144
+
+11-16
+
+−18
+
+2
+
+22
+
+2
+
+10000
+
+4645
+
+Spec128/256
+
+12-19
+
+2−23
+
+226
+
+10000
+
+4876
+
+Speck32/64
+
+6
+
+Conclusion
+
+In this paper, we construct the MILP model to automatically search for
+differential and linear approximations for ARX ciphers by researching the
+differential and linear property of modular addition under the assumptions of
+independent inputs to the modular addition and independent rounds. Then
+we use the new MILP model to search for the differential characteristics and
+linear approximations for Speck cipher. Compared with the previous best
+differential characteristics for them, our identified differential characteristics
+for Speck64, Speck96 and Speck128 are extended for one, three and five
+rounds, respectively, and our differential characteristic for Speck48 has higher
+probability. We use those new differential characteristics to improve the currently
+best public attacks on the four variants of Speck. In addition, we searched for
+the linear approximations for Speck cipher and improved the previous linear
+approximations for Speck variants with block size greater than 32.
+Acknowledgments This work has been supported by 973 Program (No. 2013C
+B834205), NSFC Projects (No. 61133013, No. 61572293), Program for New
+Century Excellent Talents in University of China (NCET- 13-0350).
+
+References
+1. Abed, F., List, E., Lucks, S., Wenzel, J.: Differential Cryptanalysis of
+Round-Reduced SIMON and SPECK. FSE 2014. LNCS, vol. 8540, pp. 525-545.
+Springer, 2015.
+2. Beaulieu, R., Shors, D., Smith, J., Treatman-Clark, S., Weeks, B., Wingers, L.: The
+SIMON and SPECK Famillies of Lightweight Block Ciphers. Cryptology ePrint
+archive, Report 2013/543 (2013). http://eprint.iacr.org/
+3. Biham, E., Shamir, A.: Differential Cryptanalysis of DES-like Cryptosystems.
+Journal of Cryptology, 4(1):3-72, 1991.
+4. Biryukov, A., Velichkov, V.: Automatic Search for Differential Trails in ARX
+Ciphers. CT-RSA 2014. LNCS, vol. 8366, pp. 227-250. Springer, 2014.
+5. Biryukov, A., Velichkov, V., Corre, Y.: Automatic Search for the Best Trails in
+ARX: Application to Block Cipher Speck. FSE 2016, Bochum, Germany, March
+20–23 (to appear), 2016.
+6. Biryukov, A., Roy, A., Velichkov, V.: Differential Analysis of Block Ciphers SIMON
+and SPECK. FSE 2014. LNCS, vol. 8540, pp. 546-570. Springer, 2015.
+7. Biryukov, A., Velichkov, V., Corre, Y. L.: Automatic Search for the Best Trails in
+ARX: Application to Block Cipher Speck. FSE 2016. LNCS. Springer, to Appear.
+8. CPLEX, I. I.: IBM software group. User-Manual CPLEX. 2011.
+9. Dinur, I.: Improved Differential Cryptanalysis of Round-Reduced Speck. SAC 2014.
+LNCS, vol. 8781, pp. 147-164. Springer, 2014.
+10. De Cannière, C., Rechberger, C.: Finding SHA-1 Characteristics: General Results
+and Applications. ASIACRYPT 2006. LNCS, vol. 4284, pp. 1–20. Springer, 2006.
+11. Gurobi
+Optimization.
+Gurobi
+Optimizer
+Reference
+Manual.
+2013.
+http://www.gurobi.com
+
+12. Leurent, G.: Construction of Differential Characteristics in ARX
+Designs-Application to Skein. Cryptology ePrint Archive, 2012/668(2012).
+https://eprint.iacr.org/
+13. Lipmaa, H., Moriai, S.: Efficient Algorithms for Computing Differential Properties
+of Addition. FSE 2002. LNCS, vol. 2355, pp. 336-350. Springer, 2002.
+14. Liu, M., Chen, J.: Improved Linear Attacks on the Chinese Block Cipher Standard.
+JCST, vol. 29, Issue 6, pp. 1123-1133. Springer, 2014.
+15. Matsui, M.: Linear Cryptanalysis Method for DES Cipher. EUROCRYPT 1993.
+LNCS, vol.765, pp. 386-397. Springer, 2001.
+16. Matsui, M.: On Correlation between the Order of S-boxes and the Strength of
+DES. EUROCRYPT 94. LNCS, vol. 950, pp. 366-375. Springer, 2006.
+17. Mendel, F., Nad, T., Schläffer, M.: Finding SHA-2 Characteristics: Searching
+through a Minefield of Contradictions. ASIACRYPT 2011. LNCS, vol. 7073, pp.
+288–307. Springer, 2011.
+18. Mouha, N., Wang, Q., Gu, D., Preneel, B.: Differential and Linear Cryptanalysis
+Using Mixed-Integer Linear Programming. Inscrypt 2011. LNCS, vol. 7537, pp.
+57-76. Springer, 2012.
+19. Nyberg, K., Wallen, J.: Improved Linear Distinguishers for SNOW 2.0. FSE 2006.
+LNCS, vol. 4047, pp. 144-162. Springer, 2006.
+20. Stein, W.,et al.: Sage: Open Source Mathematical Software(2008).
+21. Sun, S., Hu, L., Song, L., Xie, Y., Wang, P.: Automatic Security Evaluation of Block
+Ciphers with S-bP Structures Against Related-Key Differential Attacks. Inscrypt
+2013. LNCS, vol.8567, pp. 39-51. Springer, 2013.
+22. Sun, S., Hu, L., Qiao, K., Ma, X., Song, L.: Automatic Security Evaluation
+and (Related-key) Differential Characteristic Search: Application to SIMON,
+PRESENT, LBlock, DES(L) and Other Bit-Oriented Block Ciphers. ASIACRYPT
+2014. LNCS, vol. 8873, pp. 158-178. Springer, 2014.
+23. Sun, S., Hu, L., Qiao, K., Ma, X., Song, L.: Automatic Security Evaluation
+and (Related-key) Differential Characteristic Search: Application to SIMON,
+PRESENT, LBlock, DES(L) and Other Bit-Oriented Block Ciphers. Cryptology
+ePrint Archive, Report 2013/676 (2013). https://eprint.iacr.org/
+24. Sun, S., Hu, L., Wang, M., Wang, P., Qiao, K., Ma, X., Shi, D., Song, L., Fu, K.:
+Towards Finding the Best Characteristics of Some Bit-oriented Block Ciphers and
+Automatic Enumeration of (Related-key) Differential and Linear Characteristics
+with Predefined Properties. Cryptology ePrint Archive, Report 2014/747 (2014).
+https://eprint.iacr.org/
+25. Wallén, J.: Linear Approximations of Addition Modulo 2n . FSE 2003. LNCS, vol.
+2887, pp. 261-273. Springer, 2003.
+26. Wang, G., Keller, N., Dunkelman, O.: The Delicate Issues of Addition with Respect
+to XOR Differences. SAC 2007. LNCS, vol. 4786, pp. 212-231. Springer, 2007.
+27. Winnen, L.: Sage S-box Milp Toolkit. http://www.ecrypt.eu.org/tools/sage-s-box-milp-toolkit
+28. Wu, S., Wang, M.: Security Evaluation against Differential Cryptanalysis for
+Block Cipher Structures . Cryptology ePrint Archive, Report 2011/551 (2011).
+https://eprint.iacr.org/
+29. Wu, S., Wu, H., Huang, T., Wang, M., Wu, W.: Leaked-state-forgery attack against
+the authenticated encryption algorithm ALE. ASIACRYPT 2013. LNCS, vol. 8269,
+pp. 377-404. Springer, 2013.
+30. Yao, Y., Zhang, B., Wu, W.: Automatic Search for Linear Trails of the SPECK
+Family. ISC 2015. LNCS, vol. 9290, pp. 158–176. Springer, 2015.
+
+
