@@ -7,6 +7,7 @@
 #include <limits>
 #include <cmath>
 #include "neoalzette_core.hpp"
+#include "bitvector_ops.hpp"
 
 namespace neoalz {
 
