@@ -7,6 +7,7 @@
 #include "neoalzette/neoalzette_core.hpp"
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
+#include "arx_analysis_operators/differential_optimal_gamma.hpp"
 
 namespace neoalz {
 
@@ -55,11 +56,40 @@ private:
     );
     
     /**
-     * @brief 枚举候选差分（修复版）
+     * @brief 🆕 使用Algorithm 4查找最优γ（推荐！）
+     * 
+     * Lipmaa & Moriai (2001) Algorithm 4
+     * 复杂度：Θ(log n) - 对数时间
+     * 
+     * 优势：
+     * - 直接找到最优γ，无需枚举
+     * - 保证找到DP+(α, β → γ)的最大值
+     * - 比启发式枚举更快更准确
+     */
+    template<typename Yield>
+    static void find_optimal_diff(
+        std::uint32_t input_diff_alpha,
+        std::uint32_t input_diff_beta,
+        int weight_budget,
+        Yield&& yield  // yield(output_diff, weight)
+    ) {
+        auto [gamma, weight] = arx_operators::find_optimal_gamma_with_weight(
+            input_diff_alpha, input_diff_beta
+        );
+        
+        if (weight >= 0 && weight < weight_budget) {
+            yield(gamma, weight);
+        }
+    }
+    
+    /**
+     * @brief 枚举候选差分（启发式版本）
      * 
      * 给定：两个输入差分(alpha, beta)
      * 枚举：候选输出差分gamma
      * 计算：对每个gamma，调用xdp_add(alpha, beta, gamma)
+     * 
+     * 注意：推荐使用find_optimal_diff()代替此函数！
      */
     template<typename Yield>
     static void enumerate_diff_candidates(
