@@ -7,32 +7,32 @@
  * 
  * 算法：LM-2001 Algorithm 2
  * 複雜度：O(1) 位運算
- * 
- * 公式：
- * xdp⁺(α, β → γ) = 2^{-n} × #{(x,y) : (x⊕α) ⊞ (y⊕β) = (x⊞y) ⊕ γ}
- * 
- * 核心：ψ(α,β,γ) = (~α ⊕ β) & (~α ⊕ γ)
  */
 
 #pragma once
 
 #include <cstdint>
 #include <cmath>
+#include <limits>
 
 namespace neoalz {
 namespace arx_operators {
 
 /**
- * @brief ψ函数：LM-2001的核心约束函数
+ * @brief ψ函数：LM-2001的psi-constraint
  * 
- * 論文定義：ψ(α,β,γ) = (~α ⊕ β) & (~α ⊕ γ)
+ * Python实现：
+ * not_alpha = (~alpha) & mask
+ * term1 = (not_alpha ^ beta) & mask
+ * term2 = (not_alpha ^ gamma) & mask
+ * return term1 & term2
  * 
  * @param alpha 输入差分α
  * @param beta 输入差分β
  * @param gamma 输出差分γ
  * @return ψ值
  */
-inline std::uint32_t psi(
+inline std::uint32_t psi_32(
     std::uint32_t alpha,
     std::uint32_t beta,
     std::uint32_t gamma
@@ -46,14 +46,7 @@ inline std::uint32_t psi(
 /**
  * @brief LM-2001 Algorithm 2: 計算xdp⁺的權重（32位）
  * 
- * 論文：Lipmaa & Moriai, FSE 2001, Algorithm 2
- * 複雜度：O(1)
- * 
- * Algorithm 2步驟：
- * Step 1: Good check
- *         If ψ(α<<1, β<<1, γ<<1) & (α ⊕ β ⊕ γ ⊕ β<<1) != 0, return ∞
- * Step 2: Weight
- *         Return popcount(ψ(α,β,γ) & mask(n-1))
+ * 直接翻译Python实现，不做任何修改
  * 
  * @param alpha 輸入差分α
  * @param beta 輸入差分β  
@@ -65,44 +58,40 @@ inline int xdp_add_lm2001(
     std::uint32_t beta,
     std::uint32_t gamma
 ) noexcept {
-    // ========================================================================
-    // Algorithm 2, Step 1: Check ψ-constraint (good check)
-    // ========================================================================
+    // Python: mask = (1 << n) - 1
+    // n = 32, mask = 0xFFFFFFFF
+    
+    // Python: alpha_shifted = ((alpha << 1) & mask)
     std::uint32_t alpha_shifted = alpha << 1;
     std::uint32_t beta_shifted = beta << 1;
     std::uint32_t gamma_shifted = gamma << 1;
     
-    std::uint32_t psi_shifted = psi(alpha_shifted, beta_shifted, gamma_shifted);
+    // Python: psi_shifted = psi(alpha_shifted, beta_shifted, gamma_shifted, n)
+    std::uint32_t psi_shifted = psi_32(alpha_shifted, beta_shifted, gamma_shifted);
+    
+    // Python: xor_condition = (alpha ^ beta ^ gamma ^ beta_shifted) & mask
     std::uint32_t xor_condition = alpha ^ beta ^ gamma ^ beta_shifted;
     
-    // If (psi_shifted & xor_condition) != 0, differential is impossible
+    // Python: if (psi_shifted & xor_condition) != 0: return float('inf')
     if ((psi_shifted & xor_condition) != 0) {
-        return -1;  // Impossible differential
+        return -1;  // C++用-1表示不可能
     }
     
-    // ========================================================================
-    // Algorithm 2, Step 2: Compute weight
-    // ========================================================================
-    std::uint32_t psi_val = psi(alpha, beta, gamma);
+    // Python: psi_val = psi(alpha, beta, gamma, n)
+    std::uint32_t psi_val = psi_32(alpha, beta, gamma);
     
-    // mask(n-1) = 0x7FFFFFFF (低31位)
-    constexpr std::uint32_t mask_lower = 0x7FFFFFFF;
+    // Python: mask_lower = (1 << (n - 1)) - 1
+    constexpr std::uint32_t mask_lower = 0x7FFFFFFF;  // 31位
     
+    // Python: masked_psi = psi_val & mask_lower
     std::uint32_t masked_psi = psi_val & mask_lower;
     
-    // weight = popcount(ψ(α,β,γ) & mask(n-1))
-    int weight = __builtin_popcount(masked_psi);
-    
-    return weight;
+    // Python: return masked_psi.bit_count()
+    return __builtin_popcount(masked_psi);
 }
 
 /**
  * @brief LM-2001: 計算xdp⁺的概率
- * 
- * @param alpha 輸入差分α
- * @param beta 輸入差分β
- * @param gamma 輸出差分γ
- * @return 概率 p ∈ [0, 1]
  */
 inline double xdp_add_probability(
     std::uint32_t alpha,
@@ -116,11 +105,6 @@ inline double xdp_add_probability(
 
 /**
  * @brief 檢查差分是否可能
- * 
- * @param alpha 輸入差分α
- * @param beta 輸入差分β
- * @param gamma 輸出差分γ
- * @return true如果可能
  */
 inline bool is_xdp_add_possible(
     std::uint32_t alpha,
@@ -133,11 +117,7 @@ inline bool is_xdp_add_possible(
 /**
  * @brief LM-2001 Algorithm 2: 支持任意位宽n
  * 
- * @param alpha 輸入差分α
- * @param beta 輸入差分β  
- * @param gamma 輸出差分γ
- * @param n 位宽
- * @return 權重w，-1表示不可能
+ * 直接翻译Python实现
  */
 inline int xdp_add_lm2001_n(
     std::uint32_t alpha,
@@ -146,19 +126,15 @@ inline int xdp_add_lm2001_n(
     int n
 ) noexcept {
     std::uint32_t mask = (n == 32) ? 0xFFFFFFFFu : ((1u << n) - 1);
-    std::uint32_t mask_lower = (n == 32) ? 0x7FFFFFFFu : ((1u << (n - 1)) - 1);
-    
     alpha &= mask;
     beta &= mask;
     gamma &= mask;
     
-    // ========================================================================
-    // Step 1: Check ψ-constraint
-    // ========================================================================
     std::uint32_t alpha_shifted = (alpha << 1) & mask;
     std::uint32_t beta_shifted = (beta << 1) & mask;
     std::uint32_t gamma_shifted = (gamma << 1) & mask;
     
+    // psi_shifted
     std::uint32_t not_alpha_s = (~alpha_shifted) & mask;
     std::uint32_t psi_shifted = (not_alpha_s ^ beta_shifted) & (not_alpha_s ^ gamma_shifted) & mask;
     
@@ -168,17 +144,14 @@ inline int xdp_add_lm2001_n(
         return -1;
     }
     
-    // ========================================================================
-    // Step 2: Compute weight
-    // ========================================================================
+    // psi_val
     std::uint32_t not_alpha = (~alpha) & mask;
     std::uint32_t psi_val = (not_alpha ^ beta) & (not_alpha ^ gamma) & mask;
     
+    std::uint32_t mask_lower = (n == 32) ? 0x7FFFFFFFu : ((1u << (n - 1)) - 1);
     std::uint32_t masked_psi = psi_val & mask_lower;
     
-    int weight = __builtin_popcount(masked_psi);
-    
-    return weight;
+    return __builtin_popcount(masked_psi);
 }
 
 } // namespace arx_operators
