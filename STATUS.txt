@@ -14,7 +14,8 @@ include/
 ├── arx_analysis_operators/     ⭐ 底層ARX算子（最優化）
 │   ├── differential_xdp_add.hpp      LM-2001, O(1)
 │   ├── differential_addconst.hpp     BvWeight, O(log²n)
-│   ├── linear_cor_add.hpp            Wallén M_n^T, O(n)
+│   ├── linear_cor_add_logn.hpp       Wallén Theorem 2, Θ(log n) ⭐
+│   ├── linear_cor_add.hpp            Wallén M_n^T, O(n) (備用)
 │   ├── linear_cor_addconst.hpp       Wallén DP, O(n)
 │   └── bitvector_ops.hpp             輔助函數
 │
@@ -37,8 +38,9 @@ include/
 ### 底層ARX算子（對照論文最優化）
 - ✅ xdp⁺ (變量-變量): LM-2001, O(1)
 - ✅ xdp⁺ (變量-常量): BvWeight, O(log²n)
-- ✅ cor (變量-變量): Wallén M_n^T, O(n)
-- ✅ cor (變量-常量): Wallén DP, O(n)
+- ✅ cor (變量-變量): Wallén Theorem 2, Θ(log n) ⭐ (已實現)
+- ✅ cor (變量-變量): Wallén M_n^T, O(n) (備用實現)
+- ⚠️  cor (變量-常量): Wallén DP, O(n) (可優化為Θ(log n))
 
 ### 搜索框架（完整實現）
 - ✅ pDDT Algorithm 1
@@ -59,6 +61,7 @@ include/
 |------|------|------|--------|
 | Lipmaa & Moriai 2001 | LM-2001 | differential_xdp_add.hpp | O(1) |
 | Bit-Vector 2022 | BvWeight | differential_addconst.hpp | O(log²n) |
+| Wallén 2003 | Theorem 2 (cpm) | linear_cor_add_logn.hpp | **Θ(log n)** ⭐ |
 | Wallén 2003 | M_n^T | linear_cor_add.hpp | O(n) |
 | Wallén 2003 | Bit-wise DP | linear_cor_addconst.hpp | O(n) |
 | ARX Differential Trails | pDDT | pddt/pddt_algorithm1.hpp | - |
@@ -76,3 +79,12 @@ include/
 ## 📝 重構日期
 
 2025-10-04
+
+## ⚠️ 複雜度修正說明
+
+**感謝GPT-5的嚴謹指正！**
+
+Wallén算法確實有 Θ(log n) 對數時間版本（使用分塊倍增技術）。
+項目中已經實現該算法（`linear_cor_add_logn.hpp`），但之前文檔標註有誤。
+
+詳見：`COMPLEXITY_CORRECTION_REPORT.md`
