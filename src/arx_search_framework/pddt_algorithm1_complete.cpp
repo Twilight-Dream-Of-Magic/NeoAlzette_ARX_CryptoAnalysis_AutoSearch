@@ -219,12 +219,18 @@ std::optional<int> PDDTAlgorithm1Complete::compute_lm_weight(
     /**
      * Lipmaa-Moriai weight computation:
      * 
-     * w_k = hw(AOP(α_k, β_k, γ_k))
+     * 🔧 修復：當k=32時，使用完整的Algorithm 2（包含"good"檢查）
      * 
-     * where AOP(α, β, γ) = α ⊕ β ⊕ γ ⊕ ((α∧β) ⊕ ((α⊕β)∧γ)) << 1
-     * 
-     * The weight equals the Hamming weight of AOP for the k-bit prefix.
+     * For k < 32: Use AOP for k-bit prefix
+     * For k = 32: Use full xdp_add_lm2001 (with "good" check)
      */
+    
+    // ✅ 當k=32時，直接調用底層精確算子！
+    if (k == 32) {
+        int weight = arx_operators::xdp_add_lm2001(alpha_k, beta_k, gamma_k);
+        if (weight < 0) return std::nullopt;  // Impossible differential
+        return std::optional<int>(weight);
+    }
     
     // Special case: all zeros
     if (alpha_k == 0 && beta_k == 0) {

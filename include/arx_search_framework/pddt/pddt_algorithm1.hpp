@@ -4,6 +4,7 @@
 #include <optional>
 #include <functional>
 #include <cmath>
+#include "arx_analysis_operators/differential_xdp_add.hpp"
 
 namespace neoalz {
 
