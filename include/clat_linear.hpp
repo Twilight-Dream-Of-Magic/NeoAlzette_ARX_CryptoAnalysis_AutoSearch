@@ -51,19 +51,31 @@ public:
      * 
      * 論文Lines 713-774
      * 
+     * 完整實現：
+     * - Line 714-717: 初始化cLATmin, MT, cLATN
+     * - Line 719-773: 遍歷所有(v,b,w,u)組合
+     * - Line 723: 計算A, B, C
+     * - Line 725-729: 計算Cb（C的位）
+     * - Line 731-751: 計算權重Cw和MT
+     * - Line 753: Property 6檢查
+     * - Line 755-770: 存儲有效條目
+     * 
      * @return 構建是否成功
      */
     bool build() {
-        // Algorithm 2實現
-        
         // Line 714-717: 初始化
         for (int v = 0; v < mask_size; ++v) {
             for (int b = 0; b < 2; ++b) {
                 cLATmin_[v][b] = m;  // 初始為最大
+                
+                // 初始化cLATN為0
+                for (int k = 0; k <= m; ++k) {
+                    count_map_[v][b][k] = 0;
+                }
             }
         }
         
-        // Line 719-773: 遍歷所有(u, w)組合
+        // Line 719-773: 遍歷所有(v, b, w, u)組合
         for (int v = 0; v < mask_size; ++v) {
             for (int b = 0; b < 2; ++b) {
                 for (int w = 0; w < mask_size; ++w) {
@@ -74,7 +86,7 @@ public:
                         uint32_t C = u ^ v ^ w;
                         int Cw = 0;
                         
-                        // Line 725-729: 計算Cb
+                        // Line 725-729: 計算Cb[j] = (C >> (m-1-j)) & 1
                         std::array<int, M_BITS> Cb;
                         for (int j = 0; j < m; ++j) {
                             Cb[j] = (C >> (m - 1 - j)) & 1;
@@ -83,45 +95,68 @@ public:
                         // Line 731-739: 初始化連接狀態
                         std::array<int, M_BITS> MT;
                         uint32_t Z;
+                        
                         if (b == 1) {
+                            // Line 732-733: b=1時，進位來自上一塊
                             Cw++;
                             MT[0] = 1;
                             Z = 1 << (m - 1);
                         } else {
+                            // Line 735-737: b=0時，無進位
                             MT[0] = 0;
                             Z = 0;
                         }
                         
-                        // Line 741-751: 計算權重
+                        // Line 741-751: 計算權重Cw和MT
                         for (int i = 1; i < m; ++i) {
+                            // Line 743: MT[i] = (Cb[i-1] + MT[i-1]) & 1
                             MT[i] = (Cb[i-1] + MT[i-1]) & 1;
+                            
+                            // Line 745-747: 如果MT[i] = 1，增加權重
                             if (MT[i] == 1) {
                                 Cw++;
                                 Z |= (1 << (m - 1 - i));
                             }
                         }
                         
-                        // Line 753: Property 6
+                        // Line 753: Property 6檢查
+                        // F1 = A ∧ (¬(A ∧ Z))，檢查u⊕v ⊥ z
+                        // F2 = B ∧ (¬(B ∧ Z))，檢查u⊕w ⊥ z
                         uint32_t F1 = A & (~(A & Z));
                         uint32_t F2 = B & (~(B & Z));
                         
-                        // Line 755-770: 存儲有效條目
+                        // Line 755-770: 只有F1=0 且 F2=0時才存儲
                         if (F1 == 0 && F2 == 0) {
                             Entry entry;
                             entry.u = u;
                             entry.w = w;
                             entry.weight = Cw;
+                            
+                            // Line 763: 計算連接狀態
+                            // cLATb[u][v][w][b] = (MT[m-1] + Cb[m-1]) & 1
                             entry.conn_status = (MT[m-1] + Cb[m-1]) & 1;
                             
+                            // Line 757-761: 存儲到cLAT
                             table_[v][b].push_back(entry);
+                            count_map_[v][b][Cw]++;
                             
-                            // 更新最小權重
+                            // Line 765-767: 更新最小權重
                             if (cLATmin_[v][b] > Cw) {
                                 cLATmin_[v][b] = Cw;
                             }
                         }
                     }
                 }
+            }
+        }
+        
+        // 按權重排序（優化查找）
+        for (int v = 0; v < mask_size; ++v) {
+            for (int b = 0; b < 2; ++b) {
+                std::sort(table_[v][b].begin(), table_[v][b].end(),
+                         [](const Entry& a, const Entry& b) {
+                             return a.weight < b.weight;
+                         });
             }
         }
         
@@ -183,10 +218,37 @@ public:
         return table_[v][b];
     }
     
+    /**
+     * @brief 獲取表的統計信息
+     */
+    struct Stats {
+        uint64_t total_entries = 0;
+        uint64_t memory_bytes = 0;
+        double avg_entries_per_block = 0.0;
+    };
+    
+    Stats get_stats() const {
+        Stats stats;
+        for (int v = 0; v < mask_size; ++v) {
+            for (int b = 0; b < 2; ++b) {
+                stats.total_entries += table_[v][b].size();
+            }
+        }
+        stats.memory_bytes = stats.total_entries * sizeof(Entry);
+        stats.avg_entries_per_block = (double)stats.total_entries / (mask_size * 2);
+        return stats;
+    }
+    
 private:
-    // cLAT數據結構
+    // cLAT數據結構（論文中的定義）
+    // cLATw[v][b][idx] = w, cLATu[v][b][idx] = u
     std::array<std::array<std::vector<Entry>, 2>, (1 << M_BITS)> table_;
+    
+    // cLATmin[v][b] = 最小權重
     std::array<std::array<int, 2>, (1 << M_BITS)> cLATmin_;
+    
+    // cLATN[v][b][Cw] = 權重為Cw的條目數量
+    std::array<std::array<std::array<int, M_BITS+1>, 2>, (1 << M_BITS)> count_map_;
     
     /**
      * @brief 遞歸查找（實現Algorithm 3的LR過程）
