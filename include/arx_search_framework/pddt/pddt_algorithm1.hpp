@@ -130,13 +130,12 @@ public:
         int bit_width;          ///< n: Number of bits (typically 32)
         double prob_threshold;  ///< p_thres: Minimum probability to include
         int weight_threshold;   ///< w_thresh: Maximum weight (= -log₂(p_thres))
-        bool enable_pruning;    ///< Enable early pruning optimization
         
         PDDTConfig()
             : bit_width(32)
             , prob_threshold(0.01)  // 2^{-6.64}
-            , weight_threshold(7)    // -log₂(0.01) ≈ 6.64
-            , enable_pruning(true) {}
+            , weight_threshold(7) {  // -log₂(0.01) ≈ 6.64
+        }
         
         /**
          * @brief Set threshold by probability
@@ -268,28 +267,10 @@ public:
         int k
     );
     
-    /**
-     * @brief Check if k-bit prefix is feasible
-     * 
-     * Uses necessary conditions from Lipmaa-Moriai to detect impossible
-     * differentials early (before computing full weight).
-     * 
-     * Necessary condition:
-     * eq(α[i], β[i], γ[i]) must be consistent with carry propagation
-     * where eq(a,b,c) = 1 iff a = b = c
-     * 
-     * @param alpha_k α_k: k-bit prefix
-     * @param beta_k β_k: k-bit prefix
-     * @param gamma_k γ_k: k-bit prefix
-     * @param k Number of bits
-     * @return True if definitely impossible (can prune)
-     */
-    static bool check_prefix_impossible(
-        std::uint32_t alpha_k,
-        std::uint32_t beta_k,
-        std::uint32_t gamma_k,
-        int k
-    );
+    // ⚠️ REMOVED: check_prefix_impossible()
+    // Early pruning optimization NOT mentioned in the paper.
+    // Removed to strictly follow Algorithm 1 (Lines 349-365).
+    // Only pruning allowed: Line 8 threshold check (pk+1 >= pthres)
     
     /**
      * @brief Compute full xdp⁺ probability (for verification)
