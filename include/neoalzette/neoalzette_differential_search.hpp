@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include "neoalzette/neoalzette_core.hpp"
+#include "neoalzette/neoalzette_differential_step.hpp"
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
 #include "arx_analysis_operators/differential_optimal_gamma.hpp"
@@ -133,16 +134,36 @@ private:
         }
     }
     
+    /**
+     * @brief 执行Subround 1（使用新单步函数）
+     * 
+     * Subround 1步骤：
+     * 1. 线性层: L1(A), L2(B)
+     * 2. cd_from_B(B)
+     * 3. 跨分支注入: A ^= (rotl(C0,24) ^ rotl(D0,16))
+     * 4. 模加: A + B
+     * 5. 减常量: A - c0
+     */
     template<typename Yield>
-    static void execute_subround0(
+    static void execute_subround1(
         const SearchConfig& config,
         const DiffState& input,
         int weight_budget,
         Yield&& yield
     );
     
+    /**
+     * @brief 执行Subround 2（使用新单步函数）
+     * 
+     * Subround 2步骤：
+     * 6. 线性层: L1(B), L2(A)
+     * 7. cd_from_A(A)
+     * 8. 跨分支注入: B ^= (rotl(C1,24) ^ rotl(D1,16))
+     * 9. 模加: B + A
+     * 10. 减常量: B - c1
+     */
     template<typename Yield>
-    static void execute_subround1(
+    static void execute_subround2(
         const SearchConfig& config,
         const DiffState& input,
         int weight_budget,
@@ -155,82 +176,141 @@ private:
 // ============================================================================
 
 template<typename Yield>
-void NeoAlzetteDifferentialSearch::execute_subround0(
-    const SearchConfig& config,
-    const DiffState& input,
-    int weight_budget,
-    Yield&& yield
-) {
-    const std::uint32_t dA = input.dA;
-    const std::uint32_t dB = input.dB;
-    
-    // Step 1: B += (rotl(A,31) ^ rotl(A,17) ^ RC[0])
-    std::uint32_t beta = NeoAlzetteCore::rotl(dA, 31) ^ NeoAlzetteCore::rotl(dA, 17);
-    
-    enumerate_diff_candidates(dB, beta, weight_budget,
-        [&](std::uint32_t dB_after, int w1) {
-            if (w1 >= weight_budget) return;
-            
-            // Step 2: A -= RC[1]
-            const std::uint32_t RC1 = NeoAlzetteCore::ROUND_CONSTANTS[1];
-            
-            std::vector<std::uint32_t> dA_candidates = {
-                dA, dA ^ 1, dA ^ 3,
-            };
-            
-            for (std::uint32_t dA_after : dA_candidates) {
-                int w2 = arx_operators::diff_addconst_bvweight(dA, RC1, dA_after);
-                if (w2 < 0 || (w1 + w2) >= weight_budget) continue;
-                
-                // Step 3-7: 线性操作
-                std::uint32_t dA_temp = dA_after ^ NeoAlzetteCore::rotl(dB_after, 24);
-                std::uint32_t dB_temp = dB_after ^ NeoAlzetteCore::rotl(dA_temp, 16);
-                dA_temp = NeoAlzetteCore::l1_forward(dA_temp);
-                dB_temp = NeoAlzetteCore::l2_forward(dB_temp);
-                auto [dC0, dD0] = NeoAlzetteCore::cd_from_B_delta(dB_temp);
-                dA_temp ^= (NeoAlzetteCore::rotl(dC0, 24) ^ NeoAlzetteCore::rotl(dD0, 16));
-                
-                yield(dA_temp, dB_temp, w1 + w2);
-            }
-        });
-}
-
-template<typename Yield>
 void NeoAlzetteDifferentialSearch::execute_subround1(
     const SearchConfig& config,
     const DiffState& input,
     int weight_budget,
     Yield&& yield
 ) {
-    const std::uint32_t dA = input.dA;
-    const std::uint32_t dB = input.dB;
+    using Step = NeoAlzetteDifferentialStep;
     
-    // Step 1: A += (rotl(B,31) ^ rotl(B,17) ^ RC[5])
-    std::uint32_t beta = NeoAlzetteCore::rotl(dB, 31) ^ NeoAlzetteCore::rotl(dB, 17);
+    const std::uint32_t dA_in = input.dA;
+    const std::uint32_t dB_in = input.dB;
     
-    enumerate_diff_candidates(dA, beta, weight_budget,
-        [&](std::uint32_t dA_after, int w1) {
-            if (w1 >= weight_budget) return;
+    // Step 1-3: 线性层 + cd_from_B + 跨分支注入（weight = 0）
+    auto [dA_l1, dB_l2] = Step::subround1_linear_layer(dA_in, dB_in);
+    auto [dC0, dD0] = Step::subround1_cd_from_B(dB_l2);
+    std::uint32_t dA_injected = Step::subround1_cross_injection(dA_l1, dC0, dD0);
+    
+    // Step 4: 模加 A + B（关键：枚举候选γ）
+    if (config.use_optimal_gamma) {
+        // 使用Algorithm 4快速找到最优γ
+        auto [gamma_optimal, w_add] = Step::subround1_modular_add_optimal(dA_injected, dB_l2);
+        
+        if (w_add >= 0 && w_add < weight_budget) {
+            // Step 5: 减常量 A - c0
+            std::uint32_t dA_after_add = gamma_optimal;
             
-            // Step 2: B -= RC[6]
-            const std::uint32_t RC6 = NeoAlzetteCore::ROUND_CONSTANTS[6];
-            std::vector<std::uint32_t> dB_candidates = {dB, dB ^ 1};
+            // 启发式：尝试几个候选输出差分
+            std::vector<std::uint32_t> candidates = {
+                dA_after_add,           // 差分不变
+                dA_after_add ^ 1,       // 翻转LSB
+                dA_after_add ^ 0x80000000  // 翻转MSB
+            };
             
-            for (std::uint32_t dB_after : dB_candidates) {
-                int w2 = arx_operators::diff_addconst_bvweight(dB, RC6, dB_after);
-                if (w2 < 0 || (w1 + w2) >= weight_budget) continue;
+            for (std::uint32_t dA_after_sub : candidates) {
+                int w_sub = Step::subround1_subtract_const_weight(dA_after_add, config.c0, dA_after_sub);
                 
-                // Step 3-7: 线性操作
-                std::uint32_t dB_temp = dB_after ^ NeoAlzetteCore::rotl(dA_after, 24);
-                std::uint32_t dA_temp = dA_after ^ NeoAlzetteCore::rotl(dB_temp, 16);
-                dB_temp = NeoAlzetteCore::l1_forward(dB_temp);
-                dA_temp = NeoAlzetteCore::l2_forward(dA_temp);
-                auto [dC1, dD1] = NeoAlzetteCore::cd_from_A_delta(dA_temp);
-                dB_temp ^= (NeoAlzetteCore::rotl(dC1, 24) ^ NeoAlzetteCore::rotl(dD1, 16));
-                
-                yield(dA_temp, dB_temp, w1 + w2);
+                if (w_sub >= 0) {
+                    int total_weight = w_add + w_sub;
+                    if (total_weight < weight_budget) {
+                        yield(dA_after_sub, dB_l2, total_weight);
+                    }
+                }
             }
-        });
+        }
+    } else {
+        // 启发式枚举：尝试多个候选γ
+        enumerate_diff_candidates(dA_injected, dB_l2, weight_budget,
+            [&](std::uint32_t gamma_candidate, int w_add) {
+                if (w_add >= weight_budget) return;
+                
+                // Step 5: 减常量
+                std::vector<std::uint32_t> candidates = {
+                    gamma_candidate, gamma_candidate ^ 1
+                };
+                
+                for (std::uint32_t dA_after_sub : candidates) {
+                    int w_sub = Step::subround1_subtract_const_weight(gamma_candidate, config.c0, dA_after_sub);
+                    
+                    if (w_sub >= 0) {
+                        int total_weight = w_add + w_sub;
+                        if (total_weight < weight_budget) {
+                            yield(dA_after_sub, dB_l2, total_weight);
+                        }
+                    }
+                }
+            });
+    }
+}
+
+template<typename Yield>
+void NeoAlzetteDifferentialSearch::execute_subround2(
+    const SearchConfig& config,
+    const DiffState& input,
+    int weight_budget,
+    Yield&& yield
+) {
+    using Step = NeoAlzetteDifferentialStep;
+    
+    const std::uint32_t dA_in = input.dA;
+    const std::uint32_t dB_in = input.dB;
+    
+    // Step 6-8: 线性层 + cd_from_A + 跨分支注入（weight = 0）
+    auto [dB_l1, dA_l2] = Step::subround2_linear_layer(dB_in, dA_in);
+    auto [dC1, dD1] = Step::subround2_cd_from_A(dA_l2);
+    std::uint32_t dB_injected = Step::subround2_cross_injection(dB_l1, dC1, dD1);
+    
+    // Step 9: 模加 B + A（关键：枚举候选γ）
+    if (config.use_optimal_gamma) {
+        // 使用Algorithm 4快速找到最优γ
+        auto [gamma_optimal, w_add] = Step::subround2_modular_add_optimal(dB_injected, dA_l2);
+        
+        if (w_add >= 0 && w_add < weight_budget) {
+            // Step 10: 减常量 B - c1
+            std::uint32_t dB_after_add = gamma_optimal;
+            
+            // 启发式：尝试几个候选输出差分
+            std::vector<std::uint32_t> candidates = {
+                dB_after_add,
+                dB_after_add ^ 1,
+                dB_after_add ^ 0x80000000
+            };
+            
+            for (std::uint32_t dB_after_sub : candidates) {
+                int w_sub = Step::subround2_subtract_const_weight(dB_after_add, config.c1, dB_after_sub);
+                
+                if (w_sub >= 0) {
+                    int total_weight = w_add + w_sub;
+                    if (total_weight < weight_budget) {
+                        yield(dA_l2, dB_after_sub, total_weight);
+                    }
+                }
+            }
+        }
+    } else {
+        // 启发式枚举
+        enumerate_diff_candidates(dB_injected, dA_l2, weight_budget,
+            [&](std::uint32_t gamma_candidate, int w_add) {
+                if (w_add >= weight_budget) return;
+                
+                // Step 10: 减常量
+                std::vector<std::uint32_t> candidates = {
+                    gamma_candidate, gamma_candidate ^ 1
+                };
+                
+                for (std::uint32_t dB_after_sub : candidates) {
+                    int w_sub = Step::subround2_subtract_const_weight(gamma_candidate, config.c1, dB_after_sub);
+                    
+                    if (w_sub >= 0) {
+                        int total_weight = w_add + w_sub;
+                        if (total_weight < weight_budget) {
+                            yield(dA_l2, dB_after_sub, total_weight);
+                        }
+                    }
+                }
+            });
+    }
 }
 
 } // namespace neoalz

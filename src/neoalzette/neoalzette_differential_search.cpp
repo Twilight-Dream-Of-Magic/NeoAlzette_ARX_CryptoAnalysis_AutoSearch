@@ -41,18 +41,18 @@ void NeoAlzetteDifferentialSearch::search_recursive(
     
     int remaining_budget = config.weight_cap - current.weight;
     
-    // Subround 0
-    execute_subround0(config, current, remaining_budget,
-        [&](std::uint32_t dA_after_sub0, std::uint32_t dB_after_sub0, int weight_sub0) {
-            if (weight_sub0 >= remaining_budget) return;
+    // Subround 1: 执行前半部分（Steps 1-5）
+    execute_subround1(config, current, remaining_budget,
+        [&](std::uint32_t dA_after_sub1, std::uint32_t dB_after_sub1, int weight_sub1) {
+            if (weight_sub1 >= remaining_budget) return;
             
-            DiffState after_sub0(dA_after_sub0, dB_after_sub0, current.weight + weight_sub0);
-            int remaining_after_sub0 = remaining_budget - weight_sub0;
+            DiffState after_sub1(dA_after_sub1, dB_after_sub1, current.weight + weight_sub1);
+            int remaining_after_sub1 = remaining_budget - weight_sub1;
             
-            // Subround 1
-            execute_subround1(config, after_sub0, remaining_after_sub0,
-                [&](std::uint32_t dA_final, std::uint32_t dB_final, int weight_sub1) {
-                    int total_weight_this_round = weight_sub0 + weight_sub1;
+            // Subround 2: 执行后半部分（Steps 6-10）
+            execute_subround2(config, after_sub1, remaining_after_sub1,
+                [&](std::uint32_t dA_final, std::uint32_t dB_final, int weight_sub2) {
+                    int total_weight_this_round = weight_sub1 + weight_sub2;
                     if (total_weight_this_round >= remaining_budget) return;
                     
                     DiffState next_state(dA_final, dB_final, 

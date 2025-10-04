@@ -42,26 +42,26 @@ void NeoAlzetteLinearSearch::search_recursive(
     
     double remaining_budget = std::abs(current.correlation);
     
-    // 白化反向（掩码不变）
-    LinearState before_whitening = current;
+    // 🔴 关键：线性分析是逆向的！
+    // 从当前轮的输出掩码，反向推导上一轮的输出掩码
     
-    // Subround 1 反向
-    execute_subround1_backward(config, before_whitening, remaining_budget,
-        [&](std::uint32_t mA_before_sub1, std::uint32_t mB_before_sub1, double corr1) {
-            double new_corr_after_sub1 = current.correlation * corr1;
+    // Subround 2逆向（Steps 10 → 6）
+    execute_subround2_backward(config, current, remaining_budget,
+        [&](std::uint32_t mA_before_sub2, std::uint32_t mB_before_sub2, double corr2) {
+            double new_corr_after_sub2 = current.correlation * corr2;
             
-            if (std::abs(new_corr_after_sub1) < config.correlation_threshold) return;
+            if (std::abs(new_corr_after_sub2) < config.correlation_threshold) return;
             
-            LinearState before_sub1(mA_before_sub1, mB_before_sub1, new_corr_after_sub1);
+            LinearState before_sub2(mA_before_sub2, mB_before_sub2, new_corr_after_sub2);
             
-            // Subround 0 反向
-            execute_subround0_backward(config, before_sub1, std::abs(new_corr_after_sub1),
-                [&](std::uint32_t mA_before_sub0, std::uint32_t mB_before_sub0, double corr0) {
-                    double final_corr = new_corr_after_sub1 * corr0;
+            // Subround 1逆向（Steps 5 → 1）
+            execute_subround1_backward(config, before_sub2, std::abs(new_corr_after_sub2),
+                [&](std::uint32_t mA_before_sub1, std::uint32_t mB_before_sub1, double corr1) {
+                    double final_corr = new_corr_after_sub2 * corr1;
                     
                     if (std::abs(final_corr) < config.correlation_threshold) return;
                     
-                    LinearState prev_state(mA_before_sub0, mB_before_sub0, final_corr);
+                    LinearState prev_state(mA_before_sub1, mB_before_sub1, final_corr);
                     
                     trail.push_back(prev_state);
                     search_recursive(config, prev_state, round - 1, trail, result);
