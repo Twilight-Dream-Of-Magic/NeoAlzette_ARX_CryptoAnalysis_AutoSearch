@@ -45,8 +45,8 @@ void NeoAlzetteLinearSearch::search_recursive(
     // 🔴 关键：线性分析是逆向的！
     // 从当前轮的输出掩码，反向推导上一轮的输出掩码
     
-    // Subround 2逆向（Steps 10 → 6）
-    execute_subround2_backward(config, current, remaining_budget,
+    // Subround 2逆向分析（Steps 10 → 6）
+    execute_subround2_backward_analysis(config, current, remaining_budget,
         [&](std::uint32_t mA_before_sub2, std::uint32_t mB_before_sub2, double corr2) {
             double new_corr_after_sub2 = current.correlation * corr2;
             
@@ -54,8 +54,8 @@ void NeoAlzetteLinearSearch::search_recursive(
             
             LinearState before_sub2(mA_before_sub2, mB_before_sub2, new_corr_after_sub2);
             
-            // Subround 1逆向（Steps 5 → 1）
-            execute_subround1_backward(config, before_sub2, std::abs(new_corr_after_sub2),
+            // Subround 1逆向分析（Steps 5 → 1）
+            execute_subround1_backward_analysis(config, before_sub2, std::abs(new_corr_after_sub2),
                 [&](std::uint32_t mA_before_sub1, std::uint32_t mB_before_sub1, double corr1) {
                     double final_corr = new_corr_after_sub2 * corr1;
                     

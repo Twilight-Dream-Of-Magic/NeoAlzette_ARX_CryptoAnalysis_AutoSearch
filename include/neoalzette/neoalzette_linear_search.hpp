@@ -190,7 +190,7 @@ private:
     }
     
     /**
-     * @brief 执行Subround 2逆向（使用新单步函数）
+     * @brief 执行Subround 2逆向分析（使用新单步函数）
      * 
      * 逆向顺序：Step 10 → 6
      * 10. B - c1 (减常量)
@@ -200,7 +200,7 @@ private:
      * 6. L1(B), L2(A) (线性层转置)
      */
     template<typename Yield>
-    static void execute_subround2_backward(
+    static void execute_subround2_backward_analysis(
         const SearchConfig& config,
         const LinearState& output,
         double correlation_budget,
@@ -208,7 +208,7 @@ private:
     );
     
     /**
-     * @brief 执行Subround 1逆向（使用新单步函数）
+     * @brief 执行Subround 1逆向分析（使用新单步函数）
      * 
      * 逆向顺序：Step 5 → 1
      * 5. B ^= A_L1 (跨分支注入)
@@ -218,7 +218,7 @@ private:
      * 1. cd_from_B(B) (XOR操作)
      */
     template<typename Yield>
-    static void execute_subround1_backward(
+    static void execute_subround1_backward_analysis(
         const SearchConfig& config,
         const LinearState& output,
         double correlation_budget,
@@ -231,7 +231,7 @@ private:
 // ============================================================================
 
 template<typename Yield>
-void NeoAlzetteLinearSearch::execute_subround2_backward(
+void NeoAlzetteLinearSearch::execute_subround2_backward_analysis(
     const SearchConfig& config,
     const LinearState& output,
     double correlation_budget,
@@ -300,7 +300,7 @@ void NeoAlzetteLinearSearch::execute_subround2_backward(
 }
 
 template<typename Yield>
-void NeoAlzetteLinearSearch::execute_subround1_backward(
+void NeoAlzetteLinearSearch::execute_subround1_backward_analysis(
     const SearchConfig& config,
     const LinearState& output,
     double correlation_budget,
