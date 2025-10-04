@@ -8,7 +8,7 @@
 #include <limits>
 #include <string>
 #include <optional>
-#include "neoalzette_core.hpp"
+#include "neoalzette/neoalzette_core.hpp"
 
 namespace neoalz {
 

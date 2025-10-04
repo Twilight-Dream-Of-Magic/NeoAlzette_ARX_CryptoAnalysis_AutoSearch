@@ -1,0 +1,78 @@
+# ✅ NeoAlzette ARX密碼分析工程 - 重構完成
+
+## 📊 編譯狀態
+
+✅ libneoalzette.a           (72KB)  - NeoAlzette核心庫
+✅ libarx_framework.a        (182KB) - ARX搜索框架庫  
+✅ highway_table_build                - Highway表工具（差分）
+✅ highway_table_build_lin            - Highway表工具（線性）
+
+## 📁 文件夾結構
+
+```
+include/
+├── arx_analysis_operators/     ⭐ 底層ARX算子（最優化）
+│   ├── differential_xdp_add.hpp      LM-2001, O(1)
+│   ├── differential_addconst.hpp     BvWeight, O(log²n)
+│   ├── linear_cor_add.hpp            Wallén M_n^T, O(n)
+│   ├── linear_cor_addconst.hpp       Wallén DP, O(n)
+│   └── bitvector_ops.hpp             輔助函數
+│
+├── arx_search_framework/       ⭐ 自動化搜索框架
+│   ├── pddt/pddt_algorithm1.hpp
+│   ├── clat/algorithm1_const.hpp, clat_builder.hpp, clat_search.hpp
+│   ├── matsui/matsui_algorithm2.hpp
+│   └── medcp_analyzer.hpp, melcc_analyzer.hpp
+│
+└── neoalzette/                 ⭐ NeoAlzette專用
+    ├── neoalzette_core.hpp
+    ├── neoalzette_differential.hpp
+    ├── neoalzette_linear.hpp
+    ├── neoalzette_medcp.hpp
+    └── neoalzette_melcc.hpp
+```
+
+## ✅ 實現狀態
+
+### 底層ARX算子（對照論文最優化）
+- ✅ xdp⁺ (變量-變量): LM-2001, O(1)
+- ✅ xdp⁺ (變量-常量): BvWeight, O(log²n)
+- ✅ cor (變量-變量): Wallén M_n^T, O(n)
+- ✅ cor (變量-常量): Wallén DP, O(n)
+
+### 搜索框架（完整實現）
+- ✅ pDDT Algorithm 1
+- ✅ Matsui Algorithm 2 (Highways/Country-roads)
+- ✅ cLAT Algorithm 1/2/3 (Huang & Wang 2020)
+- ✅ SLR (Splitting-Lookup-Recombination)
+- ✅ MEDCP/MELCC分析器
+
+### 關鍵特性
+- ✅ 變量-變量 vs 變量-常量嚴格區分
+- ✅ 所有算子使用最優複雜度
+- ✅ 無極端SIMD優化（保持可讀性）
+- ✅ 完整README文檔
+
+## 📚 論文-代碼對應
+
+| 論文 | 算法 | 文件 | 複雜度 |
+|------|------|------|--------|
+| Lipmaa & Moriai 2001 | LM-2001 | differential_xdp_add.hpp | O(1) |
+| Bit-Vector 2022 | BvWeight | differential_addconst.hpp | O(log²n) |
+| Wallén 2003 | M_n^T | linear_cor_add.hpp | O(n) |
+| Wallén 2003 | Bit-wise DP | linear_cor_addconst.hpp | O(n) |
+| ARX Differential Trails | pDDT | pddt/pddt_algorithm1.hpp | - |
+| ARX Differential Trails | Matsui | matsui/matsui_algorithm2.hpp | - |
+| Huang & Wang 2020 | Algorithm 1 | clat/algorithm1_const.hpp | - |
+| Huang & Wang 2020 | Algorithm 2 | clat/clat_builder.hpp | 8-bit, ~1.2GB |
+| Huang & Wang 2020 | Algorithm 3 | clat/clat_search.hpp | SLR |
+
+## 🗑️ 已刪除
+
+- src/bnb.cpp, pddt.cpp, neoalzette.cpp
+- src/complete_matsui_demo.cpp, main_pddt.cpp
+- include/algorithm1_bvweight.hpp
+
+## 📝 重構日期
+
+2025-10-04
