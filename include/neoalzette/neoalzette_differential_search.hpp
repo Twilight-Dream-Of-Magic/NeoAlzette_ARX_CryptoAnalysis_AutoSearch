@@ -8,6 +8,7 @@
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
 #include "arx_search_framework/pddt/pddt_algorithm1.hpp"
+#include "utility_tools.hpp"  // SimplePDDT
 
 namespace neoalz {
 
@@ -132,8 +133,11 @@ public:
         int weight_cap = 30;             ///< 权重上限（MEDCP = 2^-weight_cap）
         std::uint32_t initial_dA = 1;    ///< 初始差分A（通常设为1）
         std::uint32_t initial_dB = 0;    ///< 初始差分B（通常设为0）
-        bool use_pddt = true;            ///< 是否使用pDDT表加速（TODO）
+        bool use_pddt = false;           ///< 是否使用pDDT表加速（需要预先构建表）
         int pddt_threshold = 10;         ///< pDDT表的权重阈值
+        
+        // pDDT表指针（如果use_pddt=true，必须提供）
+        const void* pddt_table = nullptr;  ///< SimplePDDT*类型
     };
     
     /**
