@@ -43,31 +43,6 @@ add_executable(highway_table_build_lin src/highway_table_build_lin.cpp)
 target_include_directories(highway_table_build_lin PUBLIC include)
 target_link_libraries(highway_table_build_lin PRIVATE neoalzette)
 
-add_executable(analyze_medcp src/analyze_medcp.cpp)
-target_include_directories(analyze_medcp PUBLIC include)
-target_link_libraries(analyze_medcp PRIVATE neoalzette)
-
-add_executable(analyze_melcc src/analyze_melcc.cpp)
-target_include_directories(analyze_melcc PUBLIC include)
-target_link_libraries(analyze_melcc PRIVATE neoalzette)
-
-# Optimized versions with parallel support
-add_executable(analyze_medcp_optimized src/analyze_medcp_optimized.cpp)
-target_include_directories(analyze_medcp_optimized PUBLIC include)
-target_link_libraries(analyze_medcp_optimized PRIVATE neoalzette)
-
-add_executable(analyze_melcc_optimized src/analyze_melcc_optimized.cpp)
-target_include_directories(analyze_melcc_optimized PUBLIC include)
-target_link_libraries(analyze_melcc_optimized PRIVATE neoalzette)
-
-# Link OpenMP if available
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(analyze_medcp_optimized PRIVATE OpenMP::OpenMP_CXX)
-    target_link_libraries(analyze_melcc_optimized PRIVATE OpenMP::OpenMP_CXX)
-    target_compile_definitions(analyze_medcp_optimized PRIVATE OPENMP_ENABLED)
-    target_compile_definitions(analyze_melcc_optimized PRIVATE OPENMP_ENABLED)
-endif()
-
 # Complete Matsui algorithms implementation
 add_executable(complete_matsui_demo src/complete_matsui_demo.cpp)
 target_include_directories(complete_matsui_demo PUBLIC include)
