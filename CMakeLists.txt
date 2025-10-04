@@ -79,3 +79,7 @@ endif()
 add_executable(test_addconst_exact src/test_addconst_exact.cpp)
 target_include_directories(test_addconst_exact PUBLIC include)
 target_link_libraries(test_addconst_exact PRIVATE neoalzette)
+
+add_executable(test_algorithm1 src/test_algorithm1.cpp)
+target_include_directories(test_algorithm1 PUBLIC include)
+target_link_libraries(test_algorithm1 PRIVATE neoalzette)
