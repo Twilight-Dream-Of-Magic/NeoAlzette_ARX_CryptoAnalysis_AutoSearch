@@ -25,7 +25,7 @@ namespace neoalz {
  * 转置规则：
  * 1. 模加/模减：使用Wallén算法（变量+变量）或DP算法（变量+常量）
  * 2. XOR：α_in = α_out（XOR自己就是转置）
- * 3. 线性层：使用backward（即转置）
+ * 3. 线性层：使用transpose（转置矩阵）
  * 4. 旋转：rotr是rotl的转置
  */
 class NeoAlzetteSingleRoundLinear {
@@ -156,11 +156,11 @@ void NeoAlzetteSingleRoundLinear::enumerate_subround1_backward(
     // 简化版本：假设cd注入的影响可以忽略或线性传播
     // 完整版本需要详细推导cd_from_A的转置矩阵
     
-    // Step 6 反向: A = l2_forward(A) → 使用 l2_backward 做转置
-    std::uint32_t mask_A_before_l2 = NeoAlzetteCore::l2_backward(mask_A_before_cd);
+    // Step 6 反向: A = l2_forward(A) → 使用 l2_transpose 做转置
+    std::uint32_t mask_A_before_l2 = NeoAlzetteCore::l2_transpose(mask_A_before_cd);
     
-    // Step 5 反向: B = l1_forward(B) → 使用 l1_backward 做转置
-    std::uint32_t mask_B_before_l1 = NeoAlzetteCore::l1_backward(mask_B_before_cd);
+    // Step 5 反向: B = l1_forward(B) → 使用 l1_transpose 做转置
+    std::uint32_t mask_B_before_l1 = NeoAlzetteCore::l1_transpose(mask_B_before_cd);
     
     // Step 4 反向: A ^= rotl(B, 16)
     // 前向：A' = A ^ rotl(B, 16)
@@ -226,8 +226,8 @@ void NeoAlzetteSingleRoundLinear::enumerate_subround0_backward(
     std::uint32_t mask_A_before_cd = mask_A_out;
     std::uint32_t mask_B_before_cd = mask_B_out;
     
-    std::uint32_t mask_A_before_l1 = NeoAlzetteCore::l1_backward(mask_A_before_cd);
-    std::uint32_t mask_B_before_l2 = NeoAlzetteCore::l2_backward(mask_B_before_cd);
+    std::uint32_t mask_A_before_l1 = NeoAlzetteCore::l1_transpose(mask_A_before_cd);
+    std::uint32_t mask_B_before_l2 = NeoAlzetteCore::l2_transpose(mask_B_before_cd);
     
     std::uint32_t mask_B_before_xor2 = mask_B_before_l2;
     std::uint32_t mask_A_before_xor2 = mask_A_before_l1 ^ NeoAlzetteCore::rotr(mask_B_before_l2, 16);

@@ -58,11 +58,11 @@ public:
     // Linear mask backward propagation
     // ========================================================================
     
-    // Exact backtranspose for L1 (computed via Gauss-Jordan elimination)
-    static constexpr std::uint32_t l1_backtranspose_exact(std::uint32_t x) noexcept;
+    // L1 transpose for linear cryptanalysis (rotl → rotr)
+    static constexpr std::uint32_t l1_transpose(std::uint32_t x) noexcept;
     
-    // Exact backtranspose for L2 (computed via Gauss-Jordan elimination)
-    static constexpr std::uint32_t l2_backtranspose_exact(std::uint32_t x) noexcept;
+    // L2 transpose for linear cryptanalysis (rotl → rotr)
+    static constexpr std::uint32_t l2_transpose(std::uint32_t x) noexcept;
 
     // ========================================================================
     // Wallén automaton for optimized enumeration
@@ -284,18 +284,20 @@ void MELCCAnalyzer::WallenAutomaton::enumerate_omegas(
 // Inline constexpr implementations
 // ============================================================================
 
-constexpr std::uint32_t MELCCAnalyzer::l1_backtranspose_exact(std::uint32_t x) noexcept {
-    // Precomputed exact inverse of L1 transformation
-    return x ^ NeoAlzetteCore::rotr(x,2) ^ NeoAlzetteCore::rotr(x,8) ^ NeoAlzetteCore::rotr(x,10) ^ NeoAlzetteCore::rotr(x,14)
-             ^ NeoAlzetteCore::rotr(x,16)^ NeoAlzetteCore::rotr(x,18)^ NeoAlzetteCore::rotr(x,20)^ NeoAlzetteCore::rotr(x,24)
-             ^ NeoAlzetteCore::rotr(x,28)^ NeoAlzetteCore::rotr(x,30);
+constexpr std::uint32_t MELCCAnalyzer::l1_transpose(std::uint32_t x) noexcept {
+    // Transpose: 把所有 rotl 改成 rotr
+    // L1(x) = x ^ rotl(x, 2) ^ rotl(x, 10) ^ rotl(x, 18) ^ rotl(x, 24)
+    // L1^T(x) = x ^ rotr(x, 2) ^ rotr(x, 10) ^ rotr(x, 18) ^ rotr(x, 24)
+    return x ^ NeoAlzetteCore::rotr(x, 2) ^ NeoAlzetteCore::rotr(x, 10) ^ 
+             NeoAlzetteCore::rotr(x, 18) ^ NeoAlzetteCore::rotr(x, 24);
 }
 
-constexpr std::uint32_t MELCCAnalyzer::l2_backtranspose_exact(std::uint32_t x) noexcept {
-    // Precomputed exact inverse of L2 transformation  
-    return x ^ NeoAlzetteCore::rotr(x,2) ^ NeoAlzetteCore::rotr(x,4) ^ NeoAlzetteCore::rotr(x,8) ^ NeoAlzetteCore::rotr(x,12)
-             ^ NeoAlzetteCore::rotr(x,14)^ NeoAlzetteCore::rotr(x,16)^ NeoAlzetteCore::rotr(x,18)^ NeoAlzetteCore::rotr(x,22)
-             ^ NeoAlzetteCore::rotr(x,24)^ NeoAlzetteCore::rotr(x,30);
+constexpr std::uint32_t MELCCAnalyzer::l2_transpose(std::uint32_t x) noexcept {
+    // Transpose: 把所有 rotl 改成 rotr
+    // L2(x) = x ^ rotl(x, 8) ^ rotl(x, 14) ^ rotl(x, 22) ^ rotl(x, 30)
+    // L2^T(x) = x ^ rotr(x, 8) ^ rotr(x, 14) ^ rotr(x, 22) ^ rotr(x, 30)
+    return x ^ NeoAlzetteCore::rotr(x, 8) ^ NeoAlzetteCore::rotr(x, 14) ^ 
+             NeoAlzetteCore::rotr(x, 22) ^ NeoAlzetteCore::rotr(x, 30);
 }
 
 } // namespace neoalz
