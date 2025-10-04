@@ -7,7 +7,8 @@
 #include <limits>
 #include <cmath>
 #include "neoalzette/neoalzette_core.hpp"
-#include "arx_analysis_operators/bitvector_ops.hpp"
+#include "arx_analysis_operators/differential_xdp_add.hpp"
+#include "arx_analysis_operators/differential_addconst.hpp"
 
 namespace neoalz {
 
@@ -55,7 +56,12 @@ public:
     };
     
     // ========================================================================
-    // 核心計算函數（基於Lipmaa-Moriai）
+    // 核心計算函數 - ⭐ 使用底層ARX算子
+    // ========================================================================
+    // 
+    // 本類作為NeoAlzette專用的高層封裝，內部調用：
+    // - arx_analysis_operators/differential_xdp_add.hpp (變量-變量)
+    // - arx_analysis_operators/differential_addconst.hpp (變量-常量)
     // ========================================================================
     
     /**

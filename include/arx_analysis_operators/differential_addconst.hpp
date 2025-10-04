@@ -36,7 +36,7 @@ inline int diff_addconst_bvweight(
     std::uint32_t constant,
     std::uint32_t delta_y
 ) noexcept {
-    using namespace bitvector_ops;
+    using namespace bitvector;
     
     const std::uint32_t u = delta_x;
     const std::uint32_t v = delta_y;
