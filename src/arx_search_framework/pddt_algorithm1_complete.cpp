@@ -231,45 +231,29 @@ std::optional<int> PDDTAlgorithm1Complete::compute_lm_weight(
         return (gamma_k == 0) ? std::optional<int>(0) : std::nullopt;
     }
     
+    /**
+     * Paper formula (Line 333-335):
+     * 
+     * xdp⁺(α, β → γ) = 2^(-Σ_{i=0}^{n-1} ¬eq(α[i],β[i],γ[i]))
+     * where eq(α[i], β[i], γ[i]) = 1 ⇐⇒ α[i] = β[i] = γ[i]
+     * 
+     * For k-bit prefix:
+     * weight = Σ_{i=0}^{k-1} ¬eq(α[i],β[i],γ[i])
+     * 
+     * Implementation via AOP (equivalent):
+     * AOP(α, β, γ) = α ⊕ β ⊕ γ ⊕ ((α∧β) ⊕ ((α⊕β)∧γ)) << 1
+     * weight = hw(AOP ∧ mask(k))
+     */
+    
     // Compute AOP for k-bit prefix
     std::uint32_t aop = compute_aop(alpha_k, beta_k, gamma_k);
     
-    // Mask to k bits
+    // Mask to k bits (count only first k bits)
     std::uint32_t mask = (1ULL << k) - 1;
     aop &= mask;
     
-    // Weight is Hamming weight of AOP
+    // Weight is Hamming weight of AOP (Proposition 1 guarantees monotonicity)
     int weight = __builtin_popcount(aop);
-    
-    // Additional feasibility check using eq function
-    // eq(α[i], β[i], γ[i]) = 1 iff α[i] = β[i] = γ[i]
-    // This provides necessary condition for valid differential
-    
-    for (int i = 0; i < k; ++i) {
-        int a_bit = (alpha_k >> i) & 1;
-        int b_bit = (beta_k >> i) & 1;
-        int g_bit = (gamma_k >> i) & 1;
-        
-        // Check consistency with carry propagation
-        // (This is a simplified check; full check is more complex)
-        if (i > 0) {
-            int prev_aop_bit = (aop >> (i - 1)) & 1;
-            
-            // If previous AOP bit is 1, carry is possible
-            // Check if current bits are consistent with carry
-            if (prev_aop_bit == 1) {
-                // Carry propagation condition
-                int xor_part = a_bit ^ b_bit ^ g_bit;
-                int and_part = (a_bit & b_bit) ^ ((a_bit ^ b_bit) & g_bit);
-                
-                // Consistency check (simplified)
-                if (xor_part != 0 && and_part != 0) {
-                    // Potential inconsistency
-                    continue;
-                }
-            }
-        }
-    }
     
     return std::optional<int>(weight);
 }
