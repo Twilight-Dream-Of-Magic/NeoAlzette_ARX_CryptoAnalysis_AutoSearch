@@ -104,42 +104,112 @@ public:
     /**
      * @brief 模加常量的差分分析：X + C → Y
      * 
-     * 關鍵洞察：常量C的差分為0
+     * ⚠️ 警告：絕對不能用LM簡化方法（設β=0）！
      * 
      * 基於論文：
-     * - A Bit-Vector Differential Model... (2022), Eq. (1)
-     * - 論文明確指出：可以用LM方法，設第二個差分為0
-     * - valid_a(Δx, Δy) ← valid((Δx, 0), Δy)
-     * - weight_a(Δx, Δy) ← weight((Δx, 0), Δy)
+     * - "A Bit-Vector Differential Model..." (2022), Theorem 2 (Machado 2015)
+     * - 論文實驗證明：LM簡化方法對固定常量有50%錯誤率！
+     * - 必須使用精確的Theorem 2實現
      * 
-     * 優點：代碼簡潔，使用已驗證的LM-2001方法
-     * 注意：對固定常量有微小誤差（<3%），但搜索可接受
+     * 數學公式：
+     * Pr[u →^a v] = ∏_{i=0}^{n-1} φ_i
      * 
-     * @param delta_x 輸入差分
-     * @param constant 常量C（實際值不影響，因為差分為0）
-     * @param delta_y 輸出差分
+     * 其中 S_i = (u[i-1], v[i-1], u[i]⊕v[i]) 是3位狀態
+     * φ_i 和 δ_i 根據 S_i 和 a[i] 計算（見Theorem 2）
+     * 
+     * @param delta_x 輸入差分 u
+     * @param constant 常量 a（必須使用實際值！）
+     * @param delta_y 輸出差分 v
      * @return 差分權重（-1表示不可行）
      */
     static int compute_diff_weight_addconst(
         std::uint32_t delta_x,
-        std::uint32_t constant,  // 未使用，因為差分為0
+        std::uint32_t constant,
         std::uint32_t delta_y
     ) noexcept {
-        // 論文Eq. (1)：設常量的差分為0
-        // 直接調用LM-2001方法
-        (void)constant;  // 避免未使用警告
-        return compute_diff_weight_add(delta_x, 0, delta_y);
+        // Theorem 2 的精確實現
+        double delta = 0.0;  // δ_{-1} = 0
+        double prob = 1.0;
+        
+        const std::uint32_t u = delta_x;
+        const std::uint32_t v = delta_y;
+        const std::uint32_t a = constant;
+        
+        for (int i = 0; i < 32; ++i) {
+            // 提取位
+            int u_prev = (i > 0) ? ((u >> (i-1)) & 1) : 0;
+            int v_prev = (i > 0) ? ((v >> (i-1)) & 1) : 0;
+            int u_i = (u >> i) & 1;
+            int v_i = (v >> i) & 1;
+            int a_i = (a >> i) & 1;
+            
+            // S_i = (u[i-1], v[i-1], u[i]⊕v[i])
+            int state = (u_prev << 2) | (v_prev << 1) | (u_i ^ v_i);
+            
+            double phi_i = 1.0;
+            double delta_next = 0.0;
+            
+            // 根據Theorem 2的公式計算 φ_i 和 δ_i
+            switch (state) {
+                case 0b000:  // 000
+                    phi_i = 1.0;
+                    delta_next = (a_i + delta) / 2.0;
+                    break;
+                    
+                case 0b001:  // 001 - 不可行
+                    return -1;
+                    
+                case 0b010:  // 010
+                case 0b100:  // 100
+                    phi_i = 0.5;
+                    delta_next = a_i;
+                    break;
+                    
+                case 0b011:  // 011
+                case 0b101:  // 101
+                    phi_i = 0.5;
+                    delta_next = delta;
+                    break;
+                    
+                case 0b110:  // 110
+                    // φ_i = 1 - (a[i-1] + δ_{i-1} - 2·a[i-1]·δ_{i-1})
+                    phi_i = 1.0 - (a_i + delta - 2.0 * a_i * delta);
+                    delta_next = a_i;
+                    break;
+                    
+                case 0b111:  // 111
+                    // φ_i = a[i-1] + δ_{i-1} - 2·a[i-1]·δ_{i-1}
+                    phi_i = a_i + delta - 2.0 * a_i * delta;
+                    delta_next = 0.5;
+                    break;
+                    
+                default:
+                    return -1;
+            }
+            
+            // 檢查可行性
+            if (phi_i <= 0.0) return -1;
+            
+            prob *= phi_i;
+            delta = delta_next;
+        }
+        
+        // 計算權重
+        if (prob <= 0.0) return -1;
+        return static_cast<int>(std::ceil(-std::log2(prob)));
     }
     
     /**
      * @brief 模減常量的差分分析：X - C → Y
      * 
-     * 轉換：X - C = X + (~C + 1)
-     * 因此可以使用模加常量的方法
+     * 轉換：X - C = X + (2^n - C) = X + (~C + 1) mod 2^n
+     * 
+     * ⚠️ 注意：模減常量也需要使用精確方法！
+     * 雖然常量的差分為0，但carry傳播仍然影響差分權重
      * 
      * @param delta_x 輸入差分
      * @param constant 常量C
-     * @param delta_y 輸出差分（通常等於delta_x，因為常量差分為0）
+     * @param delta_y 輸出差分
      * @return 差分權重
      */
     static int compute_diff_weight_subconst(
@@ -147,14 +217,9 @@ public:
         std::uint32_t constant,
         std::uint32_t delta_y
     ) noexcept {
-        // 關鍵洞察：X - C 的差分傳播
-        // ∆(X - C) = (X⊕∆X) - C ⊕ X - C = ∆X（常量差分為0）
-        // 因此，差分權重為0，但需要 delta_y == delta_x
-        if (delta_x == delta_y) {
-            return 0;  // 完全確定，權重0
-        } else {
-            return -1;  // 不可行
-        }
+        // X - C = X + (~C + 1)
+        std::uint32_t neg_constant = (~constant + 1) & 0xFFFFFFFF;
+        return compute_diff_weight_addconst(delta_x, neg_constant, delta_y);
     }
     
     // ========================================================================
