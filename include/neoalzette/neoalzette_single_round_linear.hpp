@@ -292,26 +292,64 @@ std::uint32_t NeoAlzetteSingleRoundLinear::cd_from_B_transpose(
     std::uint32_t mask_C,
     std::uint32_t mask_D
 ) {
-    // 前向：c = l2_forward(B ^ rc0)
-    //      d = l1_forward(rotr(B, 3) ^ rc1)
-    //      t = rotl(c ^ d, 31)
-    //      c ^= rotl(d, 17)
-    //      d ^= rotr(t, 16)
+    // === 完整推导的转置 ===
     // 
-    // 反向（转置）：需要推导从 (mask_C, mask_D) 到 mask_B 的线性映射
+    // 前向（简化，常量消失）：
+    //   c0 = l2_forward(B)
+    //   d0 = l1_forward(rotr(B, 3))
+    //   t = rotl(c0 ^ d0, 31)
+    //   c = c0 ^ rotl(d0, 17)
+    //   d = d0 ^ rotr(t, 16)
+    //     = d0 ^ rotl(c0, 15) ^ rotl(d0, 15)
     // 
-    // 简化版本：假设线性组合
-    std::uint32_t mask_B = mask_C ^ mask_D;
-    return mask_B;
+    // 掩码传播（反向）：
+    //   从 c: mask_C · c = mask_C · c0 ⊕ rotr(mask_C, 17) · d0
+    //   从 d: mask_D · d = rotr(mask_D, 15) · c0 ⊕ (mask_D ^ rotr(mask_D, 15)) · d0
+    // 
+    // Step 1: 推导到 (mask_c0, mask_d0)
+    std::uint32_t mask_c0 = mask_C ^ NeoAlzetteCore::rotr(mask_D, 15);
+    std::uint32_t mask_d0 = NeoAlzetteCore::rotr(mask_C, 17) ^ mask_D ^ NeoAlzetteCore::rotr(mask_D, 15);
+    
+    // Step 2: 通过 L1, L2 的转置传播到 B
+    // c0 = l2_forward(B) → mask_B_from_c0 = l2_transpose(mask_c0)
+    // d0 = l1_forward(rotr(B, 3)) → mask_B_from_d0 = rotl(l1_transpose(mask_d0), 3)
+    std::uint32_t mask_B_from_c0 = NeoAlzetteCore::l2_transpose(mask_c0);
+    std::uint32_t mask_B_from_d0 = NeoAlzetteCore::rotl(NeoAlzetteCore::l1_transpose(mask_d0), 3);
+    
+    // Step 3: 合并（因为 B 同时影响 c0 和 d0）
+    return mask_B_from_c0 ^ mask_B_from_d0;
 }
 
 std::uint32_t NeoAlzetteSingleRoundLinear::cd_from_A_transpose(
     std::uint32_t mask_C,
     std::uint32_t mask_D
 ) {
-    // 类似 cd_from_B_transpose
-    std::uint32_t mask_A = mask_C ^ mask_D;
-    return mask_A;
+    // === 完整推导的转置 ===
+    // 
+    // 前向（简化，常量消失）：
+    //   c0 = l1_forward(A)
+    //   d0 = l2_forward(rotl(A, 24))
+    //   t = rotr(c0 ^ d0, 31)
+    //   c = c0 ^ rotr(d0, 17)
+    //   d = d0 ^ rotl(t, 16)
+    //     = d0 ^ rotr(c0, 15) ^ rotr(d0, 15)
+    // 
+    // 掩码传播（反向）：
+    //   从 c: mask_C · c = mask_C · c0 ⊕ rotl(mask_C, 17) · d0
+    //   从 d: mask_D · d = rotl(mask_D, 15) · c0 ⊕ (mask_D ^ rotl(mask_D, 15)) · d0
+    // 
+    // Step 1: 推导到 (mask_c0, mask_d0)
+    std::uint32_t mask_c0 = mask_C ^ NeoAlzetteCore::rotl(mask_D, 17);
+    std::uint32_t mask_d0 = NeoAlzetteCore::rotl(mask_C, 15) ^ mask_D ^ NeoAlzetteCore::rotl(mask_D, 15);
+    
+    // Step 2: 通过 L1, L2 的转置传播到 A
+    // c0 = l1_forward(A) → mask_A_from_c0 = l1_transpose(mask_c0)
+    // d0 = l2_forward(rotl(A, 24)) → mask_A_from_d0 = rotr(l2_transpose(mask_d0), 24)
+    std::uint32_t mask_A_from_c0 = NeoAlzetteCore::l1_transpose(mask_c0);
+    std::uint32_t mask_A_from_d0 = NeoAlzetteCore::rotr(NeoAlzetteCore::l2_transpose(mask_d0), 24);
+    
+    // Step 3: 合并
+    return mask_A_from_c0 ^ mask_A_from_d0;
 }
 
 } // namespace neoalz
