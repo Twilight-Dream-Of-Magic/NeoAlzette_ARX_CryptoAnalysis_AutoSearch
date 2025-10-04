@@ -29,6 +29,8 @@ set(NEOALZETTE_SOURCES
     src/neoalzette/neoalzette_linear.cpp
     src/neoalzette/neoalzette_medcp.cpp
     src/neoalzette/neoalzette_melcc.cpp
+    src/neoalzette/neoalzette_differential_search.cpp
+    src/neoalzette/neoalzette_linear_search.cpp
 )
 
 add_library(neoalzette STATIC ${NEOALZETTE_SOURCES})
