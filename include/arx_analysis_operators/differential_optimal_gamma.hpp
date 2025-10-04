@@ -69,36 +69,60 @@ inline std::uint32_t aop(std::uint32_t x) noexcept {
 }
 
 /**
- * @brief Bit-reverse函数
+ * @brief Bit-reverse函数（n位）
  * 
  * 论文Line 302: x'_i := x_{n-i}
  * 
+ * ⚠️ 关键：只reverse低n位，高位保持为0
+ * 
  * @param x 输入32位整数
- * @return bit-reversed的x
+ * @param n 位宽（默认32）
+ * @return bit-reversed的低n位
  */
-inline std::uint32_t bitreverse32(std::uint32_t x) noexcept {
-    // 使用标准bit-reverse算法
-    x = ((x & 0x55555555) << 1) | ((x >> 1) & 0x55555555);  // 交换相邻位
-    x = ((x & 0x33333333) << 2) | ((x >> 2) & 0x33333333);  // 交换2位块
-    x = ((x & 0x0F0F0F0F) << 4) | ((x >> 4) & 0x0F0F0F0F);  // 交换4位块
-    x = ((x & 0x00FF00FF) << 8) | ((x >> 8) & 0x00FF00FF);  // 交换字节
-    x = (x << 16) | (x >> 16);                               // 交换半字
-    return x;
+inline std::uint32_t bitreverse_n(std::uint32_t x, int n = 32) noexcept {
+    if (n == 32) {
+        // 完整32位reverse
+        x = ((x & 0x55555555) << 1) | ((x >> 1) & 0x55555555);
+        x = ((x & 0x33333333) << 2) | ((x >> 2) & 0x33333333);
+        x = ((x & 0x0F0F0F0F) << 4) | ((x >> 4) & 0x0F0F0F0F);
+        x = ((x & 0x00FF00FF) << 8) | ((x >> 8) & 0x00FF00FF);
+        x = (x << 16) | (x >> 16);
+        return x;
+    } else {
+        // 只reverse低n位
+        std::uint32_t result = 0;
+        for (int i = 0; i < n; ++i) {
+            if (x & (1u << i)) {
+                result |= 1u << (n - 1 - i);
+            }
+        }
+        return result;
+    }
 }
 
 /**
- * @brief aopr(x) - All-One Parity Reverse
+ * @brief 32位完整bit-reverse（向后兼容）
+ */
+inline std::uint32_t bitreverse32(std::uint32_t x) noexcept {
+    return bitreverse_n(x, 32);
+}
+
+/**
+ * @brief aopr(x, n) - All-One Parity Reverse（n位）
  * 
  * 论文Line 301-302:
  * aopr(x) = aop(x'), where x'_i := x_{n-i}
  * 
+ * ⚠️ 关键：只对低n位进行bit-reverse
+ * 
  * @param x 输入32位整数
+ * @param n 位宽（默认32）
  * @return aopr(x)
  */
-inline std::uint32_t aopr(std::uint32_t x) noexcept {
-    std::uint32_t x_rev = bitreverse32(x);
+inline std::uint32_t aopr(std::uint32_t x, int n = 32) noexcept {
+    std::uint32_t x_rev = bitreverse_n(x, n);
     std::uint32_t result = aop(x_rev);
-    return bitreverse32(result);
+    return bitreverse_n(result, n);
 }
 
 /**
@@ -108,50 +132,58 @@ inline std::uint32_t aopr(std::uint32_t x) noexcept {
  * 
  * 给定输入差分(α, β)，找到使得DP+(α, β → γ)最大的γ
  * 
+ * ⚠️ 重要：支持任意位宽n（默认32）
+ * 
  * 算法步骤：
  * 1. r ← α ∧ 1;
  * 2. e ← ¬(α ⊕ β) ∧ ¬r;
  * 3. a ← e ∧ (e << 1) ∧ (α ⊕ (α << 1));
- * 4. p ← aopr(a);
+ * 4. p ← aopr(a, n);  ← 注意n！
  * 5. a ← (a ∨ (a >> 1)) ∧ ¬r;
  * 6. b ← (a ∨ e) << 1;
  * 7. γ ← ((α ⊕ p) ∧ a) ∨ ((α ⊕ β ⊕ (α << 1)) ∧ ¬a ∧ b) ∨ (α ∧ ¬a ∧ ¬b);
  * 8. γ ← (γ ∧ ¬1) ∨ ((α ⊕ β) ∧ 1);
- * 9. Return γ
+ * 9. Return γ & mask(n)
  * 
  * @param alpha 输入差分α
  * @param beta 输入差分β
+ * @param n 位宽（默认32）
  * @return 最优输出差分γ
  */
 inline std::uint32_t find_optimal_gamma(
     std::uint32_t alpha,
-    std::uint32_t beta
+    std::uint32_t beta,
+    int n = 32
 ) noexcept {
+    // Mask for n bits
+    std::uint32_t mask = (n == 32) ? 0xFFFFFFFFu : ((1u << n) - 1);
+    alpha &= mask;
+    beta &= mask;
     // Step 1: r ← α ∧ 1
     std::uint32_t r = alpha & 1;
     
     // Step 2: e ← ¬(α ⊕ β) ∧ ¬r
-    std::uint32_t e = ~(alpha ^ beta) & ~r;
+    std::uint32_t e = (~(alpha ^ beta)) & (~r) & mask;  // ← Apply mask!
     
     // Step 3: a ← e ∧ (e << 1) ∧ (α ⊕ (α << 1))
-    std::uint32_t a = e & (e << 1) & (alpha ^ (alpha << 1));
+    std::uint32_t a = e & (e << 1) & (alpha ^ (alpha << 1)) & mask;  // ← Apply mask!
     
-    // Step 4: p ← aopr(a)
-    std::uint32_t p = aopr(a);
+    // Step 4: p ← aopr(a, n)  ← 重要：传入位宽！
+    std::uint32_t p = aopr(a & mask, n);  // ← Apply mask!
     
     // Step 5: a ← (a ∨ (a >> 1)) ∧ ¬r
-    a = (a | (a >> 1)) & ~r;
+    a = ((a | (a >> 1)) & (~r)) & mask;  // ← Apply mask!
     
     // Step 6: b ← (a ∨ e) << 1
-    std::uint32_t b = (a | e) << 1;
+    std::uint32_t b = ((a | e) << 1) & mask;  // ← Apply mask!
     
     // Step 7: γ ← ((α ⊕ p) ∧ a) ∨ ((α ⊕ β ⊕ (α << 1)) ∧ ¬a ∧ b) ∨ (α ∧ ¬a ∧ ¬b)
-    std::uint32_t gamma = ((alpha ^ p) & a) 
+    std::uint32_t gamma = (((alpha ^ p) & a) 
                         | ((alpha ^ beta ^ (alpha << 1)) & ~a & b) 
-                        | (alpha & ~a & ~b);
+                        | (alpha & ~a & ~b)) & mask;  // ← Apply mask!
     
     // Step 8: γ ← (γ ∧ ¬1) ∨ ((α ⊕ β) ∧ 1)
-    gamma = (gamma & ~1u) | ((alpha ^ beta) & 1);
+    gamma = ((gamma & ~1u) | ((alpha ^ beta) & 1)) & mask;  // ← Apply mask!
     
     // Step 9: Return γ
     return gamma;
@@ -164,17 +196,20 @@ inline std::uint32_t find_optimal_gamma(
  * 
  * @param alpha 输入差分α
  * @param beta 输入差分β
+ * @param n 位宽（默认32）
  * @return pair<最优γ, 权重>
  */
 inline std::pair<std::uint32_t, int> find_optimal_gamma_with_weight(
     std::uint32_t alpha,
-    std::uint32_t beta
+    std::uint32_t beta,
+    int n = 32
 ) noexcept {
     // Step 1: 使用Algorithm 4找到最优γ
-    std::uint32_t gamma = find_optimal_gamma(alpha, beta);
+    std::uint32_t gamma = find_optimal_gamma(alpha, beta, n);
     
     // Step 2: 使用Algorithm 2计算权重
-    int weight = xdp_add_lm2001(alpha, beta, gamma);
+    int weight = (n == 32) ? xdp_add_lm2001(alpha, beta, gamma)
+                            : xdp_add_lm2001_n(alpha, beta, gamma, n);
     
     return {gamma, weight};
 }

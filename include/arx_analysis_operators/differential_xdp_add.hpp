@@ -124,5 +124,66 @@ inline bool is_xdp_add_possible(
     return xdp_add_lm2001(alpha, beta, gamma) >= 0;
 }
 
+/**
+ * @brief LM-2001 Algorithm 2: 支持任意位宽n
+ * 
+ * 用于测试和特殊应用（如论文示例验证）
+ * 
+ * @param alpha 輸入差分α
+ * @param beta 輸入差分β  
+ * @param gamma 輸出差分γ
+ * @param n 位宽
+ * @return 權重w（使得DP^+ = 2^{-w}），-1表示不可能
+ */
+inline int xdp_add_lm2001_n(
+    std::uint32_t alpha,
+    std::uint32_t beta,
+    std::uint32_t gamma,
+    int n
+) noexcept {
+    // Mask for n bits
+    std::uint32_t mask = (n == 32) ? 0xFFFFFFFFu : ((1u << n) - 1);
+    std::uint32_t mask_n_minus_1 = (n == 32) ? 0x7FFFFFFFu : ((1u << (n - 1)) - 1);
+    
+    alpha &= mask;
+    beta &= mask;
+    gamma &= mask;
+    
+    // ========================================================================
+    // Algorithm 2, Step 1: Check if differential is "good"
+    // ========================================================================
+    std::uint32_t alpha_1 = (alpha << 1) & mask;
+    std::uint32_t beta_1 = (beta << 1) & mask;
+    std::uint32_t gamma_1 = (gamma << 1) & mask;
+    
+    // eq(α<<1, β<<1, γ<<1) = ~((α<<1) ⊕ (β<<1) ⊕ (γ<<1))
+    std::uint32_t eq_shifted = (~(alpha_1 ^ beta_1 ^ gamma_1)) & mask;
+    
+    // xor(α, β, γ) = α ⊕ β ⊕ γ
+    std::uint32_t xor_val = alpha ^ beta ^ gamma;
+    
+    // Check: eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (α<<1))
+    std::uint32_t goodness_check = eq_shifted & (xor_val ^ alpha_1);
+    
+    // 如果 goodness_check != 0，則差分不可能（NOT "good"）
+    if (goodness_check != 0) {
+        return -1;  // Impossible differential
+    }
+    
+    // ========================================================================
+    // Algorithm 2, Step 2: Compute DP+
+    // ========================================================================
+    // eq(α, β, γ) = ~(α ⊕ β ⊕ γ)
+    std::uint32_t eq = (~(alpha ^ beta ^ gamma)) & mask;
+    
+    // ¬eq(α,β,γ) ∧ mask(n-1)
+    std::uint32_t not_eq_masked = (~eq) & mask_n_minus_1;
+    
+    // weight = wh(¬eq(α,β,γ) ∧ mask(n-1)) = Hamming weight
+    int weight = __builtin_popcount(not_eq_masked);
+    
+    return weight;
+}
+
 } // namespace arx_operators
 } // namespace neoalz
