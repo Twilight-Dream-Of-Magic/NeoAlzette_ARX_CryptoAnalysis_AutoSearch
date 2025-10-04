@@ -1,65 +1,120 @@
-cmake_minimum_required(VERSION 3.16)
-project(neoalzette_search CXX)
+cmake_minimum_required(VERSION 3.14)
+project(NeoAlzette_ARX_CryptoAnalysis VERSION 1.0.0 LANGUAGES CXX)
+
+# C++20標準
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Optimization flags
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -mtune=native")
-endif()
+# 編譯選項
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O3 -march=native")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
 
-# Find OpenMP for parallel optimizations
-find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP found, enabling parallel optimizations")
-else()
-    message(STATUS "OpenMP not found, building without parallel optimizations")
-endif()
-add_library(neoalzette STATIC
-    src/neoalzette_core.cpp
-    src/medcp_analyzer.cpp
-    src/melcc_analyzer.cpp
-    src/threshold_search_framework.cpp
-    src/utility_tools.cpp
-    src/matsui_algorithm2_complete.cpp
-    src/pddt_algorithm1_complete.cpp
-    # NeoAlzette專門模型
-    src/neoalzette_differential_model.cpp
-    src/neoalzette_linear_model.cpp
-    src/neoalzette_medcp_analyzer.cpp
-    src/neoalzette_melcc_analyzer.cpp
+# 包含目錄
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# ============================================================================
+# 底層ARX分析算子（Header-only）
+# ============================================================================
+# arx_analysis_operators/ 文件夾下的所有算子都是header-only
+# 無需編譯，直接include即可使用
+
+# ============================================================================
+# NeoAlzette核心庫
+# ============================================================================
+set(NEOALZETTE_SOURCES
+    src/neoalzette/neoalzette_core.cpp
+    src/neoalzette/neoalzette_differential.cpp
+    src/neoalzette/neoalzette_linear.cpp
+    src/neoalzette/neoalzette_medcp.cpp
+    src/neoalzette/neoalzette_melcc.cpp
 )
-target_include_directories(neoalzette PUBLIC include)
 
-add_executable(pddt_demo src/main_pddt.cpp src/pddt.cpp)
-target_include_directories(pddt_demo PUBLIC include)
-target_link_libraries(pddt_demo PRIVATE neoalzette)
+add_library(neoalzette STATIC ${NEOALZETTE_SOURCES})
+target_include_directories(neoalzette PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
+# ============================================================================
+# ARX搜索框架庫
+# ============================================================================
+set(ARX_FRAMEWORK_SOURCES
+    src/arx_search_framework/pddt_algorithm1_complete.cpp
+    src/arx_search_framework/matsui_algorithm2_complete.cpp
+    src/arx_search_framework/medcp_analyzer.cpp
+    src/arx_search_framework/melcc_analyzer.cpp
+    src/arx_search_framework/threshold_search_framework.cpp
+    src/utility_tools.cpp
+)
+
+add_library(arx_framework STATIC ${ARX_FRAMEWORK_SOURCES})
+target_include_directories(arx_framework PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(arx_framework PUBLIC neoalzette)
+
+# ============================================================================
+# 工具程序
+# ============================================================================
+
+# Highway表構建工具（差分）
 add_executable(highway_table_build src/highway_table_build.cpp)
-target_include_directories(highway_table_build PUBLIC include)
-target_link_libraries(highway_table_build PRIVATE neoalzette)
+target_link_libraries(highway_table_build PRIVATE arx_framework neoalzette)
 
+# Highway表構建工具（線性）
 add_executable(highway_table_build_lin src/highway_table_build_lin.cpp)
-target_include_directories(highway_table_build_lin PUBLIC include)
-target_link_libraries(highway_table_build_lin PRIVATE neoalzette)
+target_link_libraries(highway_table_build_lin PRIVATE arx_framework neoalzette)
 
-# Complete Matsui algorithms implementation
-add_executable(complete_matsui_demo src/complete_matsui_demo.cpp)
-target_include_directories(complete_matsui_demo PUBLIC include)
-target_link_libraries(complete_matsui_demo PRIVATE neoalzette)
+# ============================================================================
+# 安裝配置
+# ============================================================================
+install(TARGETS neoalzette arx_framework
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib)
 
-# Paper algorithms demo (Algorithm 1 & 2 complete implementation)
+install(DIRECTORY include/
+        DESTINATION include
+        FILES_MATCHING
+        PATTERN "*.hpp"
+        PATTERN "*.h")
 
-# NeoAlzette MEDCP/MELCC analysis demo
-
-# Test for Wallén 2003 exact linear correlation (add/sub const)
-
-# Test for Theorem 2 correctness (differential add/sub const)
-
-if(NOT NA_BUILD_DEMOS)
-  set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(highway_table_build PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(highway_table_build_lin PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
-  set_target_properties(complete_matsui_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
+# ============================================================================
+# 測試（可選）
+# ============================================================================
+option(BUILD_TESTS "Build test programs" OFF)
+if(BUILD_TESTS)
+    enable_testing()
+    # 添加測試程序
 endif()
 
+# ============================================================================
+# 文檔
+# ============================================================================
+message(STATUS "")
+message(STATUS "=======================================================")
+message(STATUS "NeoAlzette ARX密碼分析與自動化搜索")
+message(STATUS "=======================================================")
+message(STATUS "")
+message(STATUS "📁 項目結構：")
+message(STATUS "  include/arx_analysis_operators/  - 底層ARX算子（最優化）")
+message(STATUS "  include/arx_search_framework/    - 自動化搜索框架")
+message(STATUS "  include/neoalzette/              - NeoAlzette專用")
+message(STATUS "")
+message(STATUS "📚 底層算子：")
+message(STATUS "  • differential_xdp_add.hpp       - LM-2001 (O(1))")
+message(STATUS "  • differential_addconst.hpp      - BvWeight (O(log²n))")
+message(STATUS "  • linear_cor_add.hpp             - Wallén M_n^T (O(n))")
+message(STATUS "  • linear_cor_addconst.hpp        - Wallén DP (O(n))")
+message(STATUS "")
+message(STATUS "🔍 搜索框架：")
+message(STATUS "  • pddt/                          - pDDT構建")
+message(STATUS "  • clat/                          - cLAT構建（Algorithm 1/2/3）")
+message(STATUS "  • matsui/                        - Matsui閾值搜索")
+message(STATUS "  • medcp_analyzer.hpp             - MEDCP分析")
+message(STATUS "  • melcc_analyzer.hpp             - MELCC分析")
+message(STATUS "")
+message(STATUS "🎯 構建目標：")
+message(STATUS "  • libneoalzette.a                - NeoAlzette庫")
+message(STATUS "  • libarx_framework.a             - 搜索框架庫")
+message(STATUS "  • highway_table_build            - Highway表工具（差分）")
+message(STATUS "  • highway_table_build_lin        - Highway表工具（線性）")
+message(STATUS "")
+message(STATUS "=======================================================")
+message(STATUS "")

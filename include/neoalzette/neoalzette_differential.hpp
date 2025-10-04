@@ -6,8 +6,8 @@
 #include <utility>
 #include <limits>
 #include <cmath>
-#include "neoalzette_core.hpp"
-#include "bitvector_ops.hpp"
+#include "neoalzette/neoalzette_core.hpp"
+#include "arx_analysis_operators/bitvector_ops.hpp"
 
 namespace neoalz {
 

@@ -1,5 +1,5 @@
-#include "neoalzette_differential_model.hpp"
-#include "bitvector_ops.hpp"
+#include "neoalzette/neoalzette_differential.hpp"
+#include "arx_analysis_operators/bitvector_ops.hpp"
 #include <algorithm>
 #include <cstring>
 

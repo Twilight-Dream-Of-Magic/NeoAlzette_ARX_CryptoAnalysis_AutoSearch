@@ -1,4 +1,4 @@
-#include "neoalzette_linear_model.hpp"
+#include "neoalzette/neoalzette_linear.hpp"
 #include <algorithm>
 #include <cstring>
 

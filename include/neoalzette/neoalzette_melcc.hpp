@@ -4,7 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
-#include "neoalzette_linear_model.hpp"
+#include "neoalzette/neoalzette_linear.hpp"
 
 namespace neoalz {
 

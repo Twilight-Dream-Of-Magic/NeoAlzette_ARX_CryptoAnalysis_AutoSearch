@@ -1,4 +1,4 @@
-#include "neoalzette_medcp_analyzer.hpp"
+#include "neoalzette/neoalzette_medcp.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>

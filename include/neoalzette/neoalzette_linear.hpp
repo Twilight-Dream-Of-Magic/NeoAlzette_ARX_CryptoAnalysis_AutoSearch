@@ -6,8 +6,8 @@
 #include <utility>
 #include <array>
 #include <cmath>
-#include "neoalzette_core.hpp"
-#include "linear_correlation_addconst.hpp"  // Wallén精確方法
+#include "neoalzette/neoalzette_core.hpp"
+#include "arx_analysis_operators/linear_cor_addconst.hpp"  // Wallén精確方法
 
 namespace neoalz {
 

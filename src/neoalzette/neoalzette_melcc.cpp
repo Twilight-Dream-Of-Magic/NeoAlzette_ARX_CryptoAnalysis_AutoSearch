@@ -1,4 +1,4 @@
-#include "neoalzette_melcc_analyzer.hpp"
+#include "neoalzette/neoalzette_melcc.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>

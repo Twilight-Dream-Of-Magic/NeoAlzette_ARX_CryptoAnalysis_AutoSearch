@@ -5,8 +5,8 @@
 #include <string>
 #include <functional>
 #include <memory>
-#include "neoalzette_differential_model.hpp"
-#include "threshold_search_framework.hpp"
+#include "neoalzette/neoalzette_differential.hpp"
+#include "arx_search_framework/threshold_search_framework.hpp"
 
 namespace neoalz {
 
