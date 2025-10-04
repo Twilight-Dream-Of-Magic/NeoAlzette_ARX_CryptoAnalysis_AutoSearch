@@ -7,7 +7,7 @@
 #include <array>
 #include <cmath>
 #include "neoalzette/neoalzette_core.hpp"
-#include "arx_analysis_operators/linear_cor_add.hpp"        // Wallén M_n^T（變量-變量）
+#include "arx_analysis_operators/linear_cor_add_logn.hpp"   // Wallén Θ(log n)（變量-變量）✅ 精確版
 #include "arx_analysis_operators/linear_cor_addconst.hpp"  // Wallén DP（變量-常量）
 
 namespace neoalz {
