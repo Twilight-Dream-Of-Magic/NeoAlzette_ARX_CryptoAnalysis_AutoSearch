@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <chrono>
-#include "neoalzette_core.hpp"
+#include "neoalzette/neoalzette_core.hpp"
 
 namespace neoalz {
 
