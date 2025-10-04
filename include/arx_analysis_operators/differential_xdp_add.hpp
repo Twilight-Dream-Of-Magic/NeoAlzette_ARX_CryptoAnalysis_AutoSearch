@@ -25,14 +25,14 @@ namespace neoalz {
 namespace arx_operators {
 
 /**
- * @brief LM-2001 Algorithm 2: 計算xdp⁺的權重（變量-變量）
+ * @brief LM-2001 Algorithm 2: 計算xdp⁺的權重（變量-變量，32位）
  * 
  * 論文：Lipmaa & Moriai, FSE 2001, Algorithm 2 (Lines 321-327)
  * 複雜度：Θ(log n)
  * 
  * Algorithm 2 完整實現：
  * Step 1: Check if differential is "good" (possible)
- *         If eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (α<<1)) != 0, return 0 (impossible)
+ *         If eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (β<<1)) != 0, return 0 (impossible)
  * Step 2: Return 2^{-wh(¬eq(α,β,γ) ∧ mask(n-1))}
  * 
  * @param alpha 輸入差分1
@@ -48,9 +48,7 @@ inline int xdp_add_lm2001(
     // ========================================================================
     // Algorithm 2, Step 1: Check if differential is "good"
     // ========================================================================
-    // 論文Lines 310-316: 差分是"good"當且僅當它是可能的
-    // 定義：δ is "good" if eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (α<<1)) = 0
-    // 如果NOT "good"（即 != 0），則差分不可能，返回0
+    // 論文Line 324: eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (β<<1)) = 0
     
     std::uint32_t alpha_1 = alpha << 1;
     std::uint32_t beta_1 = beta << 1;
@@ -62,8 +60,9 @@ inline int xdp_add_lm2001(
     // xor(α, β, γ) = α ⊕ β ⊕ γ
     std::uint32_t xor_val = alpha ^ beta ^ gamma;
     
-    // Check: eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (α<<1))
-    std::uint32_t goodness_check = eq_shifted & (xor_val ^ alpha_1);
+    // Check: eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (β<<1))
+    // 注意：Algorithm 2使用β<<1
+    std::uint32_t goodness_check = eq_shifted & (xor_val ^ beta_1);
     
     // 如果 goodness_check != 0，則差分不可能（NOT "good"）
     if (goodness_check != 0) {
@@ -160,10 +159,10 @@ inline int xdp_add_lm2001_n(
     std::uint32_t eq_shifted = (~(alpha_1 ^ beta_1 ^ gamma_1)) & mask;
     
     // xor(α, β, γ) = α ⊕ β ⊕ γ
-    std::uint32_t xor_val = alpha ^ beta ^ gamma;
+    std::uint32_t xor_val = (alpha ^ beta ^ gamma) & mask;
     
-    // Check: eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (α<<1))
-    std::uint32_t goodness_check = eq_shifted & (xor_val ^ alpha_1);
+    // Check: eq(α<<1, β<<1, γ<<1) ∧ (xor(α,β,γ) ⊕ (β<<1))
+    std::uint32_t goodness_check = eq_shifted & (xor_val ^ beta_1);
     
     // 如果 goodness_check != 0，則差分不可能（NOT "good"）
     if (goodness_check != 0) {
