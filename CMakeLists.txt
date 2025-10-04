@@ -63,6 +63,11 @@ add_executable(test_linear_correlation_addconst src/test_linear_correlation_addc
 target_include_directories(test_linear_correlation_addconst PUBLIC include)
 target_link_libraries(test_linear_correlation_addconst PRIVATE neoalzette)
 
+# Test for Theorem 2 correctness (differential add/sub const)
+add_executable(test_theorem2_correctness src/test_theorem2_correctness.cpp)
+target_include_directories(test_theorem2_correctness PUBLIC include)
+target_link_libraries(test_theorem2_correctness PRIVATE neoalzette)
+
 option(NA_BUILD_DEMOS "Build demo binaries (pddt_demo highway_table_build highway_table_build_lin complete_matsui_demo demo_paper_algorithms)" OFF)
 if(NOT NA_BUILD_DEMOS)
   set_target_properties(pddt_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
@@ -71,3 +76,6 @@ if(NOT NA_BUILD_DEMOS)
   set_target_properties(complete_matsui_demo PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
   set_target_properties(demo_paper_algorithms PROPERTIES EXCLUDE_FROM_ALL TRUE EXCLUDE_FROM_DEFAULT_BUILD TRUE)
 endif()
+add_executable(test_addconst_exact src/test_addconst_exact.cpp)
+target_include_directories(test_addconst_exact PUBLIC include)
+target_link_libraries(test_addconst_exact PRIVATE neoalzette)
