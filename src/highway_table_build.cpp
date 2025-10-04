@@ -5,8 +5,8 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
-#include "medcp_analyzer.hpp"
-#include "neoalzette_core.hpp"
+#include "arx_search_framework/medcp_analyzer.hpp"
+#include "neoalzette/neoalzette_core.hpp"
 #include "utility_tools.hpp"
 
 using namespace neoalz;
