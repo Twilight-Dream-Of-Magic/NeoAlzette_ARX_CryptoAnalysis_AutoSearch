@@ -555,6 +555,25 @@ public:
                     }
                 }
 
+                // Step4（嚴格版補強）：使用 SLR 查詢當前塊的可行候選，取最小候選權重作更緊下界
+                // 仍然不改黑盒；僅作剪枝。v_full 的選擇依賴輪內加法位置，這裡選用當前 mB 作保守 v。
+                if (cfg.precompute_clat) {
+                    const int t = 32 / clat.m; // 32 位 → 4 塊（m=8）
+                    int best_block_lb = std::numeric_limits<int>::max();
+                    clat.lookup_and_recombine(/*v_full=*/cur.mB, /*t=*/t,
+                                              /*weight_cap=*/cfg.weight_cap - cur.accumulated_weight,
+                                              [&](uint32_t /*u*/, uint32_t /*w*/, int k){
+                                                  if (k < best_block_lb) best_block_lb = k;
+                                              });
+                    if (best_block_lb != std::numeric_limits<int>::max()) {
+                        int remain = cfg.rounds - cur.round - 1; // 本輪用候選lb，剩餘輪用全局lb
+                        long long tightened = (long long)cur.accumulated_weight + best_block_lb + (long long)remain * global_min_one_round;
+                        if (tightened >= std::min(best_weight, cfg.weight_cap)) {
+                            continue;
+                        }
+                    }
+                }
+
                 // 一輪線性黑盒步進（你的函數，逆向）
                 auto step = NeoAlzetteLinearStep::linear_one_round_backward_32(cur.mA, cur.mB);
                 if (step.weight < 0) continue; // 不可行
