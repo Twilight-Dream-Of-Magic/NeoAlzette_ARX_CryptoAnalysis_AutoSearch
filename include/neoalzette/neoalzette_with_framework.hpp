@@ -52,6 +52,39 @@
 
 namespace neoalz {
 
+
+/**
+ * @file neoalzette_medcp_analyzer.hpp
+ * @brief NeoAlzette專用的MEDCP（最大期望差分特征概率）分析器
+ * 
+ * 本分析器：
+ * 1. 使用NeoAlzetteDifferentialModel的精確單輪模型
+ * 2. 應用論文的Highway/Country Roads搜索策略
+ * 3. 計算多輪NeoAlzette的MEDCP
+ * 
+ * 區別於通用MEDCPAnalyzer：
+ * - 專門處理NeoAlzette的複雜操作（模加變量XOR、模減常量、線性層、交叉分支）
+ * - 使用bit-vector論文的模加常量模型
+ * - 考慮NeoAlzette的SPN結構（不是Feistel）
+ */
+
+
+/**
+ * @file neoalzette_melcc_analyzer.hpp
+ * @brief NeoAlzette專用的MELCC（最大期望線性特征相關性）分析器
+ * 
+ * 本分析器：
+ * 1. 使用NeoAlzetteLinearModel的精確線性模型
+ * 2. 應用Wallén論文的線性枚舉方法
+ * 3. 使用矩陣乘法鏈精確計算MELCC（基於MIQCP論文）
+ * 
+ * 區別於通用線性分析：
+ * - 專門處理NeoAlzette的線性層和交叉分支
+ * - 使用2×2相關性矩陣表示
+ * - 精確的矩陣乘法鏈計算
+ */
+
+
 /**
  * @brief NeoAlzette完整分析管線
  * 
@@ -74,7 +107,7 @@ public:
         // 使用: differential_xdp_add.hpp, differential_addconst.hpp
         
         // Step 2: NeoAlzette差分模型
-        NeoAlzetteDifferentialModel differential_model;
+        //NeoAlzetteDifferentialModel differential_model;
         
         // Step 3: pDDT構建（TODO：需要實現NeoAlzette專用pDDT）
         // 使用: pddt_algorithm1.hpp
@@ -83,7 +116,7 @@ public:
         // 使用: matsui_algorithm2.hpp
         
         // Step 5: MEDCP分析
-        NeoAlzetteMEDCPAnalyzer medcp_analyzer;
+        //NeoAlzetteMEDCPAnalyzer medcp_analyzer;
         
         /**
          * @brief 執行完整差分分析

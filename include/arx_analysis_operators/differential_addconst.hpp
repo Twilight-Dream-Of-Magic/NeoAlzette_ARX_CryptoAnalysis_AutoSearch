@@ -76,6 +76,14 @@ inline int diff_addconst_bvweight(
     return static_cast<int>(std::ceil(approx_weight));
 }
 
+template <class T>
+static constexpr T neg_mod_2n(T k, int n) noexcept {
+    static_assert(std::is_unsigned<T>::value, "T must be unsigned");
+    const int W = int(sizeof(T) * 8);
+    const T mask = (n >= W) ? T(~T(0)) : ((T(1) << n) - 1);
+    return (T(0) - (k & mask)) & mask;     // 两补数：0 - K ≡ 2^n - K (mod 2^n)
+}
+
 /**
  * @brief 常量減法差分權重
  * 
@@ -91,8 +99,8 @@ inline int diff_subconst_bvweight(
     std::uint32_t constant,
     std::uint32_t delta_y
 ) noexcept {
-    // X - C = X + (~C + 1)
-    std::uint32_t neg_constant = (~constant + 1) & 0xFFFFFFFF;
+    // X - C = X + ((~C) + 1)
+    std::uint32_t neg_constant = neg_mod_2n<uint32_t>(constant, 32);
     return diff_addconst_bvweight(delta_x, neg_constant, delta_y);
 }
 
@@ -110,6 +118,24 @@ inline double diff_addconst_probability(
     std::uint32_t delta_y
 ) noexcept {
     int weight = diff_addconst_bvweight(delta_x, constant, delta_y);
+    if (weight < 0) return 0.0;
+    return std::pow(2.0, -weight);
+}
+
+/**
+ * @brief 計算常量减法差分概率
+ * 
+ * @param delta_x 輸入差分
+ * @param constant 常量K
+ * @param delta_y 輸出差分
+ * @return 近似概率
+ */
+inline double diff_subconst_probability(
+    std::uint32_t delta_x,
+    std::uint32_t constant,
+    std::uint32_t delta_y
+) noexcept {
+    int weight = diff_subconst_bvweight(delta_x, constant, delta_y);
     if (weight < 0) return 0.0;
     return std::pow(2.0, -weight);
 }
