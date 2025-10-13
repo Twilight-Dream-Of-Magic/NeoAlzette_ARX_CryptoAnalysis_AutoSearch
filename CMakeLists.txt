@@ -65,11 +65,11 @@ target_link_libraries(highway_table_build_lin PRIVATE arx_framework neoalzette)
 # ============================================================================
 
 # 差分：專用 Matsui Algorithm 2 外殼 + 黑盒一輪
-add_executable(neoalz_diff_search src/neoalz_diff_search.cpp)
+add_executable(neoalz_diff_search src/neoalzette_differential_main_search.cpp)
 target_link_libraries(neoalz_diff_search PRIVATE arx_framework neoalzette)
 
 # 線性：cLAT 構建 + SLR 下界剪枝 + 黑盒一輪
-add_executable(neoalz_lin_search src/neoalz_lin_search.cpp)
+add_executable(neoalz_lin_search src/neoalzette_linearl_main_search.cpp)
 target_link_libraries(neoalz_lin_search PRIVATE arx_framework neoalzette)
 
 # ============================================================================
