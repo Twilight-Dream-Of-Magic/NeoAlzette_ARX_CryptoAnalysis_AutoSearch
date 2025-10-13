@@ -37,6 +37,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <random>
+#include <tuple>
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
 #include "neoalzette/neoalzette_linear_step.hpp"
@@ -292,6 +293,185 @@ public:
         }
     };
     
+    /**
+     * @brief NeoAlzette 專用 Matsui Algorithm 2 外殼（差分）
+     * 
+     * 嚴格對齊 Step3–Step5：
+     * - Step3: 構建部分 pDDT（Highways）— 利用黑盒一輪 diff_one_round_xdp_32 對規範化輸入對建表
+     * - Step4: 門檻搜索（Matsui 2 風格）— 優先走 Highways；缺失時回退黑盒一步；旋轉正規化、下界剪枝
+     * - Step5: MEDCP = 2^{-best_weight}
+     * 
+     * 注意：一輪分析黑盒不動。
+     */
+    class NeoAlzetteMatsuiAlgorithm2 {
+    public:
+        struct HighwayEntry {
+            std::uint32_t dA_in;
+            std::uint32_t dB_in;
+            std::uint32_t dA_out;
+            std::uint32_t dB_out;
+            int weight;     // 一輪權重
+            double prob;    // 2^{-weight}
+        };
+
+        class HighwayTable {
+        public:
+            void clear() { table_.clear(); min_weight_ = std::numeric_limits<int>::max(); }
+
+            void add(const HighwayEntry& e) {
+                auto k = key(canonical(e.dA_in, e.dB_in));
+                auto& vec = table_[k];
+                vec.push_back(e);
+                std::sort(vec.begin(), vec.end(), [](const HighwayEntry& a, const HighwayEntry& b){ return a.weight < b.weight; });
+                min_weight_ = std::min(min_weight_, e.weight);
+            }
+
+            const std::vector<HighwayEntry>& query(std::uint32_t dA, std::uint32_t dB) const {
+                static const std::vector<HighwayEntry> kEmpty;
+                auto k = key(canonical(dA, dB));
+                auto it = table_.find(k);
+                return (it == table_.end()) ? kEmpty : it->second;
+            }
+
+            int global_min_weight() const { return (min_weight_ == std::numeric_limits<int>::max()) ? 1 : std::max(0, min_weight_); }
+
+        private:
+            static inline std::pair<std::uint32_t,std::uint32_t> canonical(std::uint32_t a, std::uint32_t b) {
+                std::uint32_t best_a = a, best_b = b;
+                for (int r = 0; r < 32; ++r) {
+                    auto ra = NeoAlzetteCore::rotl<std::uint32_t>(a, r);
+                    auto rb = NeoAlzetteCore::rotl<std::uint32_t>(b, r);
+                    if (std::make_pair(ra, rb) < std::make_pair(best_a, best_b)) { best_a = ra; best_b = rb; }
+                }
+                return {best_a, best_b};
+            }
+            static inline std::uint64_t key(std::pair<std::uint32_t,std::uint32_t> p) {
+                return (std::uint64_t(p.first) << 32) | p.second;
+            }
+
+            std::unordered_map<std::uint64_t, std::vector<HighwayEntry>> table_;
+            int min_weight_ = std::numeric_limits<int>::max();
+        };
+
+        struct Config {
+            int rounds = 4;
+            int weight_cap = 30;
+            std::uint32_t start_dA = 0x00000001u;
+            std::uint32_t start_dB = 0x00000000u;
+            bool build_highways = true;
+            int seed_stride = 8;          // 稀疏種子
+            int topk_per_input = 1;       // 每輸入最多保留K條
+            bool use_canonical = true;    // 旋轉正規化
+            bool use_lb = true;           // 簡單下界剪枝（基於最小一輪權重）
+            int max_branch_per_node = 1;  // 每節點最多擴展K個
+        };
+
+        struct Result {
+            int best_weight = std::numeric_limits<int>::max();
+            double medcp = 0.0;
+            std::uint64_t nodes = 0;
+            std::uint64_t pruned = 0;
+            bool complete = false;
+        };
+
+        static Result run(const Config& cfg_in) {
+            Config cfg = cfg_in;
+            HighwayTable H;
+            if (cfg.build_highways) build_highways(cfg, H);
+
+            // 門檻搜索
+            struct Node { int round; std::uint32_t dA; std::uint32_t dB; int w; };
+            auto cmp = [](const Node& a, const Node& b){ return a.w > b.w; };
+            std::priority_queue<Node, std::vector<Node>, decltype(cmp)> pq(cmp);
+            pq.push(Node{0, cfg.start_dA, cfg.start_dB, 0});
+
+            Result res;
+            // 去重： (round, canonical(dA,dB)) → 最佳已知權重
+            struct KeyHash { std::size_t operator()(const std::tuple<int,std::uint32_t,std::uint32_t>& t) const noexcept {
+                return std::hash<std::uint64_t>{}((std::uint64_t(std::get<0>(t))<<48) | (std::uint64_t(std::get<1>(t))<<24) | std::get<2>(t));
+            }};
+            std::unordered_map<std::tuple<int,std::uint32_t,std::uint32_t>, int, KeyHash> seen;
+
+            const int lb_one = H.global_min_weight();
+
+            while (!pq.empty()) {
+                Node cur = pq.top(); pq.pop();
+                res.nodes++;
+                if (cur.w >= res.best_weight) { res.pruned++; continue; }
+                if (cur.w >= cfg.weight_cap)  { res.pruned++; continue; }
+
+                if (cur.round >= cfg.rounds) {
+                    if (cur.w < res.best_weight) { res.best_weight = cur.w; }
+                    continue;
+                }
+
+                auto can = canonical(cur.dA, cur.dB);
+                auto keyv = std::make_tuple(cur.round, can.first, can.second);
+                auto itSeen = seen.find(keyv);
+                if (itSeen != seen.end() && itSeen->second <= cur.w) { res.pruned++; continue; }
+                seen[keyv] = cur.w;
+
+                if (cfg.use_lb) {
+                    int remain = cfg.rounds - cur.round;
+                    int lb = remain * lb_one;
+                    if (cur.w + lb >= std::min(res.best_weight, cfg.weight_cap)) { res.pruned++; continue; }
+                }
+
+                // 優先用 Highways，缺失則回退黑盒一步
+                const auto& bucket = H.query(cur.dA, cur.dB);
+                if (!bucket.empty()) {
+                    int branched = 0;
+                    for (const auto& e : bucket) {
+                        int next_w = cur.w + e.weight;
+                        if (next_w >= cfg.weight_cap) continue;
+                        pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w});
+                        if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
+                    }
+                } else {
+                    auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
+                    if (step.weight >= 0) {
+                        int next_w = cur.w + step.weight;
+                        if (next_w < cfg.weight_cap) pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w});
+                    }
+                }
+            }
+
+            if (res.best_weight != std::numeric_limits<int>::max()) res.medcp = std::ldexp(1.0, -res.best_weight);
+            res.complete = true;
+            return res;
+        }
+
+    private:
+        static inline std::pair<std::uint32_t,std::uint32_t> canonical(std::uint32_t a, std::uint32_t b) {
+            std::uint32_t best_a = a, best_b = b;
+            for (int r = 0; r < 32; ++r) {
+                auto ra = NeoAlzetteCore::rotl<std::uint32_t>(a, r);
+                auto rb = NeoAlzetteCore::rotl<std::uint32_t>(b, r);
+                if (std::make_pair(ra, rb) < std::make_pair(best_a, best_b)) { best_a = ra; best_b = rb; }
+            }
+            return {best_a, best_b};
+        }
+
+        static void build_highways(const Config& cfg, HighwayTable& H) {
+            H.clear();
+            std::vector<std::pair<std::uint32_t,std::uint32_t>> seeds;
+            for (int i = 0; i < 32; i += std::max(1, cfg.seed_stride)) {
+                seeds.emplace_back(1u << i, 0u);
+                seeds.emplace_back(0u, 1u << i);
+            }
+            seeds.emplace_back(0u, 0u);
+            seeds.emplace_back(1u, 1u);
+
+            for (auto [dA, dB] : seeds) {
+                auto can = canonical(dA, dB);
+                auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(can.first, can.second);
+                if (step.weight < 0) continue;
+                HighwayEntry e{can.first, can.second, step.dA_out, step.dB_out, step.weight, std::ldexp(1.0, -step.weight)};
+                H.add(e);
+            }
+        }
+    };
+
     /**
      * @brief 線性分析完整流程：底層算子 → 模型 → cLAT → MELCC
      * 
