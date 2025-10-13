@@ -40,6 +40,7 @@
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
 #include "neoalzette/neoalzette_linear_step.hpp"
+#include "arx_search_framework/clat/clat_builder.hpp"   // Step3: cLAT 構建（線性）
 // 下列兩個頭僅在示例中提及，實際構建未必需要
 // #include "neoalzette/neoalzette_medcp.hpp"
 // #include "neoalzette/neoalzette_melcc.hpp"
@@ -310,6 +311,8 @@ public:
             int weight_cap = 30;              // 線性權重門檻（-log2 |corr|）
             std::uint32_t start_mask_A = 0x00000001u; // 輸出端起始掩碼A（逆向）
             std::uint32_t start_mask_B = 0x00000000u; // 輸出端起始掩碼B（逆向）
+            bool precompute_clat = true;      // Step3: 是否構建 cLAT
+            int clat_m_bits = 8;              // 分塊大小 m（默認8）
             bool verbose = false;
         };
 
@@ -334,6 +337,24 @@ public:
 
             int best_weight = std::numeric_limits<int>::max();
 
+            // Step3: 構建 cLAT（Algorithm 2）—— 僅一次
+            cLAT<8> clat;
+            if (cfg.precompute_clat) {
+                (void)clat.build();
+            }
+
+            // 以 cLAT 的最小塊權重推估一輪下界（Step4/剪枝輔助）
+            int global_min_one_round = 1; // 保守預設
+            if (cfg.precompute_clat) {
+                int mn = std::numeric_limits<int>::max();
+                for (int v = 0; v < (1 << clat.m); ++v) {
+                    for (int b = 0; b < 2; ++b) {
+                        mn = std::min(mn, clat.get_min_weight(static_cast<std::uint32_t>(v), b));
+                    }
+                }
+                if (mn != std::numeric_limits<int>::max()) global_min_one_round = std::max(0, mn);
+            }
+
             while (!pq.empty()) {
                 Node cur = pq.top(); pq.pop();
 
@@ -343,6 +364,15 @@ public:
                 if (cur.round >= cfg.rounds) {
                     if (cur.accumulated_weight < best_weight) best_weight = cur.accumulated_weight;
                     continue;
+                }
+
+                // Step4: 基於 cLAT 的簡單下界剪枝（SLR 的保守估計）
+                {
+                    int remain = cfg.rounds - cur.round;
+                    int lb = remain * global_min_one_round;
+                    if (cur.accumulated_weight + lb >= std::min(best_weight, cfg.weight_cap)) {
+                        continue;
+                    }
                 }
 
                 // 一輪線性黑盒步進（你的函數，逆向）
