@@ -666,39 +666,6 @@ public:
     }
 };
 
-/**
- * @brief 使用示例：如何調用底層ARX算子
- */
-class ARXOperatorUsageExample {
-public:
-    /**
-     * @brief 示例1：直接使用底層差分算子
-     */
-    static void example_differential_operators() {
-        using namespace arx_operators;
-        
-        // 變量-變量：LM-2001, O(1)
-        uint32_t alpha = 0x1, beta = 0x1, gamma = 0x2;
-        int weight = xdp_add_lm2001(alpha, beta, gamma);
-        printf("xdp⁺(%08X, %08X → %08X) = 2^-%d\n", alpha, beta, gamma, weight);
-        
-        // 變量-常量：BvWeight, O(log²n)
-        uint32_t delta_x = 0x1, K = 0x12345678, delta_y = 0x12345679;
-        int weight_const = diff_addconst_bvweight(delta_x, K, delta_y);
-        printf("xdp⁺const(%08X + %08X → %08X) = 2^-%d\n", delta_x, K, delta_y, weight_const);
-    }
-    
-    /**
-     * @brief 示例2：通過NeoAlzette模型使用
-     */
-    static void example_through_neoalzette_model() {
-        // NeoAlzette內部會調用底層ARX算子
-        NeoAlzetteDifferentialModel model;
-        
-        // 這會內部調用 arx_operators::xdp_add_lm2001
-        int weight = model.compute_diff_weight_add(0x1, 0x1, 0x2);
-        printf("通過NeoAlzette模型: weight = %d\n", weight);
-    }
-};
+    // 移除與舊模型類的示例依賴，專注於專用外殼與黑盒一輪。
 
 } // namespace neoalz
