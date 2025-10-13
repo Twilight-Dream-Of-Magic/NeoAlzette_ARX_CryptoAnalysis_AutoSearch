@@ -30,10 +30,11 @@
 #pragma once
 
 #include "neoalzette/neoalzette_core.hpp"
-#include "neoalzette/neoalzette_differential.hpp"
-#include "neoalzette/neoalzette_linear.hpp"
-#include "neoalzette/neoalzette_medcp.hpp"
-#include "neoalzette/neoalzette_melcc.hpp"
+#include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
+#include "neoalzette/neoalzette_linear_step.hpp"
+// 下列兩個頭僅在示例中提及，實際構建未必需要
+// #include "neoalzette/neoalzette_medcp.hpp"
+// #include "neoalzette/neoalzette_melcc.hpp"
 
 // 底層ARX算子
 #include "arx_analysis_operators/differential_xdp_add.hpp"
@@ -103,30 +104,70 @@ public:
      * 5. 計算MEDCP
      */
     struct DifferentialPipeline {
-        // Step 1: 底層ARX算子（已在neoalzette_differential.hpp中調用）
-        // 使用: differential_xdp_add.hpp, differential_addconst.hpp
-        
-        // Step 2: NeoAlzette差分模型
-        //NeoAlzetteDifferentialModel differential_model;
-        
-        // Step 3: pDDT構建（TODO：需要實現NeoAlzette專用pDDT）
-        // 使用: pddt_algorithm1.hpp
-        
-        // Step 4: Matsui搜索（TODO：需要實現NeoAlzette專用Matsui）
-        // 使用: matsui_algorithm2.hpp
-        
-        // Step 5: MEDCP分析
-        //NeoAlzetteMEDCPAnalyzer medcp_analyzer;
-        
-        /**
-         * @brief 執行完整差分分析
-         */
-        double run_differential_analysis(int num_rounds) {
-            // TODO: 實現完整流程
-            // 1. 構建pDDT
-            // 2. 運行Matsui搜索
-            // 3. 計算MEDCP
-            return 0.0;
+        // 以你的一輪黑盒分析器為核心（不拆不改）
+        // 這裡只做“門檻式擴展 + 權重剪枝”，不重建一輪模型。
+
+        struct Config {
+            int rounds = 4;
+            int weight_cap = 30;          // 門檻：累積權重達上限即剪枝
+            std::uint32_t start_dA = 0x00000001u;
+            std::uint32_t start_dB = 0x00000000u;
+            bool verbose = false;
+        };
+
+        struct Node {
+            int round;
+            std::uint32_t dA;
+            std::uint32_t dB;
+            int accumulated_weight;
+        };
+
+        // 簡單門檻搜索（Matsui Algorithm 2 風格的單分支版）：
+        // - 擴展步：直接調用 diff_one_round_xdp_32 取得下一輪 (dA,dB,weight)
+        // - 剪枝：acc_weight + step_weight < weight_cap
+        // - 終止：達到 rounds 記錄最優；返回 MEDCP = 2^{-best_weight}
+        static double run_differential_analysis(int num_rounds) {
+            Config cfg;
+            cfg.rounds = num_rounds;
+            return run_differential_analysis(cfg);
+        }
+
+        static double run_differential_analysis(const Config& cfg) {
+            auto cmp = [](const Node& a, const Node& b) {
+                return a.accumulated_weight > b.accumulated_weight; // 小權重優先
+            };
+            std::priority_queue<Node, std::vector<Node>, decltype(cmp)> pq(cmp);
+
+            pq.push(Node{0, cfg.start_dA, cfg.start_dB, 0});
+
+            int best_weight = std::numeric_limits<int>::max();
+
+            while (!pq.empty()) {
+                Node cur = pq.top();
+                pq.pop();
+
+                if (cur.accumulated_weight >= best_weight) continue;
+                if (cur.accumulated_weight >= cfg.weight_cap) continue;
+
+                if (cur.round >= cfg.rounds) {
+                    if (cur.accumulated_weight < best_weight) {
+                        best_weight = cur.accumulated_weight;
+                    }
+                    continue;
+                }
+
+                // 一輪黑盒步進（你的函數）
+                auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
+                if (step.weight < 0) continue; // 不可行
+
+                int next_w = cur.accumulated_weight + step.weight;
+                if (next_w >= cfg.weight_cap) continue; // 門檻剪枝
+
+                pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w});
+            }
+
+            if (best_weight == std::numeric_limits<int>::max()) return 0.0; // 找不到路徑
+            return std::ldexp(1.0, -best_weight); // MEDCP = 2^{-best_weight}
         }
     };
     
