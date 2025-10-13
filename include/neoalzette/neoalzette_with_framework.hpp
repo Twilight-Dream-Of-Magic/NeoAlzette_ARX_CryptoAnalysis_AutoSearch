@@ -281,25 +281,26 @@ public:
         }
 
         static double run_differential_analysis(const Config& cfg_in) {
-            // 使用專用 NeoAlzette Matsui 2 外殼，嚴格按照論文 Step3–Step5 執行。
-            NeoAlzetteMatsuiAlgorithm2::Config mcfg;
-            mcfg.rounds = cfg_in.rounds;
-            mcfg.weight_cap = cfg_in.weight_cap;
-            mcfg.start_dA = cfg_in.start_dA;
-            mcfg.start_dB = cfg_in.start_dB;
-            mcfg.build_highways = true;
-            mcfg.seed_stride = cfg_in.pddt_seed_stride;
-            mcfg.topk_per_input = 1;
-            mcfg.use_canonical = true;
-            mcfg.use_lb = true;
-            mcfg.max_branch_per_node = 1;
-            mcfg.prob_threshold = 0.0;
-            mcfg.initial_estimate = 0.0;
-            // best_probs 留空，由外殼按單輪最佳自動填充
+            // 嚴格化：改用通用 MatsuiAlgorithm2Complete + pDDT Algorithm 1
+            // Step3：構建 pDDT（Algorithm 1）為 Highways
+            MatsuiAlgorithm2Complete::SearchConfig scfg;
+            scfg.num_rounds = cfg_in.rounds;
+            scfg.initial_estimate = 0.0; // 若需要下界，可由外部提供
+            scfg.best_probs.assign(cfg_in.rounds, 1.0); // 可用單輪上界填充
 
-            auto res = NeoAlzetteMatsuiAlgorithm2::run(mcfg);
-            if (res.best_weight == std::numeric_limits<int>::max()) return 0.0;
-            return std::ldexp(1.0, -res.best_weight);
+            PDDTAlgorithm1Complete::PDDTConfig pcfg;
+            pcfg.set_weight_threshold(std::max(1, cfg_in.weight_cap));
+            auto Htriples = PDDTAlgorithm1Complete::compute_pddt(pcfg);
+            for (const auto& t : Htriples) {
+                double p = std::ldexp(1.0, -t.weight);
+                scfg.highway_table.add({t.alpha, t.beta, t.gamma, p, t.weight});
+            }
+            scfg.highway_table.build_index();
+
+            // Step4：門檻搜索（Algorithm 2）
+            auto result = MatsuiAlgorithm2Complete::execute_threshold_search(scfg);
+            if (result.best_weight == std::numeric_limits<int>::max()) return 0.0;
+            return std::ldexp(1.0, -result.best_weight);
         }
     };
     
@@ -610,33 +611,36 @@ public:
                     }
                 }
 
-                // Step4（嚴格版補強）：使用 SLR 查詢當前塊的可行候選，取最小候選權重作更緊下界
-                // 仍然不改黑盒；僅作剪枝。v_full 的選擇依賴輪內加法位置，這裡選用當前 mB 作保守 v。
-                if (cfg.precompute_clat) {
-                    const int t = 32 / clat.m; // 32 位 → 4 塊（m=8）
-                    int best_block_lb = std::numeric_limits<int>::max();
-                    clat.lookup_and_recombine(/*v_full=*/cur.mB, /*t=*/t,
-                                              /*weight_cap=*/cfg.weight_cap - cur.accumulated_weight,
-                                              [&](uint32_t /*u*/, uint32_t /*w*/, int k){
-                                                  if (k < best_block_lb) best_block_lb = k;
-                                              });
-                    if (best_block_lb != std::numeric_limits<int>::max()) {
-                        int remain = cfg.rounds - cur.round - 1; // 本輪用候選lb，剩餘輪用全局lb
-                        long long tightened = (long long)cur.accumulated_weight + best_block_lb + (long long)remain * global_min_one_round;
-                        if (tightened >= std::min(best_weight, cfg.weight_cap)) {
-                            continue;
-                        }
-                    }
-                }
+            // Step4（嚴格）：使用 SLR 產生 (u,w) 候選集，逐一交由黑盒回溯驗證
+            if (cfg.precompute_clat) {
+                const int t = 32 / clat.m; // 32 位 → 4 塊（m=8）
+                clat.lookup_and_recombine(/*v_full=*/cur.mB, /*t=*/t,
+                                          /*weight_cap=*/cfg.weight_cap - cur.accumulated_weight,
+                                          [&](uint32_t /*u*/, uint32_t /*w*/, int k){
+                                              int lb_this = k;
+                                              int remain = cfg.rounds - cur.round - 1;
+                                              long long tightened = (long long)cur.accumulated_weight + lb_this + (long long)remain * global_min_one_round;
+                                              if (tightened >= std::min(best_weight, cfg.weight_cap)) {
+                                                  return; // 剪枝此候選
+                                              }
+                                              // 用黑盒做一步逆向回溯
+                                              auto step = linear_one_round_backward_32(cur.mA, cur.mB);
+                                              if (step.weight < 0) return;
+                                              int next_w = cur.accumulated_weight + step.weight;
+                                              if (next_w >= cfg.weight_cap) return;
+                                              pq.push(Node{cur.round + 1, step.a_in_mask, step.b_in_mask, next_w});
+                                          });
+                continue; // 本輪已由候選集驅動
+            }
 
-                // 一輪線性黑盒步進（你的函數，逆向）
+            // 無 cLAT 時：退化為單分支黑盒（保底路徑）
+            {
                 auto step = linear_one_round_backward_32(cur.mA, cur.mB);
-                if (step.weight < 0) continue; // 不可行
-
+                if (step.weight < 0) continue;
                 int next_w = cur.accumulated_weight + step.weight;
-                if (next_w >= cfg.weight_cap) continue; // 門檻剪枝
-
+                if (next_w >= cfg.weight_cap) continue;
                 pq.push(Node{cur.round + 1, step.a_in_mask, step.b_in_mask, next_w});
+            }
             }
 
             if (best_weight == std::numeric_limits<int>::max()) return 0.0; // 找不到路徑
