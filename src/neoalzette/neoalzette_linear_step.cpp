@@ -99,7 +99,7 @@ namespace neoalz
 	// 結構 LinRoundResult 於 header 定義
 
 	// ============ 一轮线性近似（按 backward 顺序回溯掩码并累权）===========
-	inline LinRoundResult linear_one_round_backward_32( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept
+LinRoundResult linear_one_round_backward_32( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept
 	{
 		using NA = NeoAlzetteCore;
 		using arx_operators::corr_add_x_plus_const32;
@@ -199,7 +199,7 @@ namespace neoalz
 	}
 
 	// 便捷函数：返回 |corr| 近似值（2^{-W}）
-	inline std::pair<LinRoundResult, double> linear_one_round_backward_32_with_prob( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept
+std::pair<LinRoundResult, double> linear_one_round_backward_32_with_prob( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept
 	{
 		auto		 r = linear_one_round_backward_32( a_mask_out, b_mask_out );
 		const double p = ( r.weight >= ( 1 << 28 ) ) ? 0.0 : std::ldexp( 1.0, -r.weight );	// 2^{-W}

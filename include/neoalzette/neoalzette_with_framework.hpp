@@ -41,6 +41,8 @@
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
 #include "neoalzette/neoalzette_linear_step.hpp"
+using neoalz::diff_one_round_xdp_32;
+using neoalz::linear_one_round_backward_32;
 #include "arx_search_framework/clat/clat_builder.hpp"   // Step3: cLAT 構建（線性）
 // 下列兩個頭僅在示例中提及，實際構建未必需要
 // #include "neoalzette/neoalzette_medcp.hpp"
@@ -55,11 +57,7 @@
 // 搜索框架
 #include "arx_search_framework/pddt/pddt_algorithm1.hpp"
 #include "arx_search_framework/matsui/matsui_algorithm2.hpp"
-#include "arx_search_framework/clat/algorithm1_const.hpp"
 #include "arx_search_framework/clat/clat_builder.hpp"
-#include "arx_search_framework/clat/clat_search.hpp"
-#include "arx_search_framework/medcp_analyzer.hpp"
-#include "arx_search_framework/melcc_analyzer.hpp"
 
 namespace neoalz {
 
@@ -176,7 +174,7 @@ public:
 
             for (auto [dA, dB] : seeds) {
                 auto can = canonical_rotate_pair(dA, dB);
-                auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(can.first, can.second);
+                auto step = diff_one_round_xdp_32(can.first, can.second);
                 if (step.weight < 0) continue;
                 PDDTEntry e{can.first, can.second, step.dA_out, step.dB_out, step.weight};
                 auto& bucket = pddt[key(can.first, can.second)];
@@ -266,7 +264,7 @@ public:
                         if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
                     }
                 } else {
-                    auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
+                    auto step = diff_one_round_xdp_32(cur.dA, cur.dB);
                     if (step.weight < 0) continue;
                     int next_w = cur.accumulated_weight + step.weight;
                     if (next_w >= cfg.weight_cap) continue;
@@ -473,7 +471,7 @@ public:
                         if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
                     }
                 } else {
-                    auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
+                    auto step = diff_one_round_xdp_32(cur.dA, cur.dB);
                     if (step.weight >= 0) {
                         double p_r = std::ldexp(1.0, -step.weight);
                         double p_next = cur.p * p_r;
@@ -521,7 +519,7 @@ public:
 
             for (auto [dA, dB] : seeds) {
                 auto can = canonical(dA, dB);
-                auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(can.first, can.second);
+                auto step = diff_one_round_xdp_32(can.first, can.second);
                 if (step.weight < 0) continue;
                 HighwayEntry e{can.first, can.second, step.dA_out, step.dB_out, step.weight, std::ldexp(1.0, -step.weight)};
                 H.add(e);
@@ -632,13 +630,13 @@ public:
                 }
 
                 // 一輪線性黑盒步進（你的函數，逆向）
-                auto step = NeoAlzetteLinearStep::linear_one_round_backward_32(cur.mA, cur.mB);
+                auto step = linear_one_round_backward_32(cur.mA, cur.mB);
                 if (step.weight < 0) continue; // 不可行
 
                 int next_w = cur.accumulated_weight + step.weight;
                 if (next_w >= cfg.weight_cap) continue; // 門檻剪枝
 
-                pq.push(Node{cur.round + 1, step.mask_A_in, step.mask_B_in, next_w});
+                pq.push(Node{cur.round + 1, step.a_in_mask, step.b_in_mask, next_w});
             }
 
             if (best_weight == std::numeric_limits<int>::max()) return 0.0; // 找不到路徑

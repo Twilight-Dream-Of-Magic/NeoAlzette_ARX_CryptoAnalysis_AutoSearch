@@ -53,10 +53,10 @@ namespace neoalz
 		int			  weight;  // = −log2 |corr_total|
 	};
 
-	// ============ 一轮线性近似（按 backward 顺序回溯掩码并累权）===========
-	inline LinRoundResult linear_one_round_backward_32( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept;
+    // ============ 一轮线性近似（按 backward 顺序回溯掩码并累权）===========
+    LinRoundResult linear_one_round_backward_32( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept;
 
-	// 便捷函数：返回 |corr| 近似值（2^{-W}）
-	inline std::pair<LinRoundResult, double> linear_one_round_backward_32_with_prob( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept;
+    // 便捷函数：返回 |corr| 近似值（2^{-W}）
+    std::pair<LinRoundResult, double> linear_one_round_backward_32_with_prob( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept;
 
 }  // namespace neoalz

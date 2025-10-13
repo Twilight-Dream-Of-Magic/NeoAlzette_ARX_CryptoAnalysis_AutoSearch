@@ -14,7 +14,7 @@ namespace neoalz
 	 */
 	// DiffRoundResult 結構已在 header 定義
 
-	inline DiffRoundResult diff_one_round_xdp_32( std::uint32_t dA_in, std::uint32_t dB_in ) noexcept
+DiffRoundResult diff_one_round_xdp_32( std::uint32_t dA_in, std::uint32_t dB_in ) noexcept
 	{
 		using neoalz::NeoAlzetteCore;
 		using neoalz::arx_operators::diff_addconst_bvweight;
@@ -133,7 +133,7 @@ namespace neoalz
 	/**
 	 * @brief 便捷函数：同时返回近似概率（double）
 	 */
-	inline std::pair<DiffRoundResult, double> diff_one_round_xdp_32_with_prob( std::uint32_t dA_in, std::uint32_t dB_in ) noexcept
+std::pair<DiffRoundResult, double> diff_one_round_xdp_32_with_prob( std::uint32_t dA_in, std::uint32_t dB_in ) noexcept
 	{
 		auto   r = diff_one_round_xdp_32( dA_in, dB_in );
 		double p = ( r.weight >= ( INT_MAX / 4 ) ) ? 0.0 : std::pow( 2.0, -static_cast<double>( r.weight ) );

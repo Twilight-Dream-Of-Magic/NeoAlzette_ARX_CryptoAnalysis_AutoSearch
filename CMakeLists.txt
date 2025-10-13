@@ -61,6 +61,18 @@ add_executable(highway_table_build_lin src/highway_table_build_lin.cpp)
 target_link_libraries(highway_table_build_lin PRIVATE arx_framework neoalzette)
 
 # ============================================================================
+# NeoAlzette 計算密集型工具（專用：差分 / 線性）
+# ============================================================================
+
+# 差分：專用 Matsui Algorithm 2 外殼 + 黑盒一輪
+add_executable(neoalz_diff_search src/neoalz_diff_search.cpp)
+target_link_libraries(neoalz_diff_search PRIVATE arx_framework neoalzette)
+
+# 線性：cLAT 構建 + SLR 下界剪枝 + 黑盒一輪
+add_executable(neoalz_lin_search src/neoalz_lin_search.cpp)
+target_link_libraries(neoalz_lin_search PRIVATE arx_framework neoalzette)
+
+# ============================================================================
 # 安裝配置
 # ============================================================================
 install(TARGETS neoalzette arx_framework
