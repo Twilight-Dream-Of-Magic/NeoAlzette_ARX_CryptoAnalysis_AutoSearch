@@ -452,24 +452,37 @@ public:
                     if (est_total < Bn) { res.pruned++; continue; }
                 }
 
-                // 優先用 Highways，缺失則回退黑盒一步
+                // 優先用 Highways，缺失則回退黑盒一步；最後一輪只取“最佳”一條（最小權重）
+                bool is_last = (cur.round + 1 == cfg.rounds);
                 const auto& bucket = H.query(cur.dA, cur.dB);
                 if (!bucket.empty()) {
-                    int branched = 0;
-                    for (const auto& e : bucket) {
-                        // 段概率 p_r = 2^{-weight}
+                    if (is_last) {
+                        // 取最佳（bucket 已按權重升序）
+                        const auto& e = bucket.front();
                         double p_r = std::ldexp(1.0, -e.weight);
-                        double p_next = cur.p * p_r;
+                        double p_total = cur.p * p_r;
                         int next_w = cur.w + e.weight;
-                        if (next_w >= cfg.weight_cap) continue;
-                        // Matsui 2 剪枝（再次校驗 B̂_n）
-                        if (Bn > 0.0) {
-                            double remain_est = 1.0;
-                            for (int i = cur.round+1; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
-                            if (p_next * remain_est < Bn) { res.pruned++; continue; }
+                        // 最終比較與更新最佳
+                        if (next_w < res.best_weight) {
+                            res.best_weight = next_w;
+                            res.best_probability = p_total;
                         }
-                        pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w, p_next});
-                        if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
+                        continue;
+                    } else {
+                        int branched = 0;
+                        for (const auto& e : bucket) {
+                            double p_r = std::ldexp(1.0, -e.weight);
+                            double p_next = cur.p * p_r;
+                            int next_w = cur.w + e.weight;
+                            if (next_w >= cfg.weight_cap) continue;
+                            if (Bn > 0.0) {
+                                double remain_est = 1.0;
+                                for (int i = cur.round+1; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
+                                if (p_next * remain_est < Bn) { res.pruned++; continue; }
+                            }
+                            pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w, p_next});
+                            if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
+                        }
                     }
                 } else {
                     auto step = diff_one_round_xdp_32(cur.dA, cur.dB);
@@ -477,14 +490,21 @@ public:
                         double p_r = std::ldexp(1.0, -step.weight);
                         double p_next = cur.p * p_r;
                         int next_w = cur.w + step.weight;
-                        if (next_w >= cfg.weight_cap) { res.pruned++; }
-                        else {
-                            if (Bn > 0.0) {
-                                double remain_est = 1.0;
-                                for (int i = cur.round+1; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
-                                if (p_next * remain_est < Bn) { res.pruned++; continue; }
+                        if (is_last) {
+                            if (next_w < res.best_weight) {
+                                res.best_weight = next_w;
+                                res.best_probability = p_next;
                             }
-                            pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w, p_next});
+                        } else {
+                            if (next_w >= cfg.weight_cap) { res.pruned++; }
+                            else {
+                                if (Bn > 0.0) {
+                                    double remain_est = 1.0;
+                                    for (int i = cur.round+1; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
+                                    if (p_next * remain_est < Bn) { res.pruned++; continue; }
+                                }
+                                pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w, p_next});
+                            }
                         }
                     }
                 }
