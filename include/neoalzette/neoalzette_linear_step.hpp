@@ -9,13 +9,13 @@
 // —— 只用现成线性算子（不再额外封装）—— //
 #include "arx_analysis_operators/linear_cor_add_logn.hpp"  // linear_cor_add_wallen_logn / linear_cor_add_value_logn
 #include "arx_analysis_operators/linear_cor_addconst.hpp"  // corr_add_x_plus_const32
+#include "arx_analysis_operators/math_util.hpp"            // neg_mod_2n
 
 namespace neoalz
 {
 
-	// ============ 小工具：两补求 −K (mod 2^n) ============
-	template <class T>
-	static constexpr T neg_mod_2n( T k, int n ) noexcept;
+    // ============ 小工具：两补求 −K (mod 2^n) ============
+    using arx_operators::neg_mod_2n;
 
 	// ============ T0/T1 的转置（来自 rotl(.,31) ^ rotl(.,17)） ============
 	static inline std::uint32_t T_xy_transpose( std::uint32_t m ) noexcept;
