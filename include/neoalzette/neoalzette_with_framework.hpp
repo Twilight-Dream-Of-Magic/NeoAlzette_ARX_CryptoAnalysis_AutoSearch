@@ -34,6 +34,9 @@
 #include <limits>
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
+#include <algorithm>
+#include <random>
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
 #include "neoalzette/neoalzette_linear_step.hpp"
@@ -131,7 +134,12 @@ public:
             std::uint32_t start_dB = 0x00000000u;
             bool precompute_pddt = true;        // 是否預構建 pDDT
             int pddt_seed_stride = 8;           // 只取稀疏比特位種子（0,8,16,24）以控表
-            int topk_per_input = 1;             // 每個輸入保留前K條（因黑盒一輪返回單條，默認1）
+            int topk_per_input = 1;             // 每個輸入保留前K條（黑盒單條時=1）
+            int max_branch_per_node = 1;        // 每節點最多擴展 K 個子節點（基於 pDDT 排序）
+            bool use_canonical = true;          // 旋轉正規化去重
+            bool use_highway_lb = true;         // 啟用簡單下界剪枝（基於每輪最小權重）
+            bool use_country_roads = false;     // 可選：發散策略（僅在 pDDT 空時做一次黑盒步進）
+            int country_roads_trials = 0;       // 保留參數占位（默認不啟動）
             bool verbose = false;
         };
 
@@ -201,6 +209,22 @@ public:
 
             int best_weight = std::numeric_limits<int>::max();
 
+            // 預估每輪最小權重作為下界（Highway-like 簡化）：
+            int global_min_one_round = 1; // 保守預設
+            if (!pddt.empty()) {
+                int mn = std::numeric_limits<int>::max();
+                for (const auto& kv : pddt) {
+                    for (const auto& e : kv.second) mn = std::min(mn, e.weight);
+                }
+                if (mn != std::numeric_limits<int>::max()) global_min_one_round = std::max(0, mn);
+            }
+
+            // 去重：記錄 (round, canonical(dA,dB)) 的最佳已知累計權重
+            struct KeyHash { std::size_t operator()(const std::tuple<int,std::uint32_t,std::uint32_t>& t) const noexcept {
+                return std::hash<std::uint64_t>{}((std::uint64_t(std::get<0>(t))<<48) | (std::uint64_t(std::get<1>(t))<<24) | std::get<2>(t));
+            }};
+            std::unordered_map<std::tuple<int,std::uint32_t,std::uint32_t>, int, KeyHash> seen;
+
             while (!pq.empty()) {
                 Node cur = pq.top(); pq.pop();
                 if (cur.accumulated_weight >= best_weight) continue;
@@ -211,13 +235,33 @@ public:
                     continue;
                 }
 
+                // 旋轉正規化與去重
+                auto can_pair = canonical_rotate_pair(cur.dA, cur.dB);
+                auto keyv = std::make_tuple(cur.round, can_pair.first, can_pair.second);
+                auto itSeen = seen.find(keyv);
+                if (itSeen != seen.end() && itSeen->second <= cur.accumulated_weight) {
+                    continue;
+                }
+                seen[keyv] = cur.accumulated_weight;
+
+                // 下界剪枝：剩餘輪 * 每輪最小
+                if (cfg.use_highway_lb) {
+                    int remain = cfg.rounds - cur.round;
+                    int lb = remain * global_min_one_round;
+                    if (cur.accumulated_weight + lb >= std::min(best_weight, cfg.weight_cap)) {
+                        continue;
+                    }
+                }
+
                 // 優先使用 pDDT 擴展；若無條目，退回黑盒一輪
                 const auto& bucket = query_pddt(pddt, cur.dA, cur.dB);
                 if (!bucket.empty()) {
+                    int branched = 0;
                     for (const auto& e : bucket) {
                         int next_w = cur.accumulated_weight + e.weight;
                         if (next_w >= cfg.weight_cap) continue;
                         pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w});
+                        if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
                     }
                 } else {
                     auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
