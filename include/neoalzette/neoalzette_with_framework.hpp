@@ -281,26 +281,26 @@ public:
         }
 
         static double run_differential_analysis(const Config& cfg_in) {
-            // 嚴格化：改用通用 MatsuiAlgorithm2Complete + pDDT Algorithm 1
-            // Step3：構建 pDDT（Algorithm 1）為 Highways
-            MatsuiAlgorithm2Complete::SearchConfig scfg;
-            scfg.num_rounds = cfg_in.rounds;
-            scfg.initial_estimate = 0.0; // 若需要下界，可由外部提供
-            scfg.best_probs.assign(cfg_in.rounds, 1.0); // 可用單輪上界填充
+            // 使用 NeoAlzette 專用 Matsui 2 外殼，並嚴格按論文 Step3–Step5；
+            // 單輪擴展與計權完全交由黑盒 diff_one_round_xdp_32 處理。
+            NeoAlzetteMatsuiAlgorithm2::Config mcfg;
+            mcfg.rounds = cfg_in.rounds;
+            mcfg.weight_cap = cfg_in.weight_cap;
+            mcfg.start_dA = cfg_in.start_dA;
+            mcfg.start_dB = cfg_in.start_dB;
+            mcfg.build_highways = true;
+            mcfg.seed_stride = 1;          // 全覆蓋單比特種子
+            mcfg.topk_per_input = 4;       // 每輸入保留前4高概率
+            mcfg.use_canonical = true;
+            mcfg.use_lb = true;
+            mcfg.max_branch_per_node = 8;  // 允許充分分支，由門檻/下界剪枝控制
+            mcfg.prob_threshold = 0.0;     // 若需，之後可提供閾值
+            mcfg.initial_estimate = 0.0;   // 若需，之後可提供下界
+            // best_probs 留空，由 run() 內部以單輪最佳自動填充
 
-            PDDTAlgorithm1Complete::PDDTConfig pcfg;
-            pcfg.set_weight_threshold(std::max(1, cfg_in.weight_cap));
-            auto Htriples = PDDTAlgorithm1Complete::compute_pddt(pcfg);
-            for (const auto& t : Htriples) {
-                double p = std::ldexp(1.0, -t.weight);
-                scfg.highway_table.add({t.alpha, t.beta, t.gamma, p, t.weight});
-            }
-            scfg.highway_table.build_index();
-
-            // Step4：門檻搜索（Algorithm 2）
-            auto result = MatsuiAlgorithm2Complete::execute_threshold_search(scfg);
-            if (result.best_weight == std::numeric_limits<int>::max()) return 0.0;
-            return std::ldexp(1.0, -result.best_weight);
+            auto res = NeoAlzetteMatsuiAlgorithm2::run(mcfg);
+            if (res.best_weight == std::numeric_limits<int>::max()) return 0.0;
+            return std::ldexp(1.0, -res.best_weight);
         }
     };
     
