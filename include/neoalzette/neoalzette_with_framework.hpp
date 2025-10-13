@@ -29,6 +29,10 @@
 
 #pragma once
 
+#include <queue>
+#include <vector>
+#include <limits>
+#include <cmath>
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
 #include "neoalzette/neoalzette_linear_step.hpp"
@@ -182,31 +186,61 @@ public:
      * 5. 計算MELCC
      */
     struct LinearPipeline {
-        // Step 1: 底層ARX算子（已在neoalzette_linear.hpp中調用）
-        // 使用: linear_cor_add.hpp, linear_cor_addconst.hpp
-        
-        // Step 2: NeoAlzette線性模型
-        NeoAlzetteLinearModel linear_model;
-        
-        // Step 3: cLAT構建（TODO：需要實現NeoAlzette專用cLAT）
-        // 使用: clat_builder.hpp (Algorithm 2)
-        cLAT<8> clat;
-        
-        // Step 4: SLR搜索（TODO：需要整合到NeoAlzette）
-        // 使用: clat_search.hpp (Algorithm 3)
-        
-        // Step 5: MELCC分析
-        NeoAlzetteMELCCAnalyzer melcc_analyzer;
-        
-        /**
-         * @brief 執行完整線性分析
-         */
-        double run_linear_analysis(int num_rounds) {
-            // TODO: 實現完整流程
-            // 1. 構建cLAT
-            // 2. 運行SLR搜索
-            // 3. 計算MELCC
-            return 0.0;
+        // 以你的一輪線性黑盒分析器為核心（linear_one_round_backward_32）
+        // 這裡只做“門檻式擴展 + 權重剪枝”，不重建一輪模型。
+
+        struct Config {
+            int rounds = 4;
+            int weight_cap = 30;              // 線性權重門檻（-log2 |corr|）
+            std::uint32_t start_mask_A = 0x00000001u; // 輸出端起始掩碼A（逆向）
+            std::uint32_t start_mask_B = 0x00000000u; // 輸出端起始掩碼B（逆向）
+            bool verbose = false;
+        };
+
+        struct Node {
+            int round;
+            std::uint32_t mA;   // 當前輸出側掩碼（逆向步進）
+            std::uint32_t mB;
+            int accumulated_weight; // 累計線性權重
+        };
+
+        static double run_linear_analysis(int num_rounds) {
+            Config cfg; cfg.rounds = num_rounds; return run_linear_analysis(cfg);
+        }
+
+        static double run_linear_analysis(const Config& cfg) {
+            auto cmp = [](const Node& a, const Node& b) {
+                return a.accumulated_weight > b.accumulated_weight; // 小權重優先
+            };
+            std::priority_queue<Node, std::vector<Node>, decltype(cmp)> pq(cmp);
+
+            pq.push(Node{0, cfg.start_mask_A, cfg.start_mask_B, 0});
+
+            int best_weight = std::numeric_limits<int>::max();
+
+            while (!pq.empty()) {
+                Node cur = pq.top(); pq.pop();
+
+                if (cur.accumulated_weight >= best_weight) continue;
+                if (cur.accumulated_weight >= cfg.weight_cap) continue;
+
+                if (cur.round >= cfg.rounds) {
+                    if (cur.accumulated_weight < best_weight) best_weight = cur.accumulated_weight;
+                    continue;
+                }
+
+                // 一輪線性黑盒步進（你的函數，逆向）
+                auto step = NeoAlzetteLinearStep::linear_one_round_backward_32(cur.mA, cur.mB);
+                if (step.weight < 0) continue; // 不可行
+
+                int next_w = cur.accumulated_weight + step.weight;
+                if (next_w >= cfg.weight_cap) continue; // 門檻剪枝
+
+                pq.push(Node{cur.round + 1, step.mask_A_in, step.mask_B_in, next_w});
+            }
+
+            if (best_weight == std::numeric_limits<int>::max()) return 0.0; // 找不到路徑
+            return std::ldexp(1.0, -best_weight); // MELCC = 2^{-best_weight}
         }
     };
     
