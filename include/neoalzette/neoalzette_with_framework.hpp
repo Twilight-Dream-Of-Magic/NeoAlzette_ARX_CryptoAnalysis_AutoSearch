@@ -33,6 +33,7 @@
 #include <vector>
 #include <limits>
 #include <cmath>
+#include <unordered_map>
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_differential_step.hpp"  // diff_one_round_xdp_32
 #include "neoalzette/neoalzette_linear_step.hpp"
@@ -108,17 +109,82 @@ public:
      * 5. 計算MEDCP
      */
     struct DifferentialPipeline {
-        // 以你的一輪黑盒分析器為核心（不拆不改）
-        // 這裡只做“門檻式擴展 + 權重剪枝”，不重建一輪模型。
+        // 嚴格對齊：Step3 pDDT 構建 → Step4 Matsui 搜索 → Step5 MEDCP
+        // 黑盒一輪分析仍使用 diff_one_round_xdp_32（不拆、不改）。
+
+        // ======================= Step 3: pDDT 構建 ========================
+        struct PDDTEntry {
+            std::uint32_t dA_in;
+            std::uint32_t dB_in;
+            std::uint32_t dA_out;
+            std::uint32_t dB_out;
+            int weight; // 一輪權重
+        };
+
+        using PDDTBucket = std::vector<PDDTEntry>;
+        using PDDTMap = std::unordered_map<std::uint64_t, PDDTBucket>;
 
         struct Config {
             int rounds = 4;
-            int weight_cap = 30;          // 門檻：累積權重達上限即剪枝
+            int weight_cap = 30;                // 門檻：累積權重達上限即剪枝
             std::uint32_t start_dA = 0x00000001u;
             std::uint32_t start_dB = 0x00000000u;
+            bool precompute_pddt = true;        // 是否預構建 pDDT
+            int pddt_seed_stride = 8;           // 只取稀疏比特位種子（0,8,16,24）以控表
+            int topk_per_input = 1;             // 每個輸入保留前K條（因黑盒一輪返回單條，默認1）
             bool verbose = false;
         };
 
+        static inline std::uint64_t key(std::uint32_t a, std::uint32_t b) {
+            return (std::uint64_t(a) << 32) | b;
+        }
+
+        static inline std::pair<std::uint32_t,std::uint32_t>
+        canonical_rotate_pair(std::uint32_t a, std::uint32_t b) {
+            std::uint32_t best_a = a, best_b = b;
+            for (int r = 0; r < 32; ++r) {
+                auto ra = NeoAlzetteCore::rotl<std::uint32_t>(a, r);
+                auto rb = NeoAlzetteCore::rotl<std::uint32_t>(b, r);
+                if (std::make_pair(ra, rb) < std::make_pair(best_a, best_b)) {
+                    best_a = ra; best_b = rb;
+                }
+            }
+            return {best_a, best_b};
+        }
+
+        static void build_pddt(const Config& cfg, PDDTMap& pddt) {
+            pddt.clear();
+            // 種子集合：稀疏單比特與少量組合，控制規模（可依配置擴大）
+            std::vector<std::pair<std::uint32_t,std::uint32_t>> seeds;
+            for (int i = 0; i < 32; i += std::max(1, cfg.pddt_seed_stride)) {
+                seeds.emplace_back(1u << i, 0u);
+                seeds.emplace_back(0u, 1u << i);
+            }
+            // 也加上 (0,0) 與 (1,1) 代表性種子
+            seeds.emplace_back(0u, 0u);
+            seeds.emplace_back(1u, 1u);
+
+            for (auto [dA, dB] : seeds) {
+                auto can = canonical_rotate_pair(dA, dB);
+                auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(can.first, can.second);
+                if (step.weight < 0) continue;
+                PDDTEntry e{can.first, can.second, step.dA_out, step.dB_out, step.weight};
+                auto& bucket = pddt[key(can.first, can.second)];
+                bucket.push_back(e);
+                // 按權重排序並截斷到 topK（當前只有單條）
+                std::sort(bucket.begin(), bucket.end(), [](const PDDTEntry& x, const PDDTEntry& y){return x.weight < y.weight;});
+                if ((int)bucket.size() > cfg.topk_per_input) bucket.resize(cfg.topk_per_input);
+            }
+        }
+
+        static const PDDTBucket& query_pddt(const PDDTMap& pddt, std::uint32_t dA, std::uint32_t dB) {
+            static const PDDTBucket kEmpty;
+            auto can = canonical_rotate_pair(dA, dB);
+            auto it = pddt.find(key(can.first, can.second));
+            return (it == pddt.end()) ? kEmpty : it->second;
+        }
+
+        // ======================= Step 4: Matsui 搜索 =======================
         struct Node {
             int round;
             std::uint32_t dA;
@@ -126,52 +192,58 @@ public:
             int accumulated_weight;
         };
 
-        // 簡單門檻搜索（Matsui Algorithm 2 風格的單分支版）：
-        // - 擴展步：直接調用 diff_one_round_xdp_32 取得下一輪 (dA,dB,weight)
-        // - 剪枝：acc_weight + step_weight < weight_cap
-        // - 終止：達到 rounds 記錄最優；返回 MEDCP = 2^{-best_weight}
-        static double run_differential_analysis(int num_rounds) {
-            Config cfg;
-            cfg.rounds = num_rounds;
-            return run_differential_analysis(cfg);
-        }
-
-        static double run_differential_analysis(const Config& cfg) {
+        static int matsui_search_best_weight(const Config& cfg, const PDDTMap& pddt) {
             auto cmp = [](const Node& a, const Node& b) {
-                return a.accumulated_weight > b.accumulated_weight; // 小權重優先
+                return a.accumulated_weight > b.accumulated_weight; // 小者優先
             };
             std::priority_queue<Node, std::vector<Node>, decltype(cmp)> pq(cmp);
-
             pq.push(Node{0, cfg.start_dA, cfg.start_dB, 0});
 
             int best_weight = std::numeric_limits<int>::max();
 
             while (!pq.empty()) {
-                Node cur = pq.top();
-                pq.pop();
-
+                Node cur = pq.top(); pq.pop();
                 if (cur.accumulated_weight >= best_weight) continue;
                 if (cur.accumulated_weight >= cfg.weight_cap) continue;
 
                 if (cur.round >= cfg.rounds) {
-                    if (cur.accumulated_weight < best_weight) {
-                        best_weight = cur.accumulated_weight;
-                    }
+                    if (cur.accumulated_weight < best_weight) best_weight = cur.accumulated_weight;
                     continue;
                 }
 
-                // 一輪黑盒步進（你的函數）
-                auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
-                if (step.weight < 0) continue; // 不可行
-
-                int next_w = cur.accumulated_weight + step.weight;
-                if (next_w >= cfg.weight_cap) continue; // 門檻剪枝
-
-                pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w});
+                // 優先使用 pDDT 擴展；若無條目，退回黑盒一輪
+                const auto& bucket = query_pddt(pddt, cur.dA, cur.dB);
+                if (!bucket.empty()) {
+                    for (const auto& e : bucket) {
+                        int next_w = cur.accumulated_weight + e.weight;
+                        if (next_w >= cfg.weight_cap) continue;
+                        pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w});
+                    }
+                } else {
+                    auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
+                    if (step.weight < 0) continue;
+                    int next_w = cur.accumulated_weight + step.weight;
+                    if (next_w >= cfg.weight_cap) continue;
+                    pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w});
+                }
             }
 
-            if (best_weight == std::numeric_limits<int>::max()) return 0.0; // 找不到路徑
-            return std::ldexp(1.0, -best_weight); // MEDCP = 2^{-best_weight}
+            return best_weight;
+        }
+
+        // ======================= Step 5: MEDCP ==============================
+        static double run_differential_analysis(int num_rounds) {
+            Config cfg; cfg.rounds = num_rounds; return run_differential_analysis(cfg);
+        }
+
+        static double run_differential_analysis(const Config& cfg_in) {
+            Config cfg = cfg_in;
+            PDDTMap pddt;
+            if (cfg.precompute_pddt) build_pddt(cfg, pddt);
+
+            int best_w = matsui_search_best_weight(cfg, pddt);
+            if (best_w == std::numeric_limits<int>::max()) return 0.0; // 無路徑
+            return std::ldexp(1.0, -best_w); // MEDCP = 2^{-best_weight}
         }
     };
     
