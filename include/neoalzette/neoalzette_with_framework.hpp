@@ -283,13 +283,25 @@ public:
         }
 
         static double run_differential_analysis(const Config& cfg_in) {
-            Config cfg = cfg_in;
-            PDDTMap pddt;
-            if (cfg.precompute_pddt) build_pddt(cfg, pddt);
+            // 使用專用 NeoAlzette Matsui 2 外殼，嚴格按照論文 Step3–Step5 執行。
+            NeoAlzetteMatsuiAlgorithm2::Config mcfg;
+            mcfg.rounds = cfg_in.rounds;
+            mcfg.weight_cap = cfg_in.weight_cap;
+            mcfg.start_dA = cfg_in.start_dA;
+            mcfg.start_dB = cfg_in.start_dB;
+            mcfg.build_highways = true;
+            mcfg.seed_stride = cfg_in.pddt_seed_stride;
+            mcfg.topk_per_input = 1;
+            mcfg.use_canonical = true;
+            mcfg.use_lb = true;
+            mcfg.max_branch_per_node = 1;
+            mcfg.prob_threshold = 0.0;
+            mcfg.initial_estimate = 0.0;
+            // best_probs 留空，由外殼按單輪最佳自動填充
 
-            int best_w = matsui_search_best_weight(cfg, pddt);
-            if (best_w == std::numeric_limits<int>::max()) return 0.0; // 無路徑
-            return std::ldexp(1.0, -best_w); // MEDCP = 2^{-best_weight}
+            auto res = NeoAlzetteMatsuiAlgorithm2::run(mcfg);
+            if (res.best_weight == std::numeric_limits<int>::max()) return 0.0;
+            return std::ldexp(1.0, -res.best_weight);
         }
     };
     
