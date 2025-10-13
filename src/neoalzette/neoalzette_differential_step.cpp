@@ -12,12 +12,7 @@ namespace neoalz
 	 *  - 模加（var-const）用 BvWeight：默认取 Δout = Δin（身份映射），并计入对应权重（近似 O(log^2 n)）。
 	 *  - 其它运算（XOR / rotl / rotr / L1/L2 线性层 / 注入-delta版）为确定传播，权重 0。
 	 */
-	struct DiffRoundResult
-	{
-		std::uint32_t dA_out;
-		std::uint32_t dB_out;
-		int			  weight;  // = −log2 DP_total（整型；BvWeight已做4bit小数→整数）
-	};
+	// DiffRoundResult 結構已在 header 定義
 
 	inline DiffRoundResult diff_one_round_xdp_32( std::uint32_t dA_in, std::uint32_t dB_in ) noexcept
 	{

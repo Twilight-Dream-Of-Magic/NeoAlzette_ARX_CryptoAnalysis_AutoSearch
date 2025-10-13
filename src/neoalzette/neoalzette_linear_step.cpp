@@ -4,8 +4,8 @@ namespace neoalz
 {
 
 	// ============ 小工具：两补求 −K (mod 2^n) ============
-	template <class T>
-	static constexpr T neg_mod_2n( T k, int n = 32 ) noexcept
+    template <class T>
+    static constexpr T neg_mod_2n( T k, int n ) noexcept
 	{
 		static_assert( std::is_unsigned<T>::value, "T must be unsigned" );
 		const int W = int( sizeof( T ) * 8 );
@@ -103,14 +103,7 @@ namespace neoalz
 		mB ^= ( m_x ^ m_y );
 	}
 
-	// ============ 结果结构 ============
-	// 仅返回“输入掩码 + 总权重”；|corr|≈2^{-weight}
-	struct LinRoundResult
-	{
-		std::uint32_t a_in_mask;
-		std::uint32_t b_in_mask;
-		int			  weight;  // = −log2 |corr_total|
-	};
+	// 結構 LinRoundResult 於 header 定義
 
 	// ============ 一轮线性近似（按 backward 顺序回溯掩码并累权）===========
 	inline LinRoundResult linear_one_round_backward_32( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept

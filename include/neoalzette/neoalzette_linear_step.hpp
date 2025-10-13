@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <utility>
 #include <cmath>
+#include <climits>
 
 #include "neoalzette/neoalzette_core.hpp"
 
@@ -14,13 +15,7 @@ namespace neoalz
 
 	// ============ 小工具：两补求 −K (mod 2^n) ============
 	template <class T>
-	static constexpr T neg_mod_2n( T k, int n = 32 ) noexcept
-	{
-		static_assert( std::is_unsigned<T>::value, "T must be unsigned" );
-		const int W = int( sizeof( T ) * 8 );
-		const T	  mask = ( n >= W ) ? T( ~T( 0 ) ) : ( ( T( 1 ) << n ) - 1 );
-		return ( T( 0 ) - ( k & mask ) ) & mask;
-	}
+	static constexpr T neg_mod_2n( T k, int n ) noexcept;
 
 	// ============ T0/T1 的转置（来自 rotl(.,31) ^ rotl(.,17)） ============
 	static inline std::uint32_t T_xy_transpose( std::uint32_t m ) noexcept;

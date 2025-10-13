@@ -25,12 +25,8 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 # ============================================================================
 set(NEOALZETTE_SOURCES
     src/neoalzette/neoalzette_core.cpp
-    src/neoalzette/neoalzette_differential.cpp
-    src/neoalzette/neoalzette_linear.cpp
-    src/neoalzette/neoalzette_medcp.cpp
-    src/neoalzette/neoalzette_melcc.cpp
-    src/neoalzette/neoalzette_differential_search.cpp
-    src/neoalzette/neoalzette_linear_search.cpp
+    src/neoalzette/neoalzette_differential_step.cpp
+    src/neoalzette/neoalzette_linear_step.cpp
 )
 
 add_library(neoalzette STATIC ${NEOALZETTE_SOURCES})

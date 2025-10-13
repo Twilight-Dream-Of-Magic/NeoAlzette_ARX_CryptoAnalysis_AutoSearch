@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <utility>
 #include <cmath>
+#include <climits>
 
 #include "neoalzette/neoalzette_core.hpp"
 
