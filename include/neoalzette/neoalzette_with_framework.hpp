@@ -354,20 +354,25 @@ public:
         };
 
         struct Config {
-            int rounds = 4;
-            int weight_cap = 30;
-            std::uint32_t start_dA = 0x00000001u;
+            int rounds = 4;                       // n
+            int weight_cap = 30;                  // 兼容權重門檻（安全剪枝）
+            std::uint32_t start_dA = 0x00000001u; // 起點差分
             std::uint32_t start_dB = 0x00000000u;
-            bool build_highways = true;
-            int seed_stride = 8;          // 稀疏種子
-            int topk_per_input = 1;       // 每輸入最多保留K條
-            bool use_canonical = true;    // 旋轉正規化
-            bool use_lb = true;           // 簡單下界剪枝（基於最小一輪權重）
-            int max_branch_per_node = 1;  // 每節點最多擴展K個
+            bool build_highways = true;           // 是否構建 Highways (pDDT)
+            int seed_stride = 8;                  // 規範化種子步長
+            int topk_per_input = 1;               // 每輸入最多保留K條
+            bool use_canonical = true;            // 旋轉正規化
+            bool use_lb = true;                   // 下界剪枝（全局最小一輪）
+            int max_branch_per_node = 1;          // 節點分支上限
+            // Matsui Algorithm 2 參數：
+            double prob_threshold = 0.0;          // p_thres（Highways濾除閾值）
+            double initial_estimate = 0.0;        // B_n 初始估計下界
+            std::vector<double> best_probs;       // B̂_i 各輪最優概率估計（缺省用單輪最大）
         };
 
         struct Result {
             int best_weight = std::numeric_limits<int>::max();
+            double best_probability = 0.0;
             double medcp = 0.0;
             std::uint64_t nodes = 0;
             std::uint64_t pruned = 0;
@@ -379,11 +384,17 @@ public:
             HighwayTable H;
             if (cfg.build_highways) build_highways(cfg, H);
 
-            // 門檻搜索
-            struct Node { int round; std::uint32_t dA; std::uint32_t dB; int w; };
+            // 準備 B̂（如未提供，使用單輪最大概率作估計）
+            double single_round_best_p = std::ldexp(1.0, -H.global_min_weight()); // 2^{-w_min}
+            if (cfg.best_probs.empty()) cfg.best_probs = std::vector<double>(cfg.rounds, single_round_best_p);
+            // 若 initial_estimate 未設，取一個極小正數（避免全剪）
+            double Bn = (cfg.initial_estimate > 0.0) ? cfg.initial_estimate : 0.0;
+
+            // Matsui 2 門檻搜索（以概率為主進行剪枝）
+            struct Node { int round; std::uint32_t dA; std::uint32_t dB; int w; double p; };
             auto cmp = [](const Node& a, const Node& b){ return a.w > b.w; };
             std::priority_queue<Node, std::vector<Node>, decltype(cmp)> pq(cmp);
-            pq.push(Node{0, cfg.start_dA, cfg.start_dB, 0});
+            pq.push(Node{0, cfg.start_dA, cfg.start_dB, 0, 1.0});
 
             Result res;
             // 去重： (round, canonical(dA,dB)) → 最佳已知權重
@@ -401,7 +412,11 @@ public:
                 if (cur.w >= cfg.weight_cap)  { res.pruned++; continue; }
 
                 if (cur.round >= cfg.rounds) {
-                    if (cur.w < res.best_weight) { res.best_weight = cur.w; }
+                    // 完整 n 輪：更新最佳（以權重與概率雙準則）
+                    if (cur.w < res.best_weight) {
+                        res.best_weight = cur.w;
+                        res.best_probability = cur.p;
+                    }
                     continue;
                 }
 
@@ -417,26 +432,56 @@ public:
                     if (cur.w + lb >= std::min(res.best_weight, cfg.weight_cap)) { res.pruned++; continue; }
                 }
 
+                // Matsui 2 剪枝條件：B̂_n = p_so_far · B̂_{n-r} ≥ B_n
+                // 若 B_n 未提供，則不使用此條件（Bn=0 表示放寬）。
+                if (Bn > 0.0) {
+                    double remain_est = 1.0;
+                    for (int i = cur.round; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
+                    double est_total = cur.p * remain_est;
+                    if (est_total < Bn) { res.pruned++; continue; }
+                }
+
                 // 優先用 Highways，缺失則回退黑盒一步
                 const auto& bucket = H.query(cur.dA, cur.dB);
                 if (!bucket.empty()) {
                     int branched = 0;
                     for (const auto& e : bucket) {
+                        // 段概率 p_r = 2^{-weight}
+                        double p_r = std::ldexp(1.0, -e.weight);
+                        double p_next = cur.p * p_r;
                         int next_w = cur.w + e.weight;
                         if (next_w >= cfg.weight_cap) continue;
-                        pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w});
+                        // Matsui 2 剪枝（再次校驗 B̂_n）
+                        if (Bn > 0.0) {
+                            double remain_est = 1.0;
+                            for (int i = cur.round+1; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
+                            if (p_next * remain_est < Bn) { res.pruned++; continue; }
+                        }
+                        pq.push(Node{cur.round + 1, e.dA_out, e.dB_out, next_w, p_next});
                         if (++branched >= std::max(1, cfg.max_branch_per_node)) break;
                     }
                 } else {
                     auto step = NeoAlzetteDifferentialStep::diff_one_round_xdp_32(cur.dA, cur.dB);
                     if (step.weight >= 0) {
+                        double p_r = std::ldexp(1.0, -step.weight);
+                        double p_next = cur.p * p_r;
                         int next_w = cur.w + step.weight;
-                        if (next_w < cfg.weight_cap) pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w});
+                        if (next_w >= cfg.weight_cap) { res.pruned++; }
+                        else {
+                            if (Bn > 0.0) {
+                                double remain_est = 1.0;
+                                for (int i = cur.round+1; i < cfg.rounds; ++i) remain_est *= cfg.best_probs[i];
+                                if (p_next * remain_est < Bn) { res.pruned++; continue; }
+                            }
+                            pq.push(Node{cur.round + 1, step.dA_out, step.dB_out, next_w, p_next});
+                        }
                     }
                 }
             }
 
-            if (res.best_weight != std::numeric_limits<int>::max()) res.medcp = std::ldexp(1.0, -res.best_weight);
+            if (res.best_weight != std::numeric_limits<int>::max()) {
+                res.medcp = std::ldexp(1.0, -res.best_weight);
+            }
             res.complete = true;
             return res;
         }
