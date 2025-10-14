@@ -1,607 +1,210 @@
-# NeoAlzette ARX 密碼分析框架
+# NeoAlzette ARX 密碼分析 AutoSearch（文件：繁體中文）
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+> 提醒：本 repo 含 **計算密集** 的研究/實驗程式。請從小輪數、小樣本數開始。
 
-> ⚠️ **警告：計算密集型程序**  
-> 這是一個密碼分析框架，對ARX密碼的差分和線性特徵進行窮舉搜索。**請勿輕易運行**，務必先理解計算需求。多輪搜索即使在高性能硬件上也可能需要**數小時到數天**。
+[English README](README_EN.md)
 
-[English README](README.md)
+本專案目前包含：
 
----
-
-## 目錄
-
-- [項目概述](#項目概述)
-- [背景介紹](#背景介紹)
-- [開發歷程](#開發歷程)
-- [架構設計](#架構設計)
-- [實現的論文](#實現的論文)
-- [硬件需求](#硬件需求)
-- [安裝說明](#安裝說明)
-- [使用示例](#使用示例)
-- [性能考量](#性能考量)
-- [驗證狀態](#驗證狀態)
-- [項目結構](#項目結構)
-- [貢獻指南](#貢獻指南)
-- [許可證](#許可證)
-- [致謝](#致謝)
+- **NeoAlzette 核心實作**：`TwilightDream::NeoAlzetteCore`（單輪 `forward/backward`、線性層 `l1/l2`、以及跨分支注入 helper）。
+- **ARX 論文算子（header-only）**：用於模加/常數加減在差分與線性模型下的權重計算。
+- **研究/實驗程式**（`test_*.cpp`）：差分 trail trace、含注入模型的最佳 trail 搜尋、以及 PNB/neutral bits 相關實驗。
 
 ---
 
-## 項目概述
+## 目前 repo 內容（以現有程式碼為準）
 
-本項目實現了一個**三層ARX密碼分析框架**，專門用於分析**NeoAlzette**密碼——一個受Alzette啟發的64位ARX-box。框架提供：
-
-- **優化的ARX算子**：差分和線性分析的Θ(log n)算法
-- **自動化搜索框架**：帶有highways優化的Branch-and-bound搜索
-- **NeoAlzette集成**：完整的差分和線性特徵搜索
-
-**本框架能做什麼：**
-- 搜索最優差分特徵（MEDCP - Maximum Expected Differential Characteristic Probability）
-- 搜索最優線性特徵（MELCC - Maximum Expected Linear Characteristic Correlation）
-- 執行多輪自動化密碼分析
-
-**本框架不能做什麼：**
-- 不提供密碼分析結果（無預計算的路徑）
-- 不保證找到最優特徵（啟發式搜索）
-- 不破解密碼（這是一個研究工具）
+- **核心 ARX-box**
+  - `include/neoalzette/neoalzette_core.hpp`
+  - `src/neoalzette/neoalzette_core.cpp`
+- **ARX 分析算子（header-only）**
+  - `include/arx_analysis_operators/`  
+    相關說明與引用見 `include/arx_analysis_operators/README.md`。
+- **可執行入口（main）**
+  - `test_neoalzette_arx_trace.cpp`
+  - `test_neoalzette_differential_best_search.cpp`
+  - `test_neoalzette_linear_best_search.cpp`
+  - `test_neoalzette_arx_probabilistic_neutral_bits.cpp`
+  - `test_neoalzette_arx_probabilistic_neutral_bits_average.cpp`
 
 ---
 
-## 背景介紹
+## 建置（Windows / MinGW-w64）
 
-### NeoAlzette 密碼
+### 快速建置腳本（推薦）
 
-NeoAlzette是一個64位ARX-box（加法-旋轉-異或），設計為Alzette密碼的變體。它在兩個32位分支(A, B)上操作，通過：
+- 執行 `build_and_test.bat`（會編譯全部並執行 `test_neoalzette_arx_probabilistic_neutral_bits.exe`）。
+- 其假設你有設定環境變數 **`%MINGW64%`** 指向 toolchain 的 `bin` 目錄，並使用 `"%MINGW64%\clang++"`。
 
-- **每輪10個原子步驟**：
-  - 線性層（L1, L2）
-  - 跨分支注入
-  - 模加法
-  - 常量減法
+### 手動編譯範例
 
-### 為什麼做這個項目？
+以下指令會各自產生一個 `.exe`（C++20）：
 
-ARX密碼是現代對稱密碼學的基礎，但分析它們需要：
-
-1. **高效算法**：樸素方法是O(2^n)，對於32位字長不可行
-2. **論文實現**：算法散布在多篇論文中（2001-2022）
-3. **集成挑戰**：將通用算法適配到特定密碼結構
-
-本項目通過實現最先進的算法並將它們集成到一個統一框架來解決這些挑戰。
-
----
-
-## 開發歷程
-
-### 時間線
-
-本項目通過**嚴格的論文驗證**和**迭代改進**開發：
-
-1. **階段1：ARX算子（第1-2週）**
-   - 實現Lipmaa-Moriai (2001) 算法2、4
-   - 實現Wallén (2003) 線性相關性
-   - 實現BvWeight (2022) 常量加法
-   - **多次迭代**修復對論文算法的誤解
-
-2. **階段2：搜索框架（第3週）**
-   - 實現pDDT（部分DDT）構造
-   - 實現Matsui閾值搜索
-   - 實現cLAT（組合LAT）構造
-   - **逐行驗證**對照論文
-
-3. **階段3：NeoAlzette集成（第4週）**
-   - 創建26個原子步驟函數
-   - 集成到差分搜索（前向）
-   - 集成到線性搜索（逆向）
-   - **廣泛驗證**調用鏈
-
-### 關鍵挑戰解決
-
-#### 挑戰1：LM-2001算法2誤解
-- **問題**：初始實現直接使用`eq = ~(α ⊕ β ⊕ γ)`
-- **根本原因**：誤解了`eq`和`ψ`函數的關係
-- **解決方案**：用戶提供Python參考；重構為使用`ψ(α,β,γ) = (~α ⊕ β) & (~α ⊕ γ)`
-- **迭代次數**：3次重大重構
-
-#### 挑戰2：Wallén算法通用性
-- **問題**：為常量加法實現了單獨的O(n)算法
-- **根本原因**：沒有認識到引理7允許通用應用
-- **解決方案**：替換為單一Θ(log n)實現
-- **複雜度改進**：O(n) → Θ(log n)
-
-#### 挑戰3：線性轉置混淆
-- **問題**：最初混淆了L^T（轉置）和L^(-1)（逆）
-- **根本原因**：對掩碼傳播理解不足
-- **解決方案**：用戶澄清線性性質：`L(X ⊕ C) = L(X) ⊕ L(C)`
-- **結果**：正確的轉置實現（rotl ↔ rotr）
-
-### 驗證方法論
-
-每個算法實現都通過以下方式驗證：
-
-1. **論文交叉引用**：與源論文逐行比較
-2. **示例驗證**：使用論文示例測試（如果提供）
-3. **Python參考**：用戶提供的參考實現
-4. **靜態分析**：檢查算法複雜度和正確性
-5. **集成測試**：驗證調用鏈和數據流
-
-**無未經驗證的聲明**：如果此處記錄了某個功能，則它已被實現和驗證。
-
----
-
-## 架構設計
-
-### 三層設計
-
-```
-┌─────────────────────────────────────────────┐
-│  第3層：NeoAlzette集成                      │
-│  ┌──────────────────────────────────────┐   │
-│  │ 差分步驟函數（13個）                  │   │
-│  │ 線性步驟函數（13個）                  │   │
-│  │ 搜索框架（2個）                       │   │
-│  └──────────────────────────────────────┘   │
-└──────────────┬──────────────────────────────┘
-               │ 使用
-┌──────────────▼──────────────────────────────┐
-│  第2層：通用搜索框架                        │
-│  ┌──────────────────────────────────────┐   │
-│  │ pDDT構造                             │   │
-│  │ Matsui閾值搜索                       │   │
-│  │ cLAT構造                             │   │
-│  │ 線性搜索算法                         │   │
-│  └──────────────────────────────────────┘   │
-└──────────────┬──────────────────────────────┘
-               │ 使用
-┌──────────────▼──────────────────────────────┐
-│  第1層：ARX分析算子                         │
-│  ┌──────────────────────────────────────┐   │
-│  │ xdp_add_lm2001: Θ(log n)            │   │
-│  │ find_optimal_gamma: Θ(log n)        │   │
-│  │ diff_addconst_bvweight: O(log²n)    │   │
-│  │ linear_cor_add_wallen: Θ(log n)     │   │
-│  │ corr_add_x_plus_const32: Θ(log n)   │   │
-│  └──────────────────────────────────────┘   │
-└─────────────────────────────────────────────┘
-```
-
-### 關鍵設計原則
-
-1. **模塊化**：每層獨立
-2. **論文保真度**：嚴格遵循已發表算法
-3. **不過早優化**：正確性優於速度
-4. **明確文檔**：每個函數記錄其論文來源
-
----
-
-## 實現的論文
-
-本框架實現了以下同行評審論文的算法：
-
-### 差分分析
-
-1. **Lipmaa & Moriai (2001)**："Efficient Algorithms for Computing Differential Properties of Addition"
-   - 算法1：全一奇偶性（aop）
-   - 算法2：XOR差分概率（xdp+）
-   - 算法4：尋找最優輸出差分
-
-2. **Beierle et al. (2022)**："Improving Differential Cryptanalysis Using MILP"
-   - 算法1：常量加法的BvWeight
-
-3. **Biryukov & Velichkov**："Automatic Search for Differential Trails in ARX Ciphers"
-   - 算法1：pDDT構造
-   - 算法2：Matsui閾值搜索
-
-### 線性分析
-
-4. **Wallén (2003)**："Linear Approximations of Addition Modulo 2^n"
-   - 核心算法：Θ(log n)相關性計算
-   - 引理7：推廣到常量
-
-5. **Huang & Wang (2020)**："A Simpler Method for Linear Hull Analysis"
-   - 算法2：cLAT構造
-   - 算法3：線性特徵搜索
-
-6. **Beaulieu et al. (2013)**："The SIMON and SPECK Families of Lightweight Block Ciphers"
-   - Alzette設計原則（NeoAlzette的靈感來源）
-
-**總計**：6篇論文，11個算法實現
-
----
-
-## 硬件需求
-
-### 計算複雜度
-
-**單輪分析：**
-- 差分：每步O(log n) → **快速**（毫秒）
-- 線性：每步O(log n) → **快速**（毫秒）
-
-**多輪搜索：**
-- 2輪：~10^3到10^6節點 → **分鐘到小時**
-- 3輪：~10^6到10^9節點 → **小時到天**
-- 4輪：~10^9到10^12節點 → **天到週**
-
-**內存使用：**
-- 基線：~100MB（代碼+靜態數據）
-- 每條路徑：~1KB
-- 峰值：~1GB到10GB（取決於搜索深度）
-
-### 推薦硬件
-
-#### 最低配置（個人電腦）
-- **CPU**：4核，2.5 GHz
-- **內存**：8GB
-- **用途**：單輪分析，小規模搜索（≤2輪）
-- **限制**：多輪搜索可能不可行
-
-#### 推薦配置（工作站）
-- **CPU**：16核，3.0 GHz或更高
-- **內存**：32GB或更多
-- **用途**：多輪搜索（2-4輪）
-- **注意**：仍可能需要通宵運行
-
-#### 最優配置（計算集群）
-- **CPU**：每節點64+核
-- **內存**：每節點128GB+
-- **用途**：詳盡的4+輪搜索
-- **注意**：框架目前單線程（並行化為未來工作）
-
-### 我的個人電腦能運行嗎？
-
-**可以，但是：**
-
-- ✅ **單輪分析**：完全可以，幾秒鐘內完成
-- ✅ **2輪差分搜索**：可行，可能需要幾分鐘到幾小時
-- ⚠️ **3輪搜索**：有風險，可能需要多小時
-- ❌ **4+輪搜索**：沒有集群不推薦
-
-**運行多輪搜索前：**
-1. 從`num_rounds = 1`開始驗證設置
-2. 逐步增加輪數
-3. 監控CPU和內存使用
-4. 準備好等待（或中斷）
-
----
-
-## 安裝說明
-
-### 前置要求
-
-- **C++20編譯器**：GCC 10+，Clang 12+，或MSVC 2019+
-- **CMake**：3.15或更高
-- **構建工具**：make，ninja（可選）
-
-### 構建步驟
-
-```bash
-# 克隆倉庫
-git clone https://github.com/yourusername/neoalzette-arx-analysis.git
-cd neoalzette-arx-analysis
-
-# 創建構建目錄
-mkdir build && cd build
-
-# 使用CMake配置
-cmake .. -DCMAKE_BUILD_TYPE=Release
-
-# 構建（使用-j進行並行編譯）
-cmake --build . -j$(nproc)
-
-# 可選：運行測試
-ctest --output-on-failure
-```
-
-### 編譯標誌
-
-- **Release**：`-O3 -DNDEBUG`（推薦用於性能）
-- **Debug**：`-O0 -g`（僅用於開發）
-- **Sanitizers**：`-fsanitize=address,undefined`（用於調試）
-
----
-
-## 使用示例
-
-### 示例1：單輪差分分析
-
-```cpp
-#include "neoalzette/neoalzette_differential_search.hpp"
-
-int main() {
-    using namespace neoalz;
-    
-    // 配置搜索
-    NeoAlzetteDifferentialSearch::SearchConfig config;
-    config.num_rounds = 1;           // 單輪
-    config.initial_dA = 0x80000000;  // 輸入差分A
-    config.initial_dB = 0x00000000;  // 輸入差分B
-    config.weight_cap = 10;          // 最大權重閾值
-    config.use_optimal_gamma = true; // 使用算法4
-    
-    // 運行搜索
-    auto result = NeoAlzetteDifferentialSearch::search(config);
-    
-    // 輸出結果
-    if (result.found) {
-        std::cout << "最佳權重: " << result.best_weight << std::endl;
-        std::cout << "訪問節點: " << result.nodes_visited << std::endl;
-    }
-    
-    return 0;
-}
-```
-
-**預期運行時間**：<1秒  
-**預期輸出**：單輪最佳差分權重
-
-### 示例2：兩輪線性分析
-
-```cpp
-#include "neoalzette/neoalzette_linear_search.hpp"
-
-int main() {
-    using namespace neoalz;
-    
-    // 配置搜索（從輸出向後）
-    NeoAlzetteLinearSearch::SearchConfig config;
-    config.num_rounds = 2;                     // 兩輪
-    config.final_mA = 0x00000001;              // 輸出掩碼A
-    config.final_mB = 0x00000000;              // 輸出掩碼B
-    config.correlation_threshold = 0.001;      // 最小相關性
-    
-    // 運行搜索
-    auto result = NeoAlzetteLinearSearch::search(config);
-    
-    // 輸出結果
-    if (result.found) {
-        std::cout << "最佳相關性: " << result.best_correlation << std::endl;
-        std::cout << "訪問節點: " << result.nodes_visited << std::endl;
-    }
-    
-    return 0;
-}
-```
-
-**預期運行時間**：分鐘到小時  
-**預期輸出**：兩輪最佳線性相關性
-
-### 示例3：測試ARX算子
-
-```cpp
-#include "arx_analysis_operators/differential_xdp_add.hpp"
-
-int main() {
-    // 測試LM-2001算法2
-    std::uint32_t alpha = 0x12345678;
-    std::uint32_t beta  = 0xABCDEF00;
-    std::uint32_t gamma = 0x11111111;
-    
-    int weight = arx_operators::xdp_add_lm2001(alpha, beta, gamma);
-    
-    if (weight >= 0) {
-        std::cout << "XDP+權重: " << weight << std::endl;
-        std::cout << "概率: 2^-" << weight << std::endl;
-    } else {
-        std::cout << "差分不可能" << std::endl;
-    }
-    
-    return 0;
-}
-```
-
-**預期運行時間**：微秒  
-**預期輸出**：差分權重或-1（不可能）
-
----
-
-## 性能考量
-
-### 計算瓶頸
-
-1. **模加分析**：最昂貴的操作
-   - 差分：每次調用Θ(log n)
-   - 線性：每次調用Θ(log n)
-   - 在多輪搜索中調用數百萬次
-
-2. **候選枚舉**：組合爆炸
-   - 每步可能生成3-10個候選
-   - 每輪10步 → 1輪10^10種可能路徑
-   - 隨輪數指數增長
-
-3. **Branch-and-Bound剪枝**：可行性的關鍵
-   - 良好剪枝：3輪10^6節點
-   - 糟糕剪枝：10^12節點（不可行）
-
-### 優化策略（當前）
-
-- ✅ **最優算法**：Θ(log n)而非O(2^n)
-- ✅ **算法4**：快速最優γ搜索
-- ✅ **權重上限**：激進剪枝
-- ✅ **啟發式枚舉**：每步有限候選
-
-### 優化策略（未來工作）
-
-- ⏳ **Highway表**：預計算的高概率路徑
-- ⏳ **並行搜索**：多線程，GPU加速
-- ⏳ **cLAT集成**：更智能的線性候選選擇
-- ⏳ **自適應閾值**：動態剪枝調整
-
-### 基準測試（指示性，未驗證）
-
-**平台**：Intel Xeon E5-2680 v4 @ 2.4 GHz，32GB RAM
-
-| 配置 | 輪數 | 訪問節點 | 運行時間 | 結果 |
-|------|------|----------|---------|------|
-| 差分，weight_cap=15 | 1 | ~10^3 | <1秒 | 找到 |
-| 差分，weight_cap=20 | 2 | ~10^6 | ~1分鐘 | 找到 |
-| 線性，threshold=0.01 | 1 | ~10^3 | <1秒 | 找到 |
-| 線性，threshold=0.001 | 2 | ~10^6 | ~30分鐘 | 找到 |
-
-**⚠️ 免責聲明**：這些是基於測試運行的**指示性估計**。實際性能因以下因素而異：
-- 輸入差分/掩碼
-- 閾值設置
-- 硬件規格
-- 編譯器優化
-
-**不要**依賴這些數字進行規劃。始終先運行小規模測試。
-
----
-
-## 驗證狀態
-
-### 階段1：ARX算子 - ✅ 已驗證
-
-| 算子 | 論文 | 驗證 | 狀態 |
-|------|------|------|------|
-| `xdp_add_lm2001` | LM-2001算法2 | 用戶Python參考 | ✅ 正確 |
-| `find_optimal_gamma` | LM-2001算法4 | 論文示例 | ✅ 正確 |
-| `diff_addconst_bvweight` | BvWeight算法1 | 論文公式 | ✅ 正確 |
-| `linear_cor_add_wallen` | Wallén-2003 | 論文示例 | ✅ 正確 |
-| `corr_add_x_plus_const32` | Wallén引理7 | 數學證明 | ✅ 正確 |
-
-### 階段2：搜索框架 - ✅ 已驗證
-
-| 組件 | 論文 | 驗證 | 狀態 |
-|------|------|------|------|
-| pDDT算法1 | Biryukov & Velichkov | 逐行 | ✅ 正確 |
-| Matsui算法2 | Biryukov & Velichkov | 逐行 | ✅ 正確 |
-| cLAT算法2 | Huang & Wang | 逐行 | ✅ 正確 |
-| 線性搜索算法3 | Huang & Wang | 逐行 | ✅ 正確 |
-
-### 階段3：NeoAlzette集成 - ✅ 已驗證
-
-| 組件 | 驗證 | 狀態 |
-|------|------|------|
-| 差分步驟函數（13個） | 調用鏈分析 | ✅ 正確 |
-| 線性步驟函數（13個） | 調用鏈分析 | ✅ 正確 |
-| 差分搜索框架 | 集成測試 | ✅ 正確 |
-| 線性搜索框架 | 集成測試 | ✅ 正確 |
-
-### 未經驗證的內容
-
-- ❌ **實際密碼分析結果**：沒有已發表的路徑
-- ❌ **最優特徵**：不能保證全局最優
-- ❌ **多輪性能**：超過2輪的測試有限
-- ❌ **並行擴展**：僅單線程
-
----
-
-## 項目結構
-
-```
-.
-├── include/
-│   ├── arx_analysis_operators/          # 階段1：ARX算子
-│   │   ├── differential_xdp_add.hpp     # LM-2001算法2
-│   │   ├── differential_optimal_gamma.hpp # LM-2001算法4
-│   │   ├── differential_addconst.hpp     # BvWeight算法1
-│   │   ├── linear_cor_add_logn.hpp      # Wallén核心算法
-│   │   └── linear_cor_addconst.hpp      # Wallén引理7
-│   ├── arx_search_framework/            # 階段2：搜索框架
-│   │   ├── pddt/                        # pDDT構造
-│   │   ├── matsui/                      # Matsui閾值搜索
-│   │   ├── clat/                        # cLAT構造
-│   │   ├── medcp_analyzer.hpp           # MEDCP包裝器
-│   │   └── melcc_analyzer.hpp           # MELCC包裝器
-│   └── neoalzette/                      # 階段3：NeoAlzette集成
-│       ├── neoalzette_core.hpp          # 核心算法
-│       ├── neoalzette_differential_step.hpp  # 差分步驟
-│       ├── neoalzette_linear_step.hpp   # 線性步驟
-│       ├── neoalzette_differential_search.hpp # 差分搜索
-│       └── neoalzette_linear_search.hpp # 線性搜索
-├── src/                                 # 實現文件
-├── papers_txt/                          # 論文參考（文本）
-├── CMakeLists.txt                       # 構建配置
-└── README_CN.md                         # 本文件
+```bat
+"%MINGW64%\clang++" -std=c++20 -O3 -I.\include test_neoalzette_arx_trace.cpp src\neoalzette\neoalzette_core.cpp -o test_neoalzette_arx_trace.exe
+"%MINGW64%\clang++" -std=c++20 -O3 -I.\include test_neoalzette_differential_best_search.cpp src\neoalzette\neoalzette_core.cpp -o test_neoalzette_differential_best_search.exe
+"%MINGW64%\clang++" -std=c++20 -O3 -I.\include test_neoalzette_linear_best_search.cpp src\neoalzette\neoalzette_core.cpp -o test_neoalzette_linear_best_search.exe
+"%MINGW64%\clang++" -std=c++20 -O3 -I.\include test_neoalzette_arx_probabilistic_neutral_bits.cpp src\neoalzette\neoalzette_core.cpp -o test_neoalzette_arx_probabilistic_neutral_bits.exe
+"%MINGW64%\clang++" -std=c++20 -O3 -I.\include test_neoalzette_arx_probabilistic_neutral_bits_average.cpp src\neoalzette\neoalzette_core.cpp -o test_neoalzette_arx_probabilistic_neutral_bits_average.exe
 ```
 
 ---
 
-## 貢獻指南
+## 執行方式
 
-### 貢獻準則
+### `test_neoalzette_arx_trace.exe`（逐步差分 trace）
 
-我們歡迎貢獻，但請注意：
+- 無參數。
+- 會 trace 兩組起始差分：\((\Delta A,\Delta B)=(1,0)\) 與 \((0,1)\)。
+- 內部使用：
+  - LM2001 最佳 \(\gamma\) 算子（模加）
+  - BvWeight 算子（常數模減）
+  - **Affine-derivative** 的注入模型（以 rank 作為權重）
 
-1. **需要論文驗證**：任何新算法必須引用同行評審的論文
-2. **無未經驗證的聲明**：不要在沒有測試的情況下添加功能
-3. **代碼質量**：遵循現有風格（詳細註釋，論文引用）
-4. **測試**：提供測試用例或驗證
-
-### 報告問題
-
-報告錯誤時，請包括：
-- 編譯器版本
-- 構建配置（Release/Debug）
-- 最小可重現示例
-- 預期行為 vs 實際行為
-
----
-
-## 許可證
-
-本項目根據MIT許可證授權 - 詳見[LICENSE](LICENSE)文件。
-
-**注意**：雖然代碼採用MIT許可，但算法基於已發表的學術論文。在學術出版物中使用此工作時，請引用原始論文。
-
----
-
-## 致謝
-
-### 論文和作者
-
-沒有以下基礎研究，此工作不可能完成：
-
-- **Helger Lipmaa & Shiho Moriai**：XOR差分概率算法
-- **Johan Wallén**：線性相關性算法
-- **Alex Biryukov & Vesselin Velichkov**：自動差分搜索
-- **Kai Hu & Meiqin Wang**：線性hull分析
-- **Christof Beierle et al.**：基於MILP的差分分析
-- **Simon Beaulieu et al.**：Alzette設計
-
-### 開發
-
-本框架通過以下方式開發：
-- **嚴格的論文驗證**：多次迭代以匹配論文規範
-- **用戶反饋**：關於算法正確性的關鍵見解
-- **迭代改進**：無數次重構以實現正確性
-
-**特別感謝**提供Python參考實現並發現關鍵誤解的用戶。
-
----
-
-## 免責聲明
-
-**這是一個研究工具**
-
-- ✅ 用於：學術研究，密碼分析教育
-- ❌ 不用於：生產密碼學，安全評估
-- ⚠️ 警告：計算強度大，結果無保證
-
-**作者對誤用或產生的計算成本不承擔任何責任。**
-
----
-
-## 引用
-
-如果您在研究中使用此框架，請引用：
-
-```bibtex
-@software{neoalzette_arx_framework,
-  title = {NeoAlzette ARX密碼分析框架},
-  author = {[您的姓名]},
-  year = {2025},
-  url = {https://github.com/yourusername/neoalzette-arx-analysis}
-}
+```bat
+test_neoalzette_arx_trace.exe
 ```
 
-並請引用所使用算法的原始論文。
+### `test_neoalzette_differential_best_search.exe`（含注入模型的最佳 trail 搜尋）
+
+命令列（4 種前端 / 子命令）：
+
+- **策略模式（推薦，少量參數）**：
+  - `test_neoalzette_differential_best_search.exe strategy <time|balanced|space> --round-count <R> [--delta-a <DA> --delta-b <DB> | --seed <S>] [strategy_flags]`
+- **詳細模式（全參數，長參數名）**：
+  - `test_neoalzette_differential_best_search.exe detail --round-count <R> [--delta-a <DA> --delta-b <DB> | --seed <S>] [detail_flags]`
+- **Auto 模式（兩階段：breadth 掃描 -> deep 搜尋；要求明確起始差分）**：
+  - `test_neoalzette_differential_best_search.exe auto --round-count <R> --delta-a <DA> --delta-b <DB> [auto_flags]`
+- **Legacy 模式（相容舊語法）**：
+  - `test_neoalzette_differential_best_search.exe legacy <round_count> <deltaA_hex> <deltaB_hex> [flags]`
+  - `test_neoalzette_differential_best_search.exe legacy <round_count> --seed <seed> [flags]`
+
+注意：
+
+- 若省略 `--delta-a/--delta-b`，**必須提供 `--seed`**（不再默默使用預設輸入差分 / 預設 seed）。
+- `--maximum-constant-subtraction-candidates 0` 與 `--maximum-affine-mixing-output-differences 0` 代表 **精確/無上限枚舉**（可能非常慢）。
+- 策略模式會在啟動時印出 **`[Strategy] resolved settings`**（所有自動推導的參數都會列出）。
+- Batch 模式只有在「隨機生成 job」（例如 `--batch-job-count N`）時 **才必須**提供 `--seed`。若使用 `--batch-file` 讀入 job，則不需要 seed。
+- 當啟用 shared cache 且未明確指定 `--shared-cache-shards`（別名 `--cache-shards`）時，程式可能會依照執行緒數與 shared cache 大小 **自動把 shards 調大**。
+- 入口別名：
+  - 也可以用 `--mode strategy|detail|auto|legacy` 選擇前端（等價於使用子命令）。
+  - 若不帶子命令直接執行，預設使用 legacy/detail 相容的 parser（仍可使用舊的 positional 參數）。
+
+策略模式額外“終點/總量”參數：
+
+- `--total-work N`（別名 `--total`）：設定一個“總數量/終點”。`N` 越大，自動推導的 budget 越大：
+  - 單次/批處理：會自動提高每個 job 的 `maximum_search_nodes`（增長較溫和，約按數量級放大）。
+  - 批處理：搭配 `--batch` 啟用 batch 模式時，會用 `N` 當作 batch job 數量。
+- `--batch`（策略模式專用）：只用來「啟用 batch」，job 數量交給 `--total-work N` 決定（仍需 `--seed`）。
+
+詳細模式參數（長名；舊短名仍可當別名使用）：
+
+- `--addition-weight-cap N`（別名 `--add`，0..31）
+- `--constant-subtraction-weight-cap N`（別名 `--subtract`，0..32）
+- `--maximum-constant-subtraction-candidates N`（別名 `--maxconst`，0=精確/全部）
+- `--maximum-affine-mixing-output-differences N`（別名 `--maxmix`，0=精確/全部）
+- `--maximum-search-nodes N`（別名 `--maxnodes`，`0`=不限制）
+- `--disable-state-memoization`（別名 `--nomemo`）
+- `--enable-verbose-output`（別名 `--verbose`）
+- Batch：
+  - `--batch-job-count N`（別名 `--batch`）
+  - `--batch-file PATH`（從檔案讀入 jobs；每行：`dA dB` 或 `R dA dB`；支援 `0x..`；`#` 開頭為註解）
+  - `--thread-count T`（別名 `--threads`，`0`=auto）
+  - `--seed S`
+  - `--progress-every-jobs N`（別名 `--progress`，`0`=關閉）
+  - `--progress-every-seconds S`（別名 `--progress-sec`，`0`=關閉）
+  - `--memory-headroom-mib M`（保留約 M MiB 的可用 RAM；預設：`max(2GiB, min(4GiB, avail/10))`）
+  - `--memory-ballast`（自適應 ballast：分配/釋放 RAM，讓可用 RAM 盡量維持在 headroom 附近）
+  - `--cache-max-entries-per-thread N`（別名 `--cache`，`0`=關閉）
+  - `--shared-cache-total-entries N`（別名 `--cache-shared`，`0`=關閉）
+  - `--shared-cache-shards S`（別名 `--cache-shards`）
+- `--legacy`（Legacy Route-B regression）
+
+Auto 模式參數（只列最常用的 knobs）：
+
+- Breadth 階段（多候選、低資源）：
+  - `--auto-breadth-jobs N`（別名 `--auto-breadth-max-runs`）
+  - `--auto-breadth-top_candidates K`
+  - `--auto-breadth-threads T`（0=auto）
+  - `--auto-breadth-seed S`（預設：由提供的起始差分推導）
+  - `--auto-breadth-maxnodes N`
+  - `--auto-breadth-maxconst N`
+  - `--auto-breadth-heuristic-branch-cap N`（別名 `--auto-breadth-hcap`）
+  - `--auto-breadth-max-bitflips F`
+  - `--auto-print-breadth-candidates`
+- Deep 階段（對 top-K 候選做高資源搜尋）：
+  - `--auto-deep-maxnodes N`（0=unlimited）
+  - `--auto-max-time T`（只在 deep maxnodes=0 時生效；支援 `3600`、`60m`、`24h`、`30d`、`4w`）
+  - `--auto-target-best-weight W`
+
+Auto 模式限制：
+
+- Auto 模式 **不支援 batch**。
+- Auto 模式 **必須明確提供** `--delta-a` 與 `--delta-b`（不支援 `--seed` fallback）。
+- Auto 模式 **不支援** `--legacy`。
+
+範例：
+
+```bat
+test_neoalzette_differential_best_search.exe strategy balanced --round-count 3 --delta-a 0x0 --delta-b 0x1
+test_neoalzette_differential_best_search.exe strategy balanced --round-count 4 --batch-job-count 2000 --thread-count 16 --seed 0x1234
+test_neoalzette_differential_best_search.exe detail --round-count 3 --delta-a 0x0 --delta-b 0x1 --maximum-search-nodes 5000000
+test_neoalzette_differential_best_search.exe auto --round-count 4 --delta-a 0x0 --delta-b 0x1 --auto-breadth-jobs 512 --auto-breadth-top_candidates 3 --auto-breadth-threads 0
+test_neoalzette_differential_best_search.exe legacy 3 0x0 0x1 --maxnodes 5000000
+```
+
+### `test_neoalzette_linear_best_search.exe`（線性最佳 trail / mask 搜尋）
+
+此程式搜尋 **線性相關**（reverse-mask 模型）。輸入是兩個「輸出 mask」：
+
+- `--output-branch-a-mask MASK_A`（別名：`--out-mask-a`、`--mask-a`）
+- `--output-branch-b-mask MASK_B`（別名：`--out-mask-b`、`--mask-b`）
+
+命令列（3 種前端 / 子命令；風格與差分程式一致）：
+
+- `test_neoalzette_linear_best_search.exe strategy <time|balanced|space> --round-count <R> [--output-branch-a-mask <MA> --output-branch-b-mask <MB> | --seed <S>]`
+- `test_neoalzette_linear_best_search.exe detail --round-count <R> --output-branch-a-mask <MA> --output-branch-b-mask <MB> [options]`
+- `test_neoalzette_linear_best_search.exe auto --round-count <R> --output-branch-a-mask <MA> --output-branch-b-mask <MB> [options]`
+
+範例：
+
+```bat
+test_neoalzette_linear_best_search.exe strategy balanced --round-count 4 --output-branch-a-mask 0x0 --output-branch-b-mask 0x1
+test_neoalzette_linear_best_search.exe strategy balanced --round-count 4 --batch-job-count 2000 --thread-count 16 --seed 0x1234
+test_neoalzette_linear_best_search.exe auto --round-count 4 --output-branch-a-mask 0x0 --output-branch-b-mask 0x1 --auto-breadth-jobs 512 --auto-breadth-top_candidates 3 --auto-breadth-threads 0
+```
+
+### `test_neoalzette_arx_probabilistic_neutral_bits.exe`（PNB-style + heatmap，會輸出 CSV）
+
+快速用法：
+
+- `test_neoalzette_arx_probabilistic_neutral_bits.exe <rounds> <trials_per_inputbit>`
+- 範例：
+
+```bat
+test_neoalzette_arx_probabilistic_neutral_bits.exe 1 200000
+```
+
+會在目前目錄輸出 `neoalzette_heatmap_r<rounds>_*.csv`。
+
+### `test_neoalzette_arx_probabilistic_neutral_bits_average.exe`（平均 PNB / per-bit neutrality）
+
+此程式 **以原始碼設定**（無命令列）：請編輯 `test_neoalzette_arx_probabilistic_neutral_bits_average.cpp` 內的：
+
+- 固定輸入差分 \((\Delta A,\Delta B)\)
+- signature 模式（FULL64 / A32 / byte / masked）
+- rounds 清單與 samples 數量
 
 ---
 
-**最後更新**：2025-10-04  
-**版本**：1.0.0  
-**狀態**：階段3完成（95%）
+## 參考與使用到的算子
 
+- **模加 XOR 差分**：LM2001（`xdp_add_lm2001`、`find_optimal_gamma_with_weight`）
+- **常數模加/模減**：bit-vector weight（`diff_addconst_bvweight`、`diff_subconst_bvweight`）
+- **模加線性相關**（亦包含於本 repo）：見 `include/arx_analysis_operators/linear_correlation_add_*.hpp`
+
+---
+
+## 授權
+
+MIT License（見 `LICENSE`）。如用於學術研究，請依情境引用原論文。

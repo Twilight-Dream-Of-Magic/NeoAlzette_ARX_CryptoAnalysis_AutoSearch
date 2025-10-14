@@ -139,20 +139,32 @@ Step 3 (常量): 平衡carry-chain，准备下轮
 
 #### **我们的NeoAlzette（2对+增强设计）**：
 ```cpp
+// NeoAlzetteCore::forward()（节选）
+// const auto& RC = NeoAlzetteCore::ROUND_CONSTANTS;
+//
 // Subround 0
-B += ( rotl( A, 31 ) ^ rotl( A, 17 ) ^ R[ 0 ] );  // var-var (增强版)
-A -= R[ 1 ];                                      // var-const (模减！)
-A ^= rotl( B, 24 );                              // var-var 扩散
-B ^= rotl( A, 16 );                              // var-var 扩散
-A = l1_forward( A );                             // 线性扩散层  
-B = l2_forward( B );                             // 线性扩散层
+B += ( rotl( A, 31 ) ^ rotl( A, 17 ) ^ RC[ 0 ] );  // var-var（增强版：双旋转 ⊕ 常量）
+A -= RC[ 1 ];                                      // var-const（模减，带carry扰动）
+A ^= rotl( B, 23 );                                // var-var 扩散（CROSS_XOR_ROT_R0 = 23，旧文档为24）
+B ^= rotl( A, 16 );                                // var-var 扩散（CROSS_XOR_ROT_R1 = 16）
+auto [ C0, D0 ] = cd_injection_from_B( B, ( RC[ 2 ] | RC[ 3 ] ), RC[ 3 ] );
+A ^= ( rotl( C0, 24 ) ^ rotl( D0, 16 ) ^ RC[ 4 ] );
+B = l1_backward( B );
 
-// Subround 1  
-A += ( rotl( B, 31 ) ^ rotl( B, 17 ) ^ R[ 5 ] );  // var-var (增强版)
-B -= R[ 6 ];                                      // var-const (模减！)
-// ...
+// Subround 1（角色互换）
+A += ( rotl( B, 31 ) ^ rotl( B, 17 ) ^ RC[ 5 ] );
+B -= RC[ 6 ];
+B ^= rotl( A, 23 );
+A ^= rotl( B, 16 );
+auto [ C1, D1 ] = cd_injection_from_A( A, ( RC[ 7 ] & RC[ 8 ] ), RC[ 8 ] );
+B ^= ( rotl( C1, 24 ) ^ rotl( D1, 16 ) ^ RC[ 9 ] );
+A = l2_backward( A );
 
-特点：只有2对模加模减，但常量用模减，线性层大幅增强
+// Final
+A ^= RC[ 10 ];
+B ^= RC[ 11 ];
+
+特点：2对模加模减 + cross XOR/ROT扩散 + 跨分支注入(PRF) + 线性层逆变换 + 末尾常量XOR
 ```
 
 ### 🎯 **关键创新："把中间这个常量变成模加模减运算"**
@@ -162,7 +174,7 @@ B -= R[ 6 ];                                      // var-const (模减！)
 原始Alzette：x ← x ⊕ c        (异或常量)
 作用：简单的bit翻转，轻量级重置
 
-我们的创新：A -= R[1]         (模减常量)  
+我们的创新：A -= RC[1]        (模减常量)  
 作用：引入carry-based的复杂重置
 优势：模减产生的carry扰动比异或更复杂
 
@@ -208,8 +220,9 @@ uint32_t l2_forward(uint32_t x) {
 
 #### **复杂跨分支注入**：
 ```cpp
-auto [ C0, D0 ] = cd_from_B( B, R[ 2 ], R[ 3 ] );
-A ^= ( rotl( C0, 24 ) ^ rotl( D0, 16 ) ^ R[ 4 ] );
+// const auto& RC = NeoAlzetteCore::ROUND_CONSTANTS;
+auto [ C0, D0 ] = cd_injection_from_B( B, ( RC[ 2 ] | RC[ 3 ] ), RC[ 3 ] );
+A ^= ( rotl( C0, 24 ) ^ rotl( D0, 16 ) ^ RC[ 4 ] );
 
 作用：
 - 引入更复杂的跨分支依赖
@@ -293,39 +306,48 @@ return (x, y)
 
 ### 🏗️ **我们的NeoAlzette：增强版设计理念**
 
-#### **我们的完整实现（neoalzette.hpp）**：
+#### **我们的完整实现（neoalzette_core.hpp / neoalzette_core.cpp）**：
 
 ```cpp
-void neoalzette_round(uint32_t& A, uint32_t& B) {
-    // === Subround 0: 增强版三步设计 ===
-    
-    // Step 1: 增强版非线性混淆
-    B += ( rotl( A, 31 ) ^ rotl( A, 17 ) ^ R[ 0 ] );
-    // 创新：F(A) = (A≪31) ⊕ (A≪17) 双旋转非线性函数
-    // 对比原版：x + (y≫31) 单旋转
-    // 优势：更复杂的carry传播模式
-    
-    // Step 2: 模减常量（创新点）
-    A -= R[ 1 ];  
-    // 艾瑞卡的洞察："把常量变成模加模减运算"
-    // 对比原版：x ⊕ c 简单异或
-    // 优势：模减引入额外的carry复杂性
-    
-    // Step 3: 增强版线性扩散
-    A ^= rotl( B, 24 );
-    B ^= rotl( A, 16 );
-    // 双向扩散：A←B, B←A 同时进行
-    
-    // === 超强线性层（我们的补偿策略）===
-    A = l1_forward( A );  // 5项XOR组合的强扩散
-    B = l2_forward( B );  // 5项XOR组合的强扩散
-    
-    // === 复杂跨分支注入（我们的创新）===
-    auto [ C0, D0 ] = cd_from_B( B, R[ 2 ], R[ 3 ] );
-    A ^= ( rotl( C0, 24 ) ^ rotl( D0, 16 ) ^ R[ 4 ] );
-    
-    // === Subround 1: 角色互换的对称设计 ===
-    // (类似结构，A和B角色互换)
+// 代码位置：
+// - include/neoalzette/neoalzette_core.hpp
+// - src/neoalzette/neoalzette_core.cpp
+//
+// 关键点：
+// - cross XOR/ROT 使用 (23, 16)，并保证 (23+16)=39≡7(mod 32) 为奇数以避免大旋转不动点子空间
+// - 跨分支注入：cd_injection_from_B / cd_injection_from_A
+// - 线性层在注入与外层通过 l1/l2 的 forward/backward 组合参与
+void NeoAlzetteCore::forward(std::uint32_t& a, std::uint32_t& b) noexcept {
+    const auto& RC = ROUND_CONSTANTS;
+    std::uint32_t A = a, B = b;
+
+    // First subround
+    B += ( rotl(A, 31) ^ rotl(A, 17) ^ RC[0] );
+    A -= RC[1];
+    A ^= rotl(B, 23);
+    B ^= rotl(A, 16);
+    {
+        auto [C0, D0] = cd_injection_from_B(B, (RC[2] | RC[3]), RC[3]);
+        A ^= ( rotl(C0, 24) ^ rotl(D0, 16) ^ RC[4] );
+        B = l1_backward(B);
+    }
+
+    // Second subround
+    A += ( rotl(B, 31) ^ rotl(B, 17) ^ RC[5] );
+    B -= RC[6];
+    B ^= rotl(A, 23);
+    A ^= rotl(B, 16);
+    {
+        auto [C1, D1] = cd_injection_from_A(A, (RC[7] & RC[8]), RC[8]);
+        B ^= ( rotl(C1, 24) ^ rotl(D1, 16) ^ RC[9] );
+        A = l2_backward(A);
+    }
+
+    // Final constant addition (XOR)
+    A ^= RC[10];
+    B ^= RC[11];
+    a = A;
+    b = B;
 }
 ```
 
@@ -358,7 +380,7 @@ void neoalzette_round(uint32_t& A, uint32_t& B) {
 |----------|-------------|------------------|-------------|
 | **设计哲学** | 极致简约，12指令艺术品 | 增强复杂，研究平台 | "性能排布牺牲" |
 | **模加操作** | 4对变量模加 | 2对变量模加+双旋转增强 | "只能用两对了" |
-| **常量操作** | x ⊕ c (异或) | A -= R[1] (模减) | "变成模加模减运算" |
+| **常量操作** | x ⊕ c (异或) | A -= RC[1] (模减) | "变成模加模减运算" |
 | **线性层** | 简单XOR+旋转 | L1/L2强扩散矩阵 | "线性函数够牛逼" |
 | **安全增益** | 每轮~1.0 bit | 每轮1.3-1.5 bit | "差分困难度提升" |
 | **连锁效应** | 基础水平 | 增强水平 | "产生连锁反应" |

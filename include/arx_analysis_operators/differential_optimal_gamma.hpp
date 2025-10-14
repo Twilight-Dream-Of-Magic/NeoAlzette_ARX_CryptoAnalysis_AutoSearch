@@ -1,16 +1,44 @@
 /**
  * @file differential_optimal_gamma.hpp
- * @brief 查找最优输出差分γ - Lipmaa & Moriai (2001) Algorithm 4
- * 
- * 论文："Efficient Algorithms for Computing Differential Properties of Addition"
- *       Lipmaa & Moriai, FSE 2001
- * 
- * 功能：给定输入差分(α, β)，在Θ(log n)时间内找到最优输出差分γ
- *       使得 DP+(α, β → γ) = DP+_max(α, β)
- * 
- * 依赖算法：
- * - Algorithm 1: aop(x) - All-one parity, Θ(log n)
- * - Algorithm 4: find_optimal_gamma(α, β) - Θ(log n)
+ * @brief 给定输入差分 (α,β) 快速构造最优输出差分 γ（LM-2001 Algorithm 4）
+ *
+ * 参考 / Ref:
+ * - H. Lipmaa, S. Moriai, "Efficient Algorithms for Computing Differential Properties of Addition"
+ *   FSE 2001 (LNCS 2355), 2002.（本项目 `papers/` 已收录）
+ *
+ * ----------------------------------------------------------------------------
+ * 0) 背景：XOR 差分下的模加法 DP⁺
+ * ----------------------------------------------------------------------------
+ * 设位宽为 n（bit 0 = LSB），加法为模 \(2^n\)：
+ *
+ *   z  = x ⊞ y
+ *   z' = (x ⊕ α) ⊞ (y ⊕ β)
+ *   γ  = z ⊕ z'
+ *
+ * 定义 XOR differential probability：
+ *
+ *   DP⁺(α,β ↦ γ) := Pr_{x,y}[ (x+y) ⊕ ((x⊕α)+(y⊕β)) = γ ].
+ *
+ * 对固定 (α,β) 的最大差分概率定义为：
+ *
+ *   DP⁺_max(α,β) := max_γ DP⁺(α,β ↦ γ).
+ *
+ * ----------------------------------------------------------------------------
+ * 1) 本文件解决的问题
+ * ----------------------------------------------------------------------------
+ * 论文 Algorithm 4 给出 Θ(log n) 的构造：输入 (α,β)，直接返回使 DP⁺ 最大的 γ（即 argmax）。
+ * 这对“自动化差分特征搜索”（BnB/MILP/SAT 提示）很关键：避免枚举 2^n 个 γ。
+ *
+ * 在本项目中：
+ * - `find_optimal_gamma(α,β,n)` 给出最优 γ
+ * - 若还需要最优概率的指数形式，可用 `xdp_add_lm2001(_n)` 计算权重 w，并得 DP⁺ = 2^{-w}
+ *
+ * ----------------------------------------------------------------------------
+ * 2) 工程化位宽约定 / Engineering notes
+ * ----------------------------------------------------------------------------
+ * - 以 `uint32_t` 承载 n-bit 向量；当 n<32 时，所有输入与中间量都显式 `& mask(n)` 以避免高位污染。
+ * - 论文复杂度按 unit-cost RAM 记为 Θ(log n)。对固定 32-bit 机字而言，本实现等价于常数成本。
+ * - `aopr` 需要 bit-reverse：对 n=32 采用 SWAR 常数实现；对 n!=32 给出 O(n) fallback（n<=32 时足够快）。
  */
 
 #pragma once
@@ -24,26 +52,22 @@ namespace TwilightDream
 	namespace arx_operators
 	{
 		/**
-		* Compute AOP (All Output Positions) function
-		* 
-		* Mathematical formula from Lipmaa-Moriai:
-		* AOP(α, β, γ) = α ⊕ β ⊕ γ ⊕ ((α∧β) ⊕ ((α⊕β)∧γ)) << 1
-		* 
-		* Components:
-		* 1. α ⊕ β ⊕ γ: XOR of all three differences
-		* 2. α ∧ β: Both inputs have difference (both 1)
-		* 3. (α⊕β) ∧ γ: XOR of inputs matches output difference
-		* 4. << 1: Shift left (carry propagation)
-		* 
-		* Interpretation:
-		* AOP[i] = 1 means bit position i can have non-zero carry
-		* hw(AOP) = number of positions with possible carry = weight
-		* 
-		* @param alpha α
-		* @param beta β
-		* @param gamma γ
-		* @return AOP value
-		*/
+		 * @brief AOP(α,β,γ)：由 (α,β,γ) 推导“进位可能发生的位置”掩码
+		 *
+		 * 注意：这里的 AOP(α,β,γ) **不是** 论文 Algorithm 1 的 aop(x)（all-one parity），
+		 * 只是名字相近，含义不同。为了避免混淆，本函数命名为 `carry_aop`。
+		 *
+		 * 常见写法（与论文中的按位推导等价）：
+		 *
+		 *   AOP(α,β,γ) = α ⊕ β ⊕ γ ⊕ ( ((α∧β) ⊕ ((α⊕β)∧γ)) << 1 )
+		 *
+		 * 直观含义：AOP[i]=1 表示在第 i 位可能出现“影响输出差分的进位状态”。
+		 *
+		 * @param alpha 输入差分 α
+		 * @param beta  输入差分 β
+		 * @param gamma 输出差分 γ
+		 * @return AOP 掩码（32-bit）
+		 */
 		inline std::uint32_t carry_aop( std::uint32_t alpha, std::uint32_t beta, std::uint32_t gamma )
 		{
 			std::uint32_t xor_part = alpha ^ beta ^ gamma;
@@ -58,21 +82,19 @@ namespace TwilightDream
 		}
 
 		/**
-		 * @brief Algorithm 1: 计算All-One Parity - Θ(log n)时间
-		 * 
-		 * 论文Algorithm 1 (Lines 292-299):
-		 * 
-		 * aop(x)_i = 1 iff x的第i位开始的连续1序列长度为奇数
-		 * 
-		 * 算法步骤（n = 32）：
-		 * 1. x[1] = x ∧ (x >> 1)        ← 检测相邻的1对
-		 * 2. 循环: x[i] = x[i-1] ∧ (x[i-1] >> 2^(i-1))  ← 倍增
-		 * 3. y[1] = x ∧ ¬x[1]           ← 找单独的1
-		 * 4. 循环: y[i] = y[i-1] ∨ ((y[i-1] >> 2^(i-1)) ∧ x[i-1])
-		 * 5. Return y[log2(n)]
-		 * 
-		 * @param x 输入32位整数
-		 * @return aop(x)
+		 * @brief LM-2001 Algorithm 1：aop(x) / all-one parity（32-bit）
+		 *
+		 * 论文定义（把 x 看作 n-bit bitstring）：
+		 *
+		 *   aop(x)_i = 1  ⇔  从第 i 位开始的连续 1 段（run of ones）长度为奇数。
+		 *
+		 * 该原语用于 Algorithm 4 的 `aopr`（从 MSB 方向看 run-parity）。
+		 *
+		 * 工程化说明：
+		 * - 本实现固定 n=32，因此循环次数是常数（log2(32)=5），在实际代码里属于 O(1)。
+		 *
+		 * @param x 输入 32 位整数（视为 32-bit bitstring）
+		 * @return aop(x) 的 32 位掩码
 		 */
 		inline std::uint32_t aop( std::uint32_t x ) noexcept
 		{
@@ -107,15 +129,17 @@ namespace TwilightDream
 		}
 
 		/**
-		 * @brief Bit-reverse函数（n位）
-		 * 
-		 * 论文Line 302: x'_i := x_{n-i}
-		 * 
-		 * ⚠️ 关键：只reverse低n位，高位保持为0
-		 * 
-		 * @param x 输入32位整数
-		 * @param n 位宽（默认32）
-		 * @return bit-reversed的低n位
+		 * @brief bit-reverse（仅 reverse 低 n 位）
+		 *
+		 * 论文中用于定义 aopr：令 x' 为 x 的位反转（x'_i := x_{n-1-i}）。
+		 *
+		 * 工程注意：
+		 * - 当 n==32：使用 SWAR 常数步骤实现完整 32-bit reverse。
+		 * - 当 n!=32：仅 reverse 低 n 位，并保证高位保持为 0（O(n) fallback）。
+		 *
+		 * @param x 输入 32 位整数
+		 * @param n 位宽（默认 32；建议 1..32）
+		 * @return 低 n 位反转后的结果
 		 */
 		inline std::uint32_t bitreverse_n( std::uint32_t x, int n = 32 ) noexcept
 		{
@@ -153,16 +177,17 @@ namespace TwilightDream
 		}
 
 		/**
-		 * @brief aopr(x, n) - All-One Parity Reverse（n位）
-		 * 
-		 * 论文Line 301-302:
-		 * aopr(x) = aop(x'), where x'_i := x_{n-i}
-		 * 
-		 * ⚠️ 关键：只对低n位进行bit-reverse
-		 * 
-		 * @param x 输入32位整数
-		 * @param n 位宽（默认32）
-		 * @return aopr(x)
+		 * @brief aopr(x,n)：all-one parity from MSB side（通过 bit-reverse 实现）
+		 *
+		 * 论文定义：
+		 *
+		 *   aopr(x) = aop(x'), 其中 x' 为 x 的 n-bit 位反转。
+		 *
+		 * 直观：aop(x) 是“从 LSB 方向”看 run-of-ones 的奇偶；aopr 则等价于“从 MSB 方向”看。
+		 *
+		 * @param x 输入（仅使用低 n 位）
+		 * @param n 位宽（默认 32；建议 1..32）
+		 * @return aopr(x,n) 掩码
 		 */
 		inline std::uint32_t aopr( std::uint32_t x, int n = 32 ) noexcept
 		{
@@ -172,29 +197,25 @@ namespace TwilightDream
 		}
 
 		/**
-		 * @brief Algorithm 4: 查找最优输出差分γ - Θ(log n)时间
-		 * 
-		 * 论文Algorithm 4 (Lines 653-664):
-		 * 
-		 * 给定输入差分(α, β)，找到使得DP+(α, β → γ)最大的γ
-		 * 
-		 * ⚠️ 重要：支持任意位宽n（默认32）
-		 * 
-		 * 算法步骤：
-		 * 1. r ← α ∧ 1;
-		 * 2. e ← ¬(α ⊕ β) ∧ ¬r;
-		 * 3. a ← e ∧ (e << 1) ∧ (α ⊕ (α << 1));
-		 * 4. p ← aopr(a, n);  ← 注意n！
-		 * 5. a ← (a ∨ (a >> 1)) ∧ ¬r;
-		 * 6. b ← (a ∨ e) << 1;
-		 * 7. γ ← ((α ⊕ p) ∧ a) ∨ ((α ⊕ β ⊕ (α << 1)) ∧ ¬a ∧ b) ∨ (α ∧ ¬a ∧ ¬b);
-		 * 8. γ ← (γ ∧ ¬1) ∨ ((α ⊕ β) ∧ 1);
-		 * 9. Return γ & mask(n)
-		 * 
-		 * @param alpha 输入差分α
-		 * @param beta 输入差分β
-		 * @param n 位宽（默认32）
-		 * @return 最优输出差分γ
+		 * @brief LM-2001 Algorithm 4：find_optimal_gamma(α,β)（返回使 DP⁺ 最大的 γ）
+		 *
+		 * 这段逻辑是论文给出的“闭式构造”。代码基本逐行对应 Algorithm 4 的位向量操作。
+		 *
+		 * 变量语义（对照论文的 r/e/a/p/b）：
+		 * - r = α ∧ 1：仅包含最低位的掩码（处理 bit0 的特殊约束）
+		 * - e = ¬(α ⊕ β) ∧ ¬r：标出 α 与 β 相等的位置（并排除 bit0 的 r 影响）
+		 * - a：从 e 与 α 的“边界变化”中提取需要处理的区段起点
+		 * - p = aopr(a)：利用 all-one parity（从 MSB 方向）为区段选择“翻转/不翻转”的模式
+		 * - b：辅助 mask，用于区分不同 bit-case 的输出 γ 公式分支
+		 *
+		 * 工程注意：
+		 * - n<32 时，必须在每一步显式 `&mask`，否则高位垃圾会破坏位向量约束（这也是很多实现出错的点）。
+		 * - 预期位宽：1 <= n <= 32。
+		 *
+		 * @param alpha 输入差分 α（仅使用低 n 位）
+		 * @param beta  输入差分 β（仅使用低 n 位）
+		 * @param n 位宽（默认 32）
+		 * @return 最优输出差分 γ（仅低 n 位有效）
 		 */
 		inline std::uint32_t find_optimal_gamma( std::uint32_t alpha, std::uint32_t beta, int n = 32 ) noexcept
 		{
