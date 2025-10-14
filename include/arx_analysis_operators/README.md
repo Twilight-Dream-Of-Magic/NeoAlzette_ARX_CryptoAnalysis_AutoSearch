@@ -1,209 +1,157 @@
-# ARX 分析算子 · 低层优化实现（中英双语 README）
+# ARX 分析算子（以“模加”为核心）/ ARX Analysis Operators (Addition-Centric)
 
-ARX Analysis Operators · Low-Level Optimized Implementations (ZH/EN)
-
-* 更新时间 Updated: **2025-10-13**
-* 适配位宽 Supported word sizes: **n = 8/16/32/64**（具体见各函数签名）
+* 更新时间 Updated: **2026-01-16**
+* 主要命名空间 / Namespace:
+  - `TwilightDream::arx_operators`（对外算子 / public operators）
+  - `TwilightDream::bitvector`（位向量/SWAR primitives；当前实现在 `differential_addconst.hpp` 内）
 
 ---
 
 ## 目标 / Goal
 
-* **ZH**：本目录提供 ARX 密码分析中“模加 ⊞/⊟、旋转、异或”相关的**差分**与**线性**算子的**最快可读实现**，覆盖“变量-变量”“变量-常量”两类场景，并给出精确或对数级（SWAR）复杂度。
-* **EN**: This folder ships **readable yet fast** operators for ARX analysis (Addition/Rotation/XOR), covering **differential** and **linear** cases for **var-var** and **var-const**, with exact or bit-parallel (SWAR) complexities.
+- **ZH**：本目录提供 ARX 密码分析里“模加 ⊞/⊟”相关的**差分**与**线性相关度**算子实现，强调**可审计**（注释对齐论文符号）与**可直接用于自动化搜索**（返回 weight / feasibility），并保留若干位向量 primitives 便于将来做 SMT/bit-vector 编码。
+- **EN**: This folder provides **auditable** and **search-friendly** operators for ARX analysis, focused on modular addition/subtraction under XOR differentials and linear correlations, with clear API contracts and feasibility/weight conventions.
 
 ---
 
-## 📁 头文件一览 / Header Inventory
+## 📁 头文件一览 / Header Inventory (current)
 
-* `bitvector_ops.hpp`
-* `differential_xdp_add.hpp`
-* `differential_addconst.hpp`
-* `differential_optimal_gamma.hpp`
-* `linear_cor_add_logn.hpp`
-* `linear_cor_addconst.hpp`
-* `linear_cor_add.hpp.DEPRECATED`  ← **已弃用 / deprecated**
+- `differential_xdp_add.hpp`：XOR 差分下的 var-var 加法 DP⁺ / weight（LM-2001）
+- `differential_optimal_gamma.hpp`：给定 (α,β) 构造最优 γ（LM-2001 Algorithm 4）
+- `differential_addconst.hpp`：var-const 加/减的差分（精确 count/DP/weight + BvWeight^κ 近似）
+- `linear_correlation_add_logn.hpp`：Wallén 风格的“对数算法”实现（当前实现以 32-bit 为主）
+- `linear_correlation_addconst.hpp`：O(n) 精确线性相关（2×2 carry-state transfer matrices；var-const + var-var）
+- `math_util.hpp`：小工具（目前提供 `neg_mod_2n<T>(k,n)`）
+- `modular_addition_ccz.hpp`：Addition mod \(2^n\) 的 CCZ 等价与显式差分/线性公式算子（Schulte-Geers）
+
+> 注：README 只描述 **目录中实际存在且可 include 的文件**；旧文件名（如 `bitvector_ops.hpp` / `linear_cor_addconst.hpp`）已不再使用。
 
 ---
 
 ## 🧪 差分算子 / Differential Operators
 
-### 1) `differential_xdp_add.hpp` — XOR 差分模加（变量-变量）
+### 1) `differential_xdp_add.hpp` — XOR 差分模加（变量-变量，LM-2001）
 
-**XDP of modular addition (var-var)**
+- **定义 / Definition**：\(z=x ⊞ y\)，\(z'=(x⊕α) ⊞ (y⊕β)\)，\(γ=z⊕z'\)，计算 \(DP^+(α,β↦γ)\) 与 \(w=-\log_2 DP^+\)。
+- **API（核心）/ Core API**（均在 `TwilightDream::arx_operators`）：
+  - `int xdp_add_lm2001(uint32_t alpha, uint32_t beta, uint32_t gamma)`：返回整数 weight `w`；不可能返回 `-1`
+  - `int xdp_add_lm2001_n(uint32_t alpha, uint32_t beta, uint32_t gamma, int n)`：支持 `1..32` 位（输入会 mask 到低 n 位）
+  - `double xdp_add_probability(uint32_t alpha, uint32_t beta, uint32_t gamma)`：返回 `DP^+`（不可能返回 `0.0`）
+  - `bool is_xdp_add_possible(uint32_t alpha, uint32_t beta, uint32_t gamma)`
 
-* **参考 / Ref**: Lipmaa & Moriai, *Efficient Algorithms for Computing Differential Properties of Addition* (FSE 2001)
-* **算法 / Algo**: LM-2001（ψ 约束 + 前缀运算）
-* **复杂度 / Complexity**:
+### 2) `differential_optimal_gamma.hpp` — 最优输出差分 γ（LM-2001 Algorithm 4）
 
-  * 位模型 bit-model：Θ(log n)
-  * 固定机字宽 fixed word (e.g. 32/64-bit, SWAR/POPCNT)：≈ **O(1)**
-* **API（核心）/ Core API**:
+- **用途 / Use**：给定 (α,β) 直接构造使 \(DP^+\) 最大的 γ（避免枚举 γ）。
+- **API**（`TwilightDream::arx_operators`）：
+  - `uint32_t find_optimal_gamma(uint32_t alpha, uint32_t beta, int n=32)`
+  - `std::pair<uint32_t,int> find_optimal_gamma_with_weight(uint32_t alpha, uint32_t beta, int n=32)`
+    - `weight` 通过 `xdp_add_lm2001(_n)` 计算；不可能时为 `-1`
 
-  * `int xdp_add_lm2001(uint32_t α, uint32_t β, uint32_t γ)` → 返回权重 *w = −log₂DP*；`-1` 表示不可能
-  * `double xdp_add_probability(uint32_t α, uint32_t β, uint32_t γ)` → 返回 *DP*
-  * `int xdp_add_lm2001_n(uint64_t α, uint64_t β, uint64_t γ, int n)` → 指定位宽
-* **说明 / Notes**: 实现中将论文的 *eq/ψ* 条件写成无分支的位并行形式，便于内联与常量折叠。
+### 3) `differential_addconst.hpp` — 常量加/减的 XOR 差分（变量-常量）
 
----
+- **问题 / Problem**：\(y=x ⊞ a\)（或 \(y=x ⊟ a\)），输入差分 \(Δx\)，输出差分 \(Δy\)。
+- **三类输出 / Three kinds of outputs**（同一文件内）：
+  - **精确 count/DP/weight（O(n)）**：基于 carry-pair 4-state 逐位 DP，返回解数 `count` 与精确 `DP` / `weight`
+  - **闭式 weight（double）**：按 Azimi Lemma 3/4/5 的 \(\sum \log_2(\pi_i)\) 形式计算（不可行返回 `+∞`）
+  - **BvWeight^κ（Qκ fixed-point，近似）**：返回 `uint32_t`，低 `κ` bits 为小数；不可行返回 `0xFFFFFFFF`
 
-### 2) `differential_addconst.hpp` — 常量加法差分（变量-常量）
+- **API（常用）/ Common API**（`TwilightDream::arx_operators`）：
+  - **可行性**：`bool is_diff_addconst_possible_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
+  - **精确**：
+    - `uint64_t diff_addconst_exact_count_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
+    - `double   diff_addconst_exact_probability_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
+    - `double   diff_addconst_exact_weight_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`（不可能返回 `+∞`）
+    - `int      diff_addconst_exact_weight_ceil_int_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`（不可能返回 `-1`）
+    - 32-bit wrappers：`diff_addconst_exact_count / diff_addconst_exact_probability / diff_addconst_exact_weight`
+  - **闭式（log2π）**：`double diff_addconst_weight_log2pi_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
+    - 32-bit wrapper：`diff_addconst_weight_log2pi`
+  - **近似（BvWeight^κ）**：
+    - `uint32_t diff_addconst_bvweight_fixed_point_n(uint32_t dx, uint32_t a, uint32_t dy, int n, int fraction_bit_count)`
+    - `uint32_t diff_addconst_bvweight_q4_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`（κ=4）
+    - 32-bit wrappers：`diff_addconst_bvweight_fixed_point / diff_addconst_bvweight_q4`
+  - **与现有“只吃 int 权重”的搜索框架对接**：
+    - `int diff_addconst_bvweight(uint32_t dx, uint32_t a, uint32_t dy)`：**返回精确 weight 的上取整**（即 `diff_addconst_exact_weight_ceil_int_n(...,32)`）
+    - `int diff_addconst_bvweight_q4_int_ceil(...)`：仅用于“近似 Q4 → int”的对照/实验（仍是近似）
+  - **近似概率（由 Q4 weight 换算）**：
+    - `double diff_addconst_probability(uint32_t dx, uint32_t a, uint32_t dy)`
+    - `double diff_subconst_probability(uint32_t dx, uint32_t a, uint32_t dy)`
+  - **减法**：`diff_subconst_*` 系列通过 `neg_mod_2n` 转换到 add-const
 
-**Differential for x ⊞ K (var-const)**
+- **位向量 primitives（在同一头文件内）/ Bit-vector primitives**（`TwilightDream::bitvector`）：
+  - `HammingWeight / Rev / Carry / RevCarry / LeadingZeros / ParallelLog / ParallelTrunc`
+  - 同名的 `*_n` 版本（支持 `n!=32` 的 domain）
 
-* **参考 / Ref**: Azimi et al., *A Bit-Vector Differential Model for the Modular Addition by a Constant* (DCC 2022 / Asiacrypt’20 扩展)
-* **算法 / Algos**:
-
-  * **Algorithm 1 (BvWeight)**：**O(log² n)** 位向量近似，输出 4-bit 小数精度的权重（更快，默认）
-  * （文内注释含）Machado/逐位精确迭代 **O(n)**（可切换为基准验证）
-* **API / Core API**:
-
-  * `int diff_addconst_bvweight(uint32_t Δx, uint32_t K, uint32_t Δz)` → 近似 *w ≈ −log₂DP*（含 1/16 精度）
-  * `double diff_addconst_probability(uint32_t Δx, uint32_t K, uint32_t Δz)` → 近似 *DP*
-  * `int diff_subconst_bvweight(...)` → 对应 *x ⊟ K*
-* **说明 / Notes**: BvWeight 利用 `Carry/Rev/RevCarry/HW/LZ/ParallelLog/ParallelTrunc` 等 SWAR 原语在 **O(log² n)** 内给出二进制对数概率，适合自动化搜索与约束编码。
-
----
-
-### 3) `differential_optimal_gamma.hpp` — 最优输出差分 γ 搜索
-
-**Find optimal γ for (α,β) in addition**
-
-* **参考 / Ref**: LM-2001 Algorithm 4（find_optimal_gamma）
-* **复杂度 / Complexity**: **Θ(log n)**
-* **API**: `uint32_t find_optimal_gamma(uint32_t α, uint32_t β, int n=32)`
-* **用途 / Use**: 给定 (α,β)，快速返回使 DP 最大的 γ，便于分支定界或 MILP/SAT 提示。
+> 重要：当前工程实现为了“可审计/可单测”，在 BvWeight^κ 的计算上采用逐链展开（整体仍是 **O(n)** 量级）。论文中的纯 bit-vector（含 ParallelLog/ParallelTrunc）写法在本文件中作为 primitives 保留，便于未来回切到 SMT-friendly 的表达式形式。
 
 ---
 
 ## 📈 线性算子 / Linear-Correlation Operators
 
-### 4) `linear_cor_add_logn.hpp` — 模加线性相关度 · **Θ(log n)**（变量-变量）
+### 4) `linear_correlation_add_logn.hpp` — Wallén 风格对数算法（变量-变量）
 
-**Linear correlation of x ⊞ y (var-var) in Θ(log n)**
+- **核心 / Key idea**：将相关度可行性与权重归约到 carry-support 向量 / cpm（Common Prefix Mask）之上；不可行返回 `-1`。
+- **API（当前实现为 32-bit）/ API (current implementation is 32-bit focused)**（`TwilightDream::arx_operators`）：
+  - `int    internal_addition_wallen_logn(uint32_t u, uint32_t v, uint32_t w)`：返回 `Lw = -log2(|corr|)`（不可行返回 `-1`）
+  - `double linear_correlation_add_value_logn(uint32_t u, uint32_t v, uint32_t w)`：返回 `|corr|`（不可行返回 `0.0`；当前实现返回**绝对值**）
+  - 另外暴露 `compute_cpm_*` / `eq(x,y)` 等辅助函数（用于对照论文与回归测试）
 
-* **参考 / Ref**: Wallén, *Linear Approximations of Addition Modulo 2ⁿ* (FSE 2003)
-* **关键 / Key**: 利用 **Common-Prefix Mask (cpm)** 与 Wallén Thm.2 / Cor.1，将相关度权重化为 **HW(cpm)**，并以并行前缀（SWAR）在 **Θ(log n)** 时间求得。
-* **API / Core API**:
+### 5) `linear_correlation_addconst.hpp` — 精确线性相关（var-const + var-var，O(n) 基线）
 
-  * `int    linear_cor_add_wallen_logn(uint32_t u, uint32_t v, uint32_t w)` → *Lw = −log₂|corr|*（整数权重）
-  * `double linear_cor_add_value_logn(uint32_t u, uint32_t v, uint32_t w)` → `|corr|`
-* **说明 / Notes**: 与传统逐位 DP/相关转移 O(n) 相比，本实现为 **对数时间**（位并行）版本，适合大规模穷举或在线评估。
+- **方法 / Method**：每 bit 构造 2×2 carry-state transfer matrix，逐位左乘累积得到最终相关度 `corr`；再转为线性 weight：
+  - `Lw = -log2(|corr|)`，当 `corr==0` 时为 `+∞`
+- **平均因子 / Averaging factor（非常关键）**：
+  - **var-const**：只平均 `x_i` 两种情况 ⇒ `1/2`
+  - **var-var**：平均 `(x_i,y_i)` 四种情况 ⇒ `1/4`
+- **对外封装 API / Public wrappers**（`TwilightDream::arx_operators`）：
+  - `LinearCorrelation linear_x_modulo_plus_const32(uint32_t alpha, uint32_t K, uint32_t beta, int nbits=32)`
+  - `LinearCorrelation linear_x_modulo_minus_const32(uint32_t alpha, uint32_t C, uint32_t beta, int nbits=32)`
+  - `LinearCorrelation linear_x_modulo_plus_const64(uint64_t alpha, uint64_t K, uint64_t beta, int nbits=64)`
+  - `LinearCorrelation linear_x_modulo_minus_const64(uint64_t alpha, uint64_t C, uint64_t beta, int nbits=64)`
+  - `LinearCorrelation linear_add_varvar32(uint32_t alpha, uint32_t beta, uint32_t gamma, int nbits=32)`
+  - `LinearCorrelation linear_add_varvar64(uint64_t alpha, uint64_t beta, uint64_t gamma, int nbits=64)`
+  - `struct LinearCorrelation { double correlation; double weight; bool is_feasible() const; }`
 
----
+### 6) `modular_addition_ccz.hpp` — CCZ 等价与显式公式（差分 + 线性）
 
-### 5) `linear_cor_addconst.hpp` — 模加线性相关度（变量-常量 & 变量-变量，**精确 O(n)** 基准）
-
-**Exact linear correlation for x ⊞ K (var-const) and x ⊞ y (var-var), O(n) baseline**
-
-* **参考 / Ref**: Wallén 2003（按位**2×2 载波状态转移矩阵**重构）
-* **平均因子 / Averaging factor**（关键约定，避免歧义）:
-
-  * **var-const**: 仅 *x_i* 随机 → **1/2 = 0.5**
-  * **var-var**: *x_i,y_i* 均随机 → **1/4 = 0.25**
-* **API / Core API**（返回结构含 *corr* 与 *weight*）:
-
-  * `LinearCorrelation corr_add_x_plus_const32(uint32_t α, uint32_t β, uint32_t K, int n=32)`
-  * `LinearCorrelation corr_add_x_minus_const32(...)`；`...64` 同理
-  * `LinearCorrelation corr_add_varvar32(uint32_t α, uint32_t β, uint32_t γ, int n=32)`；`...64` 同理
-  * 结构体：`struct LinearCorrelation { double correlation; double weight; /* weight = −log₂|corr| */ }`
-* **用途 / Use**: 作为**精确基线**与单测“金标准”；同时给出与 `linear_cor_add_logn.hpp` 的**一致性校验**。
-
----
-
-## 🧩 位向量工具 / Bit-Vector Utilities
-
-### 6) `bitvector_ops.hpp` — SWAR 原语集合
-
-**Carry/Rev/RevCarry/HW/LZ/ParallelLog/ParallelTrunc/compute_cpm_logn/eq…**
-
-* **作用 / Purpose**: 为 BvWeight 与 Wallén 对数算法提供 **O(log n)** 级别的位并行基元；所有函数均为内联、无分支或低分支，便于编译器优化。
-* **典型函数 / Typical functions**:
-
-  * `uint32_t HW(x)`，`uint32_t Rev(x)`，`uint32_t Carry(x,y)`，`uint32_t RevCarry(x,y)`
-  * `uint32_t ParallelLog(x, sep)`，`uint32_t ParallelTrunc(x, sep)`
-  * `uint32_t compute_cpm_logn(u, eq_mask)`，`uint32_t eq(a,b)`
+- **定位 / Positioning**：给出 addition mod \(2^n\) 的**显式差分概率**（Theorem 3）与**显式 Walsh/相关系数**（Theorem 4）形式；适合作为“公式基准/交叉验证”，也可直接用于搜索中的可行性与权重计算。
+- **差分 API / Differential API**（`TwilightDream::arx_operators`）：
+  - `double differential_probability_add_ccz_value(uint64_t alpha, uint64_t beta, uint64_t gamma, int n)`：返回 \(2^{-k}\) 或 `0.0`
+  - `std::optional<int> differential_probability_add_ccz_weight(uint64_t alpha, uint64_t beta, uint64_t gamma, int n)`：返回 \(k\) 或 `nullopt`
+  - `bool differential_equation_add_ccz_solvable(uint64_t a, uint64_t b, uint64_t d, int n)`
+- **线性 API / Linear API**（`TwilightDream::arx_operators`）：
+  - `std::optional<double> linear_correlation_add_ccz_value(uint64_t u, uint64_t v, uint64_t w, int n)`：返回 \(±2^{-k}\) 或 `nullopt`
+  - `std::optional<int> linear_correlation_add_ccz_weight(uint64_t u, uint64_t v, uint64_t w, int n)`：返回 \(k\) 或 `nullopt`
+  - `double row_best_correlation_value(uint64_t u, int n)` / `std::optional<double> column_best_correlation_value(uint64_t v, uint64_t w, int n)`：行/列最大相关的便捷封装
 
 ---
 
-## 🧯 弃用说明 / Deprecation
+## 📊 复杂度与精确度对照 / Complexity & Accuracy (as implemented)
 
-* `linear_cor_add.hpp.DEPRECATED`：早期 **O(n)** 线性相关实现，已由 **`linear_cor_add_logn.hpp`**（对数时间）与 **`linear_cor_addconst.hpp`**（精确基线）共同取代。
-  **请迁移 / Please migrate**。
-
----
-
-## 🎯 使用示例 / Usage Examples
-
-```cpp
-#include "arx_analysis_operators/bitvector_ops.hpp"
-#include "arx_analysis_operators/differential_xdp_add.hpp"
-#include "arx_analysis_operators/differential_addconst.hpp"
-#include "arx_analysis_operators/differential_optimal_gamma.hpp"
-#include "arx_analysis_operators/linear_cor_add_logn.hpp"
-#include "arx_analysis_operators/linear_cor_addconst.hpp"
-
-using namespace neoalz::arx_operators;
-
-// 1) 差分 · 变量-变量（LM-2001）
-int w_xdp = xdp_add_lm2001(0x01, 0x01, 0x02);     // −log2 DP；-1 表示不可能
-double dp   = xdp_add_probability(0x01, 0x01, 0x02);
-
-// 2) 差分 · 变量-常量（BvWeight 近似）
-int w_addc = diff_addconst_bvweight(0x01, 0x05, 0x04);
-double dp_c = diff_addconst_probability(0x01, 0x05, 0x04);
-
-// 3) 求最优 γ（LM-2001 Algorithm.4）
-uint32_t gamma_star = find_optimal_gamma(0x01, 0x01, 32);
-
-// 4) 线性 · 变量-变量（Wallén · Θ(log n)）
-int    lw_vv  = linear_cor_add_wallen_logn(0x01, 0x01, 0x01); // −log2|corr|
-double cor_vv = linear_cor_add_value_logn(0x01, 0x01, 0x01);  // |corr|
-
-// 5) 线性 · 基准精确（矩阵转移 O(n)）
-auto lc_vc = corr_add_x_plus_const32(0x01, 0x01, 0x05); // var-const
-// lc_vc.correlation ∈ [-1,1], lc_vc.weight = −log2(|corr|)
-
-auto lc_vv = corr_add_varvar32(0x01, 0x01, 0x01);       // var-var（精确基线）
-```
+| 算子 / Operator | 场景 / Case | 方法 / Method | 复杂度 / Complexity | 精确度 / Accuracy |
+| --- | --- | --- | --- | --- |
+| XDP⁺ of ⊞ | var-var | LM-2001（ψ/eq + popcount） | 固定 32-bit ≈ O(1)；`*_n` 为常数级位运算 | **精确** |
+| XOR diff of ⊞a | var-const | carry-pair DP count | **O(n)** | **精确** |
+| XOR diff of ⊞a | var-const | Lemma 3/4/5（log2π） | **O(n)** | **精确**（浮点误差除外） |
+| XOR diff of ⊞a | var-const | BvWeight^κ（Qκ fixed-point） | **O(n)**（当前逐链实现） | **近似** |
+| linear corr of ⊞ | var-var | Wallén-logn（实现偏 32-bit） | 固定 32-bit 近似常数成本 | **精确**（权重/数值） |
+| linear corr of ⊞ / ⊞a | var-var / var-const | 2×2 transfer matrices | **O(n)** | **精确** |
 
 ---
 
-## 📊 复杂度与精确度对照 / Complexity & Accuracy
+## ✅ 一致性与约定 / Conventions
 
-| 算子 / Operator          | 场景 / Case | 算法 / Method        | 复杂度 / Complexity   | 精确度 / Accuracy  |
-| ---------------------- | --------- | ------------------ | ------------------ | --------------- |
-| XDP⁺ ⊞（LM-2001）        | var-var   | ψ + 前缀（SWAR）       | Θ(log n)（机字宽≈O(1)） | **精确**          |
-| XDP⁺ ⊞ K（BvWeight）     | var-const | Bit-Vector（DCC’22） | **O(log² n)**      | **近似**（4bit 小数） |
-| 线性 corr ⊞（Wallén-logn） | var-var   | cpm + HW           | **Θ(log n)**       | **精确**（权重/数值）   |
-| 线性 corr ⊞ K（矩阵）        | var-const | 2×2 载波矩阵           | **O(n)**           | **精确**          |
-| 线性 corr ⊞（矩阵）          | var-var   | 2×2 载波矩阵           | **O(n)**           | **精确**          |
-
-> 说明：在 **固定 32/64-bit** 机型上，`Θ(log n)` 多以少量 SWAR 层级实现，实践中与 **O(1)** 无异。
+- **差分 weight / Differential weight**：`w = -log2(DP)`；不可能通常用 `-1`（整数接口）或 `+∞`（double 接口）
+- **线性 weight / Linear weight**：`Lw = -log2(|corr|)`；`corr==0` ⇒ `+∞`
+- **位宽 / Word size**：
+  - `differential_xdp_add.hpp` 的 `*_n` 支持 `1..32`
+  - `linear_correlation_addconst.hpp` 的封装支持 `1..64`（通过 `uint64_t` + `nbits`）
 
 ---
 
-## ✅ 一致性与约定 / Conventions & Consistency
+## 🧷 构建与依赖 / Build & Notes
 
-* **差分权重 / Differential weight**: `w = −log₂(DP)`；`-1` 表示不可能（impossible）。
-* **线性权重 / Linear weight**: `Lw = −log₂(|corr|)`；返回结构同时提供 `correlation`。
-* **平均因子 / Averaging factors**：`linear_cor_addconst.hpp` 中明确区分
+- 代码中存在 `__builtin_popcount` / `__builtin_clz` 等内建（GCC/Clang/clang-cl 直接可用）；若使用 MSVC `cl.exe`，建议：
+  - 直接改用 clang-cl；或
+  - 为这些内建提供兼容层（本目录内 `modular_addition_ccz.hpp` 已对 MSVC 做了 popcount 分支）。
+- 无第三方依赖；以 header-only 为主；`math_util.hpp` 提供通用的模 \(2^n\) 取负 `neg_mod_2n`。
 
-  * var-const：**0.5**，var-var：**0.25**（与 Wallén 矩阵定义一致）。
-* **位宽 / Word size**：所有 API 提供 32/64 版本或 `n` 参数；超定长请使用 `*_n` 接口或移植模板化版本。
-
----
-
-## 🧷 构建与依赖 / Build & Deps
-
-* **C++20**（或更高），支持 `__builtin_popcount(ll)` / `std::popcount` 与常见内联函数。
-* 无第三方依赖；可在编译期内联优化；禁用 AVX/SIMD 以保持跨平台**可读性**与**确定性**。
-
----
-
-## 🔁 变更摘要 / Changelog (2025-10-13)
-
-* 新增：`linear_cor_add_logn.hpp`（**Θ(log n)** 线性相关算法，取代旧 `linear_cor_add.hpp`）。
-* 新增：`linear_cor_addconst.hpp` 精确基准（**O(n)**），统一 **0.25/0.5** 因子约定。
-* 差分：`differential_addconst.hpp` 默认启用 **BvWeight O(log² n)**，并保留注释指向精确逐位法。
-* 工具：`bitvector_ops.hpp` 完整 SWAR 原语，支撑 cpm/Carry/RevCarry 等对数级操作。

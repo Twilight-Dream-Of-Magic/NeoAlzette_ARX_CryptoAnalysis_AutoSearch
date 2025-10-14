@@ -1,6 +1,6 @@
 #pragma once
 /**
- * @file linear_cor_addconst.hpp
+ * @file linear_correlation_addconst.hpp
  * @brief Exact linear correlation for modular addition (constant & variable cases)
  *
  * This header provides a **reference-correct** implementation of linear
@@ -89,7 +89,7 @@ namespace TwilightDream
 		 * @brief Safe conversion from correlation to linear weight
 		 *        Lw = -log2(|corr|), with Lw = +inf for corr == 0.
 		 */
-		static inline double linear_weight_from_corr( double correlation ) noexcept
+		static inline double weight_from_linear_correlation( double correlation ) noexcept
 		{
 			const double a = std::fabs( correlation );
 			if ( a <= 0.0 )
@@ -232,7 +232,7 @@ namespace TwilightDream
 			for ( int i = 0; i < n; ++i )
 			{
 				const Matrix2D Mi = make_Mi_add_varvar_bit( bit_u64( alpha, i ), bit_u64( beta, i ), bit_u64( gamma, i ) );
-				double	   nv0, nv1;
+				double		   nv0, nv1;
 				Matrix2D::multiply_row( v0, v1, Mi, nv0, nv1 );
 				v0 = nv0;
 				v1 = nv1;
@@ -248,7 +248,7 @@ namespace TwilightDream
 		static inline double corr_sub_varvar( uint64_t alpha, uint64_t gamma, uint64_t beta, int n ) noexcept
 		{
 			const uint64_t MASK = ( n == 64 ) ? ~0ULL : ( ( 1ULL << n ) - 1ULL );
-			const uint64_t neg_beta = ( ( ~beta ) + 1ULL ) & MASK;  // two's complement mod 2^n
+			const uint64_t neg_beta = ( ( ~beta ) + 1ULL ) & MASK;	// two's complement mod 2^n
 			return correlation_add_varvar( alpha, neg_beta, gamma, n );
 		}
 
@@ -313,7 +313,7 @@ namespace TwilightDream
 			for ( int i = 0; i < n; ++i )
 			{
 				const Matrix2D Mi = make_Mi_add_const_bit( bit_u64( alpha, i ), bit_u64( constant, i ), bit_u64( beta, i ) );
-				double	   nv0, nv1;
+				double		   nv0, nv1;
 				Matrix2D::multiply_row( v0, v1, Mi, nv0, nv1 );
 				v0 = nv0;
 				v1 = nv1;
@@ -328,7 +328,7 @@ namespace TwilightDream
 		static inline double correlation_sub_const( uint64_t alpha, uint64_t constant, uint64_t beta, int n ) noexcept
 		{
 			const uint64_t MASK = ( n == 64 ) ? ~0ULL : ( ( 1ULL << n ) - 1ULL );
-			const uint64_t neg_constant = ( ( ~constant ) + 1ULL ) & MASK;  // two's complement mod 2^n
+			const uint64_t neg_constant = ( ( ~constant ) + 1ULL ) & MASK;	// two's complement mod 2^n
 			return correlation_add_const( alpha, neg_constant, beta, n );
 		}
 
@@ -356,9 +356,9 @@ namespace TwilightDream
 		/**
 		 * @brief Helper to wrap corr → LinearCorrelation.
 		 */
-		static inline LinearCorrelation make_lc( double correlation ) noexcept
+		static inline LinearCorrelation make_linear_correlation( double correlation ) noexcept
 		{
-			const double w = linear_weight_from_corr( correlation );
+			const double w = weight_from_linear_correlation( correlation );
 			return LinearCorrelation { correlation, w };
 		}
 
@@ -367,25 +367,25 @@ namespace TwilightDream
 		static inline LinearCorrelation linear_x_modulo_plus_const32( uint32_t alpha, uint32_t K, uint32_t beta, int nbits = 32 ) noexcept
 		{
 			const double c = correlation_add_const( alpha, K, beta, nbits );
-			return make_lc( c );
+			return make_linear_correlation( c );
 		}
 
 		static inline LinearCorrelation linear_x_modulo_minus_const32( uint32_t alpha, uint32_t C, uint32_t beta, int nbits = 32 ) noexcept
 		{
 			const double c = correlation_sub_const( alpha, C, beta, nbits );
-			return make_lc( c );
+			return make_linear_correlation( c );
 		}
 
 		static inline LinearCorrelation linear_x_modulo_plus_const64( uint64_t alpha, uint64_t K, uint64_t beta, int nbits = 64 ) noexcept
 		{
 			const double c = correlation_add_const( alpha, K, beta, nbits );
-			return make_lc( c );
+			return make_linear_correlation( c );
 		}
 
 		static inline LinearCorrelation linear_x_modulo_minus_const64( uint64_t alpha, uint64_t C, uint64_t beta, int nbits = 64 ) noexcept
 		{
 			const double c = correlation_sub_const( alpha, C, beta, nbits );
-			return make_lc( c );
+			return make_linear_correlation( c );
 		}
 
 		// -- var-var: 32/64 ----------------------------------------------------------
@@ -393,13 +393,13 @@ namespace TwilightDream
 		static inline LinearCorrelation linear_add_varvar32( uint32_t alpha, uint32_t beta, uint32_t gamma, int nbits = 32 ) noexcept
 		{
 			const double c = correlation_add_varvar( alpha, beta, gamma, nbits );
-			return make_lc( c );
+			return make_linear_correlation( c );
 		}
 
 		static inline LinearCorrelation linear_add_varvar64( uint64_t alpha, uint64_t beta, uint64_t gamma, int nbits = 64 ) noexcept
 		{
 			const double c = correlation_add_varvar( alpha, beta, gamma, nbits );
-			return make_lc( c );
+			return make_linear_correlation( c );
 		}
 
 		// ============================================================================
@@ -421,12 +421,13 @@ namespace TwilightDream
 		 * 1) Rotation: only reindex masks, no weight:
 		 *       α_t = rotl_n(α_x, r1, n)
 		 * 2) Add-const: call exact var-const operator:
-		 *       LC lc = corr_add_x_plus_const32(α_t, β_u, a, n);
+		 *       LinearCorrelation lc = linear_x_modulo_plus_const32(α_t, a, β_u, n);
 		 *       // accumulate weight += lc.weight
 		 * 3) XOR: linear ⇒ no extra weight, just combine masks accordingly.
 		 * 4) Final rotation: reindex to the cipher API's output mask domain.
 		 *
-		 * For var-var addition (x ⊞ y), call corr_add_varvar32(α_x, γ_y, β_z, n).
+		 * For var-var addition (z = x ⊞ y), call:
+		 *       LinearCorrelation lc2 = linear_add_varvar32(α_x, β_y, γ_z, n);
 		 */
 
 		// ============================================================================
