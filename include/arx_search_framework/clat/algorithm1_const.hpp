@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file algorithm1_const.hpp
  * @brief Algorithm 1: Const(S_Cw) - 構建指定權重的掩碼空間
  * 

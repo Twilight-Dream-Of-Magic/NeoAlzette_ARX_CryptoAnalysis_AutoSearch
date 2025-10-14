@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /**
  * @file linear_cor_addconst.hpp
  * @brief Exact linear correlation for modular addition (constant & variable cases)

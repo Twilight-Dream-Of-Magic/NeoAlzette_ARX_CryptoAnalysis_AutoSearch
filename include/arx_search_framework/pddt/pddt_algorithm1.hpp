@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <vector>
 #include <optional>
@@ -6,7 +6,7 @@
 #include <cmath>
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 
-namespace neoalz {
+namespace TwilightDream {
 
 /**
  * @brief Complete implementation of Algorithm 1 for pDDT construction
@@ -391,4 +391,4 @@ private:
     );
 };
 
-} // namespace neoalz
+} // namespace TwilightDream

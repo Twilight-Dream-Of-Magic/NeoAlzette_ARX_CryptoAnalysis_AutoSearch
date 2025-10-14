@@ -1,111 +1,93 @@
-# ARX自動化搜索算法框架
+## ARX 自動化搜索框架（TwilightDream 命名空間）
 
-本文件夾包含所有ARX密碼自動化搜索算法框架的實現。
+本目錄提供 ARX 密碼分析中常用的自動化搜索組件，涵蓋差分（pDDT/Matsui）與線性（cLAT）兩大方向，均採用 `TwilightDream` 命名空間。
 
-## 📁 文件結構
+### 📁 目錄結構
 
-### pDDT（部分差分分佈表）
+- `pddt/`
+  - `pddt_algorithm1.hpp`：差分部分分佈表（pDDT）構建，Algorithm 1
+- `matsui/`
+  - `matsui_algorithm2.hpp`：Matsui 閾值搜索，Algorithm 2（Highways/Country-roads）
+- `clat/`
+  - `algorithm1_const.hpp`：線性掩碼空間構建，Algorithm 1（常數子問題）
+  - `clat_builder.hpp`：cLAT 構建（預設 8 位分塊），Algorithm 2
+  - `clat_search.hpp`：基於 cLAT 的 SLR 搜索（如需）
 
-```
-pddt/
-└── pddt_algorithm1.hpp     # Algorithm 1: pDDT構建
-```
+提示：舊版的通用分析器與框架（`medcp_analyzer.*`、`melcc_analyzer.*`、`threshold_search_framework.*`）已被移除，請直接使用下述 API 或倚賴頂層示例程式。
 
-- **論文**："Automatic Search for Differential Trails in ARX Ciphers"
-- **功能**：構建閾值過濾的差分分佈表
-- **用途**：差分特徵搜索的預計算表
+### 🚀 快速開始（可執行程式）
 
-### cLAT（組合線性近似表）
+專案已提供兩個主程式（僅用於演示，不建議在低配環境長時間運行）：
 
-```
-clat/
-├── algorithm1_const.hpp    # Algorithm 1: Const(S_Cw)掩碼空間構建
-├── clat_builder.hpp        # Algorithm 2: cLAT構建（8位分塊）
-└── clat_search.hpp         # Algorithm 3: 自動搜索框架（SLR）
-```
-
-- **論文**：Huang & Wang (2020), "Automatic Search for the Linear (Hull) Characteristics of ARX Ciphers"
-- **功能**：
-  - Algorithm 1: 構建指定權重的掩碼空間
-  - Algorithm 2: 8位cLAT (~1.2GB)
-  - Algorithm 3: Splitting-Lookup-Recombination (SLR)搜索
-- **用途**：線性特徵高效搜索
-
-### Matsui閾值搜索
-
-```
-matsui/
-└── matsui_algorithm2.hpp   # Algorithm 2: 閾值搜索（Highways/Country-roads）
+- 差分：`neoalz_diff_search`
+  - 參數：`--rounds/-r`、`--weight-cap/-w`、`--start-a`、`--start-b`、`--precompute/--no-precompute`、`--pddt-seed-stride`
+  - 範例：
+```bash
+./neoalz_diff_search -r 6 -w 32 --start-a 0x1 --start-b 0x0 --no-precompute --pddt-seed-stride 8
 ```
 
-- **論文**："Automatic Search for Differential Trails in ARX Ciphers"
-- **功能**：Branch-and-bound閾值搜索
-- **策略**：Highways（高概率路徑）vs Country-roads（低概率路徑）
-
-### 分析器
-
-```
-├── medcp_analyzer.hpp              # MEDCP（最大期望差分特徵概率）分析
-├── melcc_analyzer.hpp              # MELCC（最大期望線性特徵相關性）分析
-└── threshold_search_framework.hpp  # 通用閾值搜索框架
+- 線性：`neoalz_lin_search`
+  - 參數：`--rounds/-r`、`--weight-cap/-w`、`--start-mask-a`、`--start-mask-b`、`--precompute/--no-precompute`
+  - 範例：
+```bash
+./neoalz_lin_search -r 6 -w 32 --start-mask-a 0x1 --start-mask-b 0x0 --precompute
 ```
 
-## 🎯 使用流程
+### 🧩 程式庫 API（C++）
 
-### 1. 差分分析（MEDCP）
-
+#### 差分 pDDT（Algorithm 1）
 ```cpp
 #include "arx_search_framework/pddt/pddt_algorithm1.hpp"
-#include "arx_search_framework/matsui/matsui_algorithm2.hpp"
-#include "arx_search_framework/medcp_analyzer.hpp"
+using namespace TwilightDream;
 
-// 1. 構建pDDT
-pDDT_Builder builder;
-builder.build(threshold);
+PDDTAlgorithm1Complete::PDDTConfig cfg;
+cfg.bit_width = 32;
+cfg.set_weight_threshold(7);   // 或 cfg.set_probability_threshold(p)
 
-// 2. Matsui搜索
-MatsuiAlgorithm2 searcher;
-auto trail = searcher.search(num_rounds);
-
-// 3. 計算MEDCP
-auto medcp = MEDCP_Analyzer::compute(trail);
+auto entries = PDDTAlgorithm1Complete::compute_pddt(cfg);
+// 或帶統計：
+PDDTAlgorithm1Complete::PDDTStats stats;
+auto entries2 = PDDTAlgorithm1Complete::compute_pddt_with_stats(cfg, stats);
 ```
 
-### 2. 線性分析（MELCC）
-
+#### Matsui 閾值搜索（Algorithm 2）
 ```cpp
-#include "arx_search_framework/clat/algorithm1_const.hpp"
-#include "arx_search_framework/clat/clat_builder.hpp"
-#include "arx_search_framework/clat/clat_search.hpp"
-#include "arx_search_framework/melcc_analyzer.hpp"
+#include "arx_search_framework/matsui/matsui_algorithm2.hpp"
+using namespace TwilightDream;
 
-// 1. 構建cLAT（預計算）
-cLAT<8> clat;
-clat.build();
+MatsuiAlgorithm2Complete::SearchConfig sc;
+sc.num_rounds = 4;
+sc.prob_threshold = 0.01;    // 構建 highways 的閾值
+sc.initial_estimate = 1e-12; // B_n（0 代表關閉門檻剪枝）
 
-// 2. Algorithm 3搜索
-LinearSearchAlgorithm3::Config config;
-config.clat_ptr = &clat;
-auto result = LinearSearchAlgorithm3::search(config, known_bounds);
-
-// 3. 計算MELCC
-auto melcc = MELCC_Analyzer::compute(result.best_trail);
+auto result = MatsuiAlgorithm2Complete::execute_threshold_search(sc);
+// result.best_trail / result.best_weight / result.best_probability
 ```
 
-## 📊 算法對應表
+#### cLAT 構建與查詢（Algorithm 2）
+```cpp
+#include "arx_search_framework/clat/clat_builder.hpp"
+using namespace TwilightDream;
 
-| 框架 | 論文 | 算法 | 用途 |
-|------|------|------|------|
-| pDDT | ARX Differential Trails | Algorithm 1 | 差分表構建 |
-| Matsui | ARX Differential Trails | Algorithm 2 | 差分搜索 |
-| cLAT Const | Huang & Wang 2020 | Algorithm 1 | 掩碼空間 |
-| cLAT Build | Huang & Wang 2020 | Algorithm 2 | 線性表構建 |
-| cLAT Search | Huang & Wang 2020 | Algorithm 3 | 線性搜索 |
+cLAT<8> clat;        // 預設 8 位分塊
+clat.build();        // 構建表（記憶體與耗時取決於分塊與平台）
 
-## ✅ 實現狀態
+// 查詢/重組（SLR 操作的一部分）
+clat.lookup_and_recombine(/*v_full=*/0x12345678u, /*t=*/4, /*weight_cap=*/30,
+    [](uint32_t u, uint32_t w, int weight){ /* 使用 (u,w,weight) */ });
+```
 
-- ✅ pDDT Algorithm 1完整實現
-- ✅ Matsui Algorithm 2完整實現
-- ✅ cLAT Algorithm 1/2/3完整實現
-- ✅ SLR (Splitting-Lookup-Recombination)完整實現
-- ✅ MEDCP/MELCC分析器完整實現
+### 📚 參考與備註
+
+- **差分**：Biryukov & Velichkov, “Automatic Search for Differential Trails in ARX Ciphers”。
+- **線性**：Huang & Wang (2020), “Automatic Search for the Linear (Hull) Characteristics of ARX Ciphers”。
+- 目前程式碼假定 32 位字尺寸；若需 64 位/混合位寬，請在演算法實作與接口處擴展。
+- cLAT 構建可能佔用大量記憶體（視分塊與平台而定），請在伺服器或資源允許的環境執行。
+
+### ✅ 目前實現
+
+- **pDDT**：Algorithm 1 完整實作，支持權重/機率閾值與統計輸出
+- **Matsui**：Algorithm 2 完整實作，含 Highways/Country-roads 策略與剪枝
+- **cLAT**：Algorithm 2 完整實作，提供查詢與 SLR 支援方法
+
+（已移除）舊的通用分析器與框架：`medcp_analyzer.*`、`melcc_analyzer.*`、`threshold_search_framework.*`。

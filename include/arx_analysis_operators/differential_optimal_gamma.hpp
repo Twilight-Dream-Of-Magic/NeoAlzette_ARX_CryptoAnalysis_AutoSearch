@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file differential_optimal_gamma.hpp
  * @brief 查找最优输出差分γ - Lipmaa & Moriai (2001) Algorithm 4
  * 

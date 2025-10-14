@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file differential_xdp_add.hpp
  * @brief XOR差分模加法概率計算（變量-變量）
  * 

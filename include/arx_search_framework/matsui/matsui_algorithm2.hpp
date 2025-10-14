@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <vector>
 #include <unordered_map>
@@ -9,7 +9,7 @@
 #include <optional>
 #include <algorithm>
 
-namespace neoalz {
+namespace TwilightDream {
 
 /**
  * @brief Complete implementation of Matsui's Algorithm 2 for threshold search
@@ -562,4 +562,4 @@ private:
     );
 };
 
-} // namespace neoalz
+} // namespace TwilightDream

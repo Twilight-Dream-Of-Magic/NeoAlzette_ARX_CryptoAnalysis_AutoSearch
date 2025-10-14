@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file linear_search_algorithm3.hpp
  * @brief Algorithm 3: ARX線性特徵自動搜索
  * 
