@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace TwilightDream
+namespace neoalz
 {
 
 	// ============================================================================
@@ -212,10 +212,10 @@ namespace TwilightDream
 		 * For k = 32: Use full xdp_add_lm2001 (with "good" check)
 		 */
 
-		// ✅ 當k=32時，直接調用底層精確算子！
-		if ( k == 32 )
+    		// ✅ 當k=32時，直接調用底層精確算子！
+    		if ( k == 32 )
 		{
-			int weight = arx_operators::xdp_add_lm2001( alpha_k, beta_k, gamma_k );
+			int weight = TwilightDream::arx_operators::xdp_add_lm2001( alpha_k, beta_k, gamma_k );
 			if ( weight < 0 )
 				return std::nullopt;  // Impossible differential
 			return std::optional<int>( weight );
@@ -242,7 +242,7 @@ namespace TwilightDream
 		 */
 
 		// Compute AOP for k-bit prefix
-		std::uint32_t aop = arx_operators::carry_aop( alpha_k, beta_k, gamma_k );
+		std::uint32_t aop = TwilightDream::arx_operators::carry_aop( alpha_k, beta_k, gamma_k );
 
 		// Mask to k bits (count only first k bits)
 		std::uint32_t mask = ( 1ULL << k ) - 1;
@@ -302,4 +302,4 @@ namespace TwilightDream
 		}
 	}
 
-}  // namespace TwilightDream
+}  // namespace neoalz

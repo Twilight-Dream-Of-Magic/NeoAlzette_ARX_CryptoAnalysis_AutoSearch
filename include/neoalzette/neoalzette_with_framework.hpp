@@ -34,8 +34,8 @@ using TwilightDream::linear_one_round_backward_analysis;
 // 底層ARX算子
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
-#include "arx_analysis_operators/linear_cor_add_logn.hpp"
-#include "arx_analysis_operators/linear_cor_addconst.hpp"
+#include "arx_analysis_operators/linear_correlation_add_logn.hpp"
+#include "arx_analysis_operators/linear_correlation_addconst.hpp"
 
 // 搜索框架
 #include "arx_search_framework/pddt/pddt_algorithm1.hpp"
@@ -952,7 +952,7 @@ namespace TwilightDream
 			static Result run( const Config& cfg )
 			{
 				// 固定 m=8 的 cLAT；若配置不同，仍退化使用 8（模板需編譯期常量）
-				cLAT<8> clat;
+                neoalz::cLAT<8> clat;
 				if ( cfg.precompute_clat )
 					( void )clat.build();
 

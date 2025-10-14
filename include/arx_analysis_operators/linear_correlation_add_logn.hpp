@@ -31,7 +31,7 @@ namespace TwilightDream
 		// MnT operator implementation (core of Wallén algorithm)
 		// ============================================================================
 
-		std::uint32_t MnT_of( std::uint32_t v ) noexcept
+		inline std::uint32_t MnT_of( std::uint32_t v ) noexcept
 		{
 			// Compute z* = M_n^T v (carry support vector) for 32-bit via prefix XOR trick
 			std::uint32_t z = 0;
@@ -47,7 +47,7 @@ namespace TwilightDream
 			return z;
 		}
 
-		std::optional<int> wallen_weight( std::uint32_t mu, std::uint32_t nu, std::uint32_t omega, int n )
+		inline std::optional<int> wallen_weight( std::uint32_t mu, std::uint32_t nu, std::uint32_t omega, int n )
 		{
 			std::uint32_t v = mu ^ nu ^ omega;
 			std::uint32_t z_star = MnT_of( v );

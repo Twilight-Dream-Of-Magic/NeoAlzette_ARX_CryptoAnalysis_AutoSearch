@@ -42,7 +42,7 @@ namespace TwilightDream
 		std::uint32_t beta_for_A_plus_TB = 0; // 用于 A += (T(B)^R5)
 	};
 
-	// ====== NeoAlzette算法一轮线性近似（Backward 回溯；使用所有常量并计相位）cLAT+SLR 论文搜索框架专用 ======
-	inline LinRoundResult linear_one_round_backward_analysis( std::uint32_t a_mask_out, std::uint32_t b_mask_out, BetaHints* beta_hints ) noexcept;
+    // ====== NeoAlzette算法一轮线性近似（Backward 回溯；使用所有常量并计相位）cLAT+SLR 论文搜索框架专用 ======
+    LinRoundResult linear_one_round_backward_analysis( std::uint32_t a_mask_out, std::uint32_t b_mask_out, BetaHints* beta_hints ) noexcept;
 
 }  // namespace TwilightDream

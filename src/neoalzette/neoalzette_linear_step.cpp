@@ -130,10 +130,10 @@ namespace TwilightDream
 	}
 
 	// ====== 一轮线性近似（Backward 回溯；使用所有常量并计相位）======
-	inline LinRoundResult linear_one_round_backward_analysis( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept
+	LinRoundResult linear_one_round_backward_analysis( std::uint32_t a_mask_out, std::uint32_t b_mask_out ) noexcept
 	{
 		using NA = NeoAlzetteCore;
-		using arx_operators::corr_x_modulo_plus_const32;
+		using arx_operators::linear_x_modulo_plus_const32;
 		using arx_operators::linear_cor_add_wallen_logn;
 		using arx_operators::neg_mod_2n;
 
@@ -163,7 +163,8 @@ namespace TwilightDream
 		// B -= R6  变-常模加
 		{
 			mark_rc( used, 6 );
-			auto lc = corr_x_modulo_minus_const32( mB, R[ 6 ], n );
+			// var-const subtraction: use both input/output masks = mB as a standard choice
+			auto lc = arx_operators::linear_x_modulo_minus_const32( mB, R[ 6 ], mB, n );
 			SumWeight += static_cast<int>( std::ceil( lc.weight ) );
 			// 若有 lc.parity：phase ^= lc.parity;
 		}
@@ -199,7 +200,7 @@ namespace TwilightDream
 		// A -= R1
 		{
 			mark_rc( used, 1 );
-			auto lc = corr_x_modulo_minus_const32( mA, R[ 1 ], mA, n );
+			auto lc = arx_operators::linear_x_modulo_minus_const32( mA, R[ 1 ], mA, n );
 			SumWeight += static_cast<int>( std::ceil( lc.weight ) );
 			// 若有 lc.parity：phase ^= lc.parity;
 		}
@@ -238,10 +239,10 @@ namespace TwilightDream
 	}
 
 	// ====== 一轮线性近似（Backward 回溯；使用所有常量并计相位）cLAT+SLR 论文搜索框架专用 ======
-	inline LinRoundResult linear_one_round_backward_analysis( std::uint32_t a_mask_out, std::uint32_t b_mask_out, BetaHints* beta_hints ) noexcept
+	LinRoundResult linear_one_round_backward_analysis( std::uint32_t a_mask_out, std::uint32_t b_mask_out, BetaHints* beta_hints ) noexcept
 	{
 		using NA = NeoAlzetteCore;
-		using arx_operators::corr_x_modulo_plus_const32;
+		using arx_operators::linear_x_modulo_plus_const32;
 		using arx_operators::linear_cor_add_wallen_logn;
 		using arx_operators::neg_mod_2n;
 
@@ -271,7 +272,8 @@ namespace TwilightDream
 		// B -= R6  变-常模加
 		{
 			mark_rc( used, 6 );
-			auto lc = corr_x_modulo_minus_const32( mB, R[ 6 ], n );
+			// var-const subtraction: use both input/output masks = mB as a standard choice
+			auto lc = arx_operators::linear_x_modulo_minus_const32( mB, R[ 6 ], mB, n );
 			SumWeight += static_cast<int>( std::ceil( lc.weight ) );
 			// 若有 lc.parity：phase ^= lc.parity;
 		}
@@ -300,7 +302,7 @@ namespace TwilightDream
 		// A -= R1
 		{
 			mark_rc( used, 1 );
-			auto lc = corr_x_modulo_minus_const32( mA, R[ 1 ], mA, n );
+			auto lc = arx_operators::linear_x_modulo_minus_const32( mA, R[ 1 ], mA, n );
 			SumWeight += static_cast<int>( std::ceil( lc.weight ) );
 			// 若有 lc.parity：phase ^= lc.parity;
 		}
