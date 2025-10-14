@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace neoalz
+namespace TwilightDream
 {
 
 	// ============================================================================

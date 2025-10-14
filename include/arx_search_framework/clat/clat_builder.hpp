@@ -18,7 +18,7 @@
 #include <array>
 #include <unordered_map>
 
-namespace neoalz {
+namespace TwilightDream {
 
 /**
  * @brief cLAT（組合線性近似表）
@@ -291,4 +291,4 @@ private:
     }
 };
 
-} // namespace neoalz
+} // namespace TwilightDream

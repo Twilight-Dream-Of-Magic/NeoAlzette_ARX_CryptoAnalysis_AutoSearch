@@ -6,7 +6,7 @@
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_optimal_gamma.hpp"
 
-namespace neoalz {
+namespace TwilightDream {
 
 // ============================================================================
 // HighwayTable Implementation
@@ -503,4 +503,4 @@ MatsuiAlgorithm2Complete::find_max_probability(
     return {best_gamma, std::exp2(-best_weight)};
 }
 
-} // namespace neoalz
+} // namespace TwilightDream

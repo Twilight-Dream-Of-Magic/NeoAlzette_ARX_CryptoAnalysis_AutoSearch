@@ -952,7 +952,7 @@ namespace TwilightDream
 			static Result run( const Config& cfg )
 			{
 				// 固定 m=8 的 cLAT；若配置不同，仍退化使用 8（模板需編譯期常量）
-                neoalz::cLAT<8> clat;
+                TwilightDream::cLAT<8> clat;
 				if ( cfg.precompute_clat )
 					( void )clat.build();
 
