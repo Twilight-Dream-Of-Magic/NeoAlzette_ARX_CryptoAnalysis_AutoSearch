@@ -1,13 +1,13 @@
 #include "neoalzette/neoalzette_core.hpp"
 
-namespace neoalz {
+namespace TwilightDream {
 
 // ============================================================================
 // Cross-branch injection (value domain with constants)
 // ============================================================================
 
 std::pair<std::uint32_t, std::uint32_t>
-NeoAlzetteCore::cd_from_B(std::uint32_t B, std::uint32_t rc0, std::uint32_t rc1) noexcept {
+NeoAlzetteCore::cd_injection_from_B(std::uint32_t B, std::uint32_t rc0, std::uint32_t rc1) noexcept {
     std::uint32_t c = l2_forward(B ^ rc0);
     std::uint32_t d = l1_forward(rotr(B, 3) ^ rc1);
     std::uint32_t t = rotl(c ^ d, 31);
@@ -17,33 +17,9 @@ NeoAlzetteCore::cd_from_B(std::uint32_t B, std::uint32_t rc0, std::uint32_t rc1)
 }
 
 std::pair<std::uint32_t, std::uint32_t>
-NeoAlzetteCore::cd_from_A(std::uint32_t A, std::uint32_t rc0, std::uint32_t rc1) noexcept {
+NeoAlzetteCore::cd_injection_from_A(std::uint32_t A, std::uint32_t rc0, std::uint32_t rc1) noexcept {
     std::uint32_t c = l1_forward(A ^ rc0);
     std::uint32_t d = l2_forward(rotl(A, 24) ^ rc1);
-    std::uint32_t t = rotr(c ^ d, 31);
-    c ^= rotr(d, 17);
-    d ^= rotl(t, 16);
-    return {c, d};
-}
-
-// ============================================================================
-// Cross-branch injection (delta domain, constants vanish)
-// ============================================================================
-
-std::pair<std::uint32_t, std::uint32_t>
-NeoAlzetteCore::cd_from_B_delta(std::uint32_t B_delta) noexcept {
-    std::uint32_t c = l2_forward(B_delta);
-    std::uint32_t d = l1_forward(rotr(B_delta, 3));
-    std::uint32_t t = rotl(c ^ d, 31);
-    c ^= rotl(d, 17);
-    d ^= rotr(t, 16);
-    return {c, d};
-}
-
-std::pair<std::uint32_t, std::uint32_t>
-NeoAlzetteCore::cd_from_A_delta(std::uint32_t A_delta) noexcept {
-    std::uint32_t c = l1_forward(A_delta);
-    std::uint32_t d = l2_forward(rotl(A_delta, 24));
     std::uint32_t t = rotr(c ^ d, 31);
     c ^= rotr(d, 17);
     d ^= rotl(t, 16);
@@ -66,7 +42,7 @@ void NeoAlzetteCore::forward(std::uint32_t& a, std::uint32_t& b) noexcept {
     A = l1_forward(A);
     B = l2_forward(B);
     {
-        auto [C0, D0] = cd_from_B(B, R[2], R[3]);
+        auto [C0, D0] = cd_injection_from_B(B, R[2], R[3]);
         A ^= (rotl(C0, 24) ^ rotl(D0, 16) ^ R[4]);
     }
 
@@ -78,7 +54,7 @@ void NeoAlzetteCore::forward(std::uint32_t& a, std::uint32_t& b) noexcept {
     B = l1_forward(B);
     A = l2_forward(A);
     {
-        auto [C1, D1] = cd_from_A(A, R[7], R[8]);
+        auto [C1, D1] = cd_injection_from_A(A, R[7], R[8]);
         B ^= (rotl(C1, 24) ^ rotl(D1, 16) ^ R[9]);
     }
 
@@ -99,7 +75,7 @@ void NeoAlzetteCore::backward(std::uint32_t& a, std::uint32_t& b) noexcept {
     
     // Reverse second subround
     {
-        auto [C1, D1] = cd_from_A(A, R[7], R[8]);
+        auto [C1, D1] = cd_injection_from_A(A, R[7], R[8]);
         B ^= (rotl(C1, 24) ^ rotl(D1, 16) ^ R[9]);
     }
     B = l1_backward(B);
@@ -111,7 +87,7 @@ void NeoAlzetteCore::backward(std::uint32_t& a, std::uint32_t& b) noexcept {
 
     // Reverse first subround
     {
-        auto [C0, D0] = cd_from_B(B, R[2], R[3]);
+        auto [C0, D0] = cd_injection_from_B(B, R[2], R[3]);
         A ^= (rotl(C0, 24) ^ rotl(D0, 16) ^ R[4]);
     }
     A = l1_backward(A);
@@ -141,4 +117,4 @@ NeoAlzetteCore::decrypt(std::uint32_t a, std::uint32_t b) noexcept {
     return {a, b};
 }
 
-} // namespace neoalz
+} // namespace TwilightDream

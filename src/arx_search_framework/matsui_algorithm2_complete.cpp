@@ -3,8 +3,10 @@
 #include <cmath>
 #include <algorithm>
 #include <queue>
+#include "arx_analysis_operators/differential_xdp_add.hpp"
+#include "arx_analysis_operators/differential_optimal_gamma.hpp"
 
-namespace neoalz {
+namespace TwilightDream {
 
 // ============================================================================
 // HighwayTable Implementation
@@ -484,66 +486,21 @@ bool MatsuiAlgorithm2Complete::check_pruning_condition(
 double MatsuiAlgorithm2Complete::compute_xdp_add(
     std::uint32_t alpha, std::uint32_t beta, std::uint32_t gamma, int n
 ) {
-    /**
-     * XOR differential probability of modular addition
-     * 
-     * xdp⁺(α, β → γ) = 2^{-2n} · |{(x,y) : ((x⊕α)+(y⊕β))⊕(x+y) = γ}|
-     * 
-     * Using Lipmaa-Moriai formula:
-     * xdp⁺(α, β → γ) = 2^{-w} where w = hw(AOP(α,β,γ))
-     * 
-     * AOP(α,β,γ) = α⊕β⊕γ⊕((α∧β)⊕((α⊕β)∧γ))<<1
-     */
-    
-    if (alpha == 0 && beta == 0) {
-        return (gamma == 0) ? 1.0 : 0.0;
-    }
-    
-    // Compute AOP (All Output Positions)
-    std::uint32_t xor_part = alpha ^ beta ^ gamma;
-    std::uint32_t and_part = (alpha & beta) ^ ((alpha ^ beta) & gamma);
-    std::uint32_t aop = xor_part ^ (and_part << 1);
-    
-    // Weight is Hamming weight of AOP
-    int weight = __builtin_popcount(aop & ((1ULL << n) - 1));
-    
-    // Probability is 2^{-weight}
-    return std::pow(2.0, -static_cast<double>(weight));
+    // 精確：使用 LM-2001 Algorithm 2 權重（含 "good" 條件）
+    (void)n; // 位寬固定為32於底層實現中已處理
+    int weight = TwilightDream::arx_operators::xdp_add_lm2001(alpha, beta, gamma);
+    if (weight < 0 || weight > 1024) return 0.0;
+    return std::exp2(-weight); // 2^{-weight}
 }
 
-std::pair<std::uint32_t, double> 
+std::pair<std::uint32_t, double>
 MatsuiAlgorithm2Complete::find_max_probability(
     std::uint32_t alpha, std::uint32_t beta, int n
 ) {
-    /**
-     * Find maximum probability output difference:
-     * max_γ xdp⁺(α, β → γ)
-     * 
-     * For modular addition, the maximum is usually achieved by
-     * γ = α ⊕ β (carry-free case)
-     */
-    
-    std::uint32_t best_gamma = alpha ^ beta; // Optimal case (no carries)
-    double best_prob = compute_xdp_add(alpha, beta, best_gamma, n);
-    
-    // Try a few other candidates
-    std::vector<std::uint32_t> candidates = {
-        alpha ^ beta,
-        alpha ^ beta ^ 1,
-        alpha ^ beta ^ 2,
-        (alpha ^ beta) + 1,
-        (alpha ^ beta) - 1
-    };
-    
-    for (std::uint32_t gamma : candidates) {
-        double prob = compute_xdp_add(alpha, beta, gamma, n);
-        if (prob > best_prob) {
-            best_prob = prob;
-            best_gamma = gamma;
-        }
-    }
-    
-    return {best_gamma, best_prob};
+    // 精確：使用 LM-2001 Algorithm 4 搜索最優 γ，再以 Algorithm 2 求權重
+    auto [best_gamma, best_weight] = TwilightDream::arx_operators::find_optimal_gamma_with_weight(alpha, beta, n);
+    if (best_weight < 0 || best_weight > 1024) return {best_gamma, 0.0};
+    return {best_gamma, std::exp2(-best_weight)};
 }
 
-} // namespace neoalz
+} // namespace TwilightDream

@@ -19,10 +19,43 @@
 #include <algorithm>
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 
-namespace neoalz
+namespace TwilightDream
 {
 	namespace arx_operators
 	{
+		/**
+		* Compute AOP (All Output Positions) function
+		* 
+		* Mathematical formula from Lipmaa-Moriai:
+		* AOP(α, β, γ) = α ⊕ β ⊕ γ ⊕ ((α∧β) ⊕ ((α⊕β)∧γ)) << 1
+		* 
+		* Components:
+		* 1. α ⊕ β ⊕ γ: XOR of all three differences
+		* 2. α ∧ β: Both inputs have difference (both 1)
+		* 3. (α⊕β) ∧ γ: XOR of inputs matches output difference
+		* 4. << 1: Shift left (carry propagation)
+		* 
+		* Interpretation:
+		* AOP[i] = 1 means bit position i can have non-zero carry
+		* hw(AOP) = number of positions with possible carry = weight
+		* 
+		* @param alpha α
+		* @param beta β
+		* @param gamma γ
+		* @return AOP value
+		*/
+		inline std::uint32_t carry_aop( std::uint32_t alpha, std::uint32_t beta, std::uint32_t gamma )
+		{
+			std::uint32_t xor_part = alpha ^ beta ^ gamma;
+			std::uint32_t alpha_and_beta = alpha & beta;
+			std::uint32_t alpha_xor_beta = alpha ^ beta;
+			std::uint32_t xor_and_gamma = alpha_xor_beta & gamma;
+			std::uint32_t carry_part = alpha_and_beta ^ xor_and_gamma;
+
+			std::uint32_t aop = xor_part ^ ( carry_part << 1 );
+
+			return aop;
+		}
 
 		/**
 		 * @brief Algorithm 1: 计算All-One Parity - Θ(log n)时间
@@ -219,4 +252,4 @@ namespace neoalz
 		}
 
 	}  // namespace arx_operators
-}  // namespace neoalz
+}  // namespace TwilightDream

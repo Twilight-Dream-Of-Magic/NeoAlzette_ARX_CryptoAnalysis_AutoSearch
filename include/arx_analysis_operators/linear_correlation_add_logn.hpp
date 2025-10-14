@@ -20,11 +20,47 @@
 #include <cstdint>
 #include <cmath>
 #include <array>
+#include <optional>
 
-namespace neoalz
+namespace TwilightDream
 {
 	namespace arx_operators
 	{
+
+		// ============================================================================
+		// MnT operator implementation (core of Wallén algorithm)
+		// ============================================================================
+
+		std::uint32_t MnT_of( std::uint32_t v ) noexcept
+		{
+			// Compute z* = M_n^T v (carry support vector) for 32-bit via prefix XOR trick
+			std::uint32_t z = 0;
+			std::uint32_t suffix = 0;
+
+			for ( int i = 31; i >= 0; --i )
+			{
+				if ( suffix & 1u )
+					z |= ( 1u << i );
+				suffix ^= ( v >> i ) & 1u;
+			}
+
+			return z;
+		}
+
+		std::optional<int> wallen_weight( std::uint32_t mu, std::uint32_t nu, std::uint32_t omega, int n )
+		{
+			std::uint32_t v = mu ^ nu ^ omega;
+			std::uint32_t z_star = MnT_of( v );
+			std::uint32_t a = mu ^ omega;
+			std::uint32_t b = nu ^ omega;
+
+			if ( ( a & ~z_star ) != 0 || ( b & ~z_star ) != 0 )
+			{
+				return std::nullopt;  // Not feasible
+			}
+
+			return __builtin_popcount( z_star );
+		}
 
 		/**
 		 * @brief Wallén Theorem 2: 計算cpm(x, y) - Θ(log n)時間
@@ -169,7 +205,7 @@ namespace neoalz
 		 * 
 		 * @return 相關度 ∈ [-1, 1]
 		 */
-		inline double linear_cor_add_value_logn( std::uint32_t u, std::uint32_t v, std::uint32_t w ) noexcept
+		inline double linear_correlation_add_value_logn( std::uint32_t u, std::uint32_t v, std::uint32_t w ) noexcept
 		{
 			int weight = linear_cor_add_wallen_logn( u, v, w );
 			if ( weight < 0 )
@@ -181,4 +217,4 @@ namespace neoalz
 		}
 
 	}  // namespace arx_operators
-}  // namespace neoalz
+}  // namespace TwilightDream

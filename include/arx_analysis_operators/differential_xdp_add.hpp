@@ -16,7 +16,7 @@
 #include <cmath>
 #include <limits>
 
-namespace neoalz
+namespace TwilightDream
 {
 	namespace arx_operators
 	{
@@ -141,4 +141,4 @@ namespace neoalz
 		}
 
 	}  // namespace arx_operators
-}  // namespace neoalz
+}  // namespace TwilightDream

@@ -25,12 +25,8 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 # ============================================================================
 set(NEOALZETTE_SOURCES
     src/neoalzette/neoalzette_core.cpp
-    src/neoalzette/neoalzette_differential.cpp
-    src/neoalzette/neoalzette_linear.cpp
-    src/neoalzette/neoalzette_medcp.cpp
-    src/neoalzette/neoalzette_melcc.cpp
-    src/neoalzette/neoalzette_differential_search.cpp
-    src/neoalzette/neoalzette_linear_search.cpp
+    src/neoalzette/neoalzette_differential_step.cpp
+    src/neoalzette/neoalzette_linear_step.cpp
 )
 
 add_library(neoalzette STATIC ${NEOALZETTE_SOURCES})
@@ -42,10 +38,6 @@ target_include_directories(neoalzette PUBLIC ${CMAKE_SOURCE_DIR}/include)
 set(ARX_FRAMEWORK_SOURCES
     src/arx_search_framework/pddt_algorithm1_complete.cpp
     src/arx_search_framework/matsui_algorithm2_complete.cpp
-    src/arx_search_framework/medcp_analyzer.cpp
-    src/arx_search_framework/melcc_analyzer.cpp
-    src/arx_search_framework/threshold_search_framework.cpp
-    src/utility_tools.cpp
 )
 
 add_library(arx_framework STATIC ${ARX_FRAMEWORK_SOURCES})
@@ -53,16 +45,16 @@ target_include_directories(arx_framework PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(arx_framework PUBLIC neoalzette)
 
 # ============================================================================
-# 工具程序
+# NeoAlzette 計算密集型工具（專用：差分 / 線性）
 # ============================================================================
 
-# Highway表構建工具（差分）
-add_executable(highway_table_build src/highway_table_build.cpp)
-target_link_libraries(highway_table_build PRIVATE arx_framework neoalzette)
+# 差分：專用 Matsui Algorithm 2 外殼 + 黑盒一輪
+add_executable(neoalz_diff_search src/neoalzette_differential_main_search.cpp)
+target_link_libraries(neoalz_diff_search PRIVATE arx_framework neoalzette)
 
-# Highway表構建工具（線性）
-add_executable(highway_table_build_lin src/highway_table_build_lin.cpp)
-target_link_libraries(highway_table_build_lin PRIVATE arx_framework neoalzette)
+# 線性：cLAT 構建 + SLR 下界剪枝 + 黑盒一輪
+add_executable(neoalz_lin_search src/neoalzette_linear_main_search.cpp)
+target_link_libraries(neoalz_lin_search PRIVATE arx_framework neoalzette)
 
 # ============================================================================
 # 安裝配置
@@ -110,14 +102,10 @@ message(STATUS "🔍 搜索框架：")
 message(STATUS "  • pddt/                          - pDDT構建")
 message(STATUS "  • clat/                          - cLAT構建（Algorithm 1/2/3）")
 message(STATUS "  • matsui/                        - Matsui閾值搜索")
-message(STATUS "  • medcp_analyzer.hpp             - MEDCP分析")
-message(STATUS "  • melcc_analyzer.hpp             - MELCC分析")
 message(STATUS "")
 message(STATUS "🎯 構建目標：")
 message(STATUS "  • libneoalzette.a                - NeoAlzette庫")
 message(STATUS "  • libarx_framework.a             - 搜索框架庫")
-message(STATUS "  • highway_table_build            - Highway表工具（差分）")
-message(STATUS "  • highway_table_build_lin        - Highway表工具（線性）")
 message(STATUS "")
 message(STATUS "=======================================================")
 message(STATUS "")

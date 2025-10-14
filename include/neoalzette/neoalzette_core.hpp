@@ -4,7 +4,7 @@
 #include <utility>
 #include <algorithm>
 
-namespace neoalz {
+namespace TwilightDream {
 
 /**
  * NeoAlzette Core - ARX-box implementation with linear layers
@@ -67,23 +67,11 @@ public:
     
     // Cross-branch injection from B branch
     static std::pair<std::uint32_t, std::uint32_t>
-    cd_from_B(std::uint32_t B, std::uint32_t rc0, std::uint32_t rc1) noexcept;
+    cd_injection_from_B(std::uint32_t B, std::uint32_t rc0, std::uint32_t rc1) noexcept;
     
     // Cross-branch injection from A branch
     static std::pair<std::uint32_t, std::uint32_t>
-    cd_from_A(std::uint32_t A, std::uint32_t rc0, std::uint32_t rc1) noexcept;
-
-    // ========================================================================
-    // Cross-branch injection (delta domain, constants vanish)
-    // ========================================================================
-    
-    // Cross-branch injection from B delta (for differential analysis)
-    static std::pair<std::uint32_t, std::uint32_t>
-    cd_from_B_delta(std::uint32_t B_delta) noexcept;
-    
-    // Cross-branch injection from A delta (for differential analysis)
-    static std::pair<std::uint32_t, std::uint32_t>
-    cd_from_A_delta(std::uint32_t A_delta) noexcept;
+    cd_injection_from_A(std::uint32_t A, std::uint32_t rc0, std::uint32_t rc1) noexcept;
 
     // ========================================================================
     // Main ARX-box transformations
@@ -154,4 +142,4 @@ constexpr std::uint32_t NeoAlzetteCore::l2_transpose(std::uint32_t x) noexcept {
     return x ^ rotr(x, 8) ^ rotr(x, 14) ^ rotr(x, 22) ^ rotr(x, 30);
 }
 
-} // namespace neoalz
+} // namespace TwilightDream

@@ -48,7 +48,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace neoalz
+namespace TwilightDream
 {
 	namespace arx_operators
 	{
@@ -89,9 +89,9 @@ namespace neoalz
 		 * @brief Safe conversion from correlation to linear weight
 		 *        Lw = -log2(|corr|), with Lw = +inf for corr == 0.
 		 */
-		static inline double linear_weight_from_corr( double corr ) noexcept
+		static inline double linear_weight_from_corr( double correlation ) noexcept
 		{
-			const double a = std::fabs( corr );
+			const double a = std::fabs( correlation );
 			if ( a <= 0.0 )
 				return std::numeric_limits<double>::infinity();
 			return -std::log2( a );
@@ -108,18 +108,18 @@ namespace neoalz
 		 *
 		 * We maintain row-major as four doubles.
 		 */
-		struct Mat2
+		struct Matrix2D
 		{
 			double m00, m01, m10, m11;	// rows: 0,1 ; cols: 0,1
 
-			constexpr Mat2() : m00( 0 ), m01( 0 ), m10( 0 ), m11( 0 ) {}
-			constexpr Mat2( double a, double b, double c, double d ) : m00( a ), m01( b ), m10( c ), m11( d ) {}
+			constexpr Matrix2D() : m00( 0 ), m01( 0 ), m10( 0 ), m11( 0 ) {}
+			constexpr Matrix2D( double a, double b, double c, double d ) : m00( a ), m01( b ), m10( c ), m11( d ) {}
 
 			/**
 			 * @brief Row-vector × Matrix
 			 *        [v0 v1] × [m00 m01; m10 m11] = [v0*m00+v1*m10, v0*m01+v1*m11]
 			 */
-			static inline void mul_row( double v0, double v1, const Mat2& M, double& out0, double& out1 ) noexcept
+			static inline void multiply_row( double v0, double v1, const Matrix2D& M, double& out0, double& out1 ) noexcept
 			{
 				out0 = v0 * M.m00 + v1 * M.m10;
 				out1 = v0 * M.m01 + v1 * M.m11;
@@ -167,18 +167,18 @@ namespace neoalz
 		/**
 		 * @brief Build Mi for var-var addition (x ⊞ y) at bit i.
 		 * @param alpha_i mask bit for x
-		 * @param gamma_i mask bit for y   (we call it gamma to avoid clash with β)
-		 * @param beta_i  mask bit for z
+		 * @param beta_i  mask bit for y   (we call it gamma to avoid clash with β)
+		 * @param gamma_i mask bit for z
 		 * @return 2×2 local transfer matrix with averaging factor 1/4.
 		 */
-		static inline Mat2 make_Mi_add_varvar_bit( int alpha_i, int gamma_i, int beta_i ) noexcept
+		static inline Matrix2D make_Mi_add_varvar_bit( int alpha_i, int beta_i, int gemma_i ) noexcept
 		{
-			Mat2 M;
+			Matrix2D M;
 			for ( int cin = 0; cin <= 1; ++cin )
 			{
 				for ( int cout = 0; cout <= 1; ++cout )
 				{
-					double acc = 0.0;
+					double sum = 0.0;
 					// Average over all (x,y) ∈ {0,1}^2 ⇒ 4 terms ⇒ factor 1/4.
 					for ( int x = 0; x <= 1; ++x )
 					{
@@ -190,56 +190,14 @@ namespace neoalz
 							double	  s = 1.0;
 							// (-1)^(α_i x)
 							s *= signed_bit( alpha_i, x );
-							// (-1)^(γ_i y)
-							s *= signed_bit( gamma_i, y );
-							// (-1)^(β_i z_i)
-							s *= signed_bit( beta_i, zi );
-							acc += s;
+							// (-1)^(β_i y)
+							s *= signed_bit( beta_i, y );
+							// (-1)^(γ_i z_i)
+							s *= signed_bit( gemma_i, zi );
+							sum += s;
 						}
 					}
-					const double val = acc * 0.25;	// 1/4
-					if ( cin == 0 && cout == 0 )
-						M.m00 = val;
-					if ( cin == 0 && cout == 1 )
-						M.m01 = val;
-					if ( cin == 1 && cout == 0 )
-						M.m10 = val;
-					if ( cin == 1 && cout == 1 )
-						M.m11 = val;
-				}
-			}
-			return M;
-		}
-
-		// -- var-const: z = x ⊞ a ----------------------------------------------------
-
-		/**
-		 * @brief Build Mi for var-const addition (x ⊞ a) at bit i.
-		 * @param alpha_i mask bit for x
-		 * @param beta_i  mask bit for z
-		 * @param a_i     constant bit a_i ∈ {0,1}
-		 * @return 2×2 local transfer matrix with averaging factor 1/2.
-		 */
-		static inline Mat2 make_Mi_add_const_bit( int alpha_i, int beta_i, int a_i ) noexcept
-		{
-			Mat2 M;
-			for ( int cin = 0; cin <= 1; ++cin )
-			{
-				for ( int cout = 0; cout <= 1; ++cout )
-				{
-					double acc = 0.0;
-					// Only x varies ⇒ 2 terms ⇒ factor 1/2.
-					for ( int x = 0; x <= 1; ++x )
-					{
-						if ( carry_out_bit( x, a_i, cin ) != cout )
-							continue;
-						const int zi = x ^ a_i ^ cin;
-						double	  s = 1.0;
-						s *= signed_bit( alpha_i, x );	// (-1)^(α_i x)
-						s *= signed_bit( beta_i, zi );	// (-1)^(β_i z_i)
-						acc += s;
-					}
-					const double val = acc * 0.5;  // 1/2
+					const double val = sum * 0.25;	// 1/4
 					if ( cin == 0 && cout == 0 )
 						M.m00 = val;
 					if ( cin == 0 && cout == 1 )
@@ -261,21 +219,21 @@ namespace neoalz
 		 * @brief Exact correlation for z = x ⊞ y (var-var).
 		 *
 		 * API contract:
-		 *   - alpha: mask for x
-		 *   - gamma: mask for y
-		 *   - beta : mask for z
-		 *   - n    : word size (1..64), LSB = bit 0
+		 *   - alpha : mask for x
+		 *   - beta  : mask for y
+		 *   - gamma : mask for z
+		 *   - n     : word size (1..64), LSB = bit 0
 		 *
 		 * Returns corr ∈ [-1, 1].
 		 */
-		static inline double corr_add_varvar( uint64_t alpha, uint64_t gamma, uint64_t beta, int n ) noexcept
+		static inline double correlation_add_varvar( uint64_t alpha, uint64_t beta, uint64_t gamma, int n ) noexcept
 		{
 			double v0 = 1.0, v1 = 0.0;	// v_0 = [1,0]
 			for ( int i = 0; i < n; ++i )
 			{
-				const Mat2 Mi = make_Mi_add_varvar_bit( bit_u64( alpha, i ), bit_u64( gamma, i ), bit_u64( beta, i ) );
+				const Matrix2D Mi = make_Mi_add_varvar_bit( bit_u64( alpha, i ), bit_u64( beta, i ), bit_u64( gamma, i ) );
 				double	   nv0, nv1;
-				Mat2::mul_row( v0, v1, Mi, nv0, nv1 );
+				Matrix2D::multiply_row( v0, v1, Mi, nv0, nv1 );
 				v0 = nv0;
 				v1 = nv1;
 			}
@@ -284,26 +242,79 @@ namespace neoalz
 		}
 
 		/**
+		 * @brief Exact correlation for z = x ⊟ y (var-var subtraction).
+		 *        Implemented as z = x ⊞ ((-y) mod 2^n).
+		 */
+		static inline double corr_sub_varvar( uint64_t alpha, uint64_t gamma, uint64_t beta, int n ) noexcept
+		{
+			const uint64_t MASK = ( n == 64 ) ? ~0ULL : ( ( 1ULL << n ) - 1ULL );
+			const uint64_t neg_beta = ( ( ~beta ) + 1ULL ) & MASK;  // two's complement mod 2^n
+			return correlation_add_varvar( alpha, neg_beta, gamma, n );
+		}
+
+		// -- var-const: z = x ⊞ a ----------------------------------------------------
+
+		/**
+		 * @brief Build Mi for var-const addition (x ⊞ a) at bit i.
+		 * @param alpha_i mask bit for x
+		 * @param constant_i constant bit constant_i ∈ {0,1}
+		 * @param beta_i  mask bit for z
+		 * @return 2×2 local transfer matrix with averaging factor 1/2.
+		 */
+		static inline Matrix2D make_Mi_add_const_bit( int alpha_i, int constant, int beta_i ) noexcept
+		{
+			Matrix2D M;
+			for ( int cin = 0; cin <= 1; ++cin )
+			{
+				for ( int cout = 0; cout <= 1; ++cout )
+				{
+					double sum = 0.0;
+					// Only x varies ⇒ 2 terms ⇒ factor 1/2.
+					for ( int x = 0; x <= 1; ++x )
+					{
+						if ( carry_out_bit( x, constant, cin ) != cout )
+							continue;
+						const int zi = x ^ constant ^ cin;
+						double	  s = 1.0;
+						s *= signed_bit( alpha_i, x );	// (-1)^(α_i x)
+						s *= signed_bit( beta_i, zi );	// (-1)^(β_i z_i)
+						sum += s;
+					}
+					const double val = sum * 0.5;  // 1/2
+					if ( cin == 0 && cout == 0 )
+						M.m00 = val;
+					if ( cin == 0 && cout == 1 )
+						M.m01 = val;
+					if ( cin == 1 && cout == 0 )
+						M.m10 = val;
+					if ( cin == 1 && cout == 1 )
+						M.m11 = val;
+				}
+			}
+			return M;
+		}
+
+		/**
 		 * @brief Exact correlation for z = x ⊞ a (var-const).
 		 *
 		 * API contract:
-		 *   - alpha: mask for x
-		 *   - beta : mask for z
-		 *   - a    : n-bit constant (will be masked to n bits)
-		 *   - n    : word size (1..64), LSB = bit 0
+		 *   - alpha    : mask for x
+		 *   - constant : n-bit constant (will be masked to n bits)
+		 *   - beta     : mask for z
+		 *   - n        : word size (1..64), LSB = bit 0
 		 *
 		 * Returns corr ∈ [-1, 1].
 		 */
-		static inline double corr_add_const( uint64_t alpha, uint64_t beta, uint64_t a, int n ) noexcept
+		static inline double correlation_add_const( uint64_t alpha, uint64_t constant, uint64_t beta, int n ) noexcept
 		{
 			const uint64_t MASK = ( n == 64 ) ? ~0ULL : ( ( 1ULL << n ) - 1ULL );
-			a &= MASK;
+			constant &= MASK;
 			double v0 = 1.0, v1 = 0.0;	// v_0 = [1,0]
 			for ( int i = 0; i < n; ++i )
 			{
-				const Mat2 Mi = make_Mi_add_const_bit( bit_u64( alpha, i ), bit_u64( beta, i ), bit_u64( a, i ) );
+				const Matrix2D Mi = make_Mi_add_const_bit( bit_u64( alpha, i ), bit_u64( constant, i ), bit_u64( beta, i ) );
 				double	   nv0, nv1;
-				Mat2::mul_row( v0, v1, Mi, nv0, nv1 );
+				Matrix2D::multiply_row( v0, v1, Mi, nv0, nv1 );
 				v0 = nv0;
 				v1 = nv1;
 			}
@@ -314,11 +325,11 @@ namespace neoalz
 		 * @brief Exact correlation for z = x ⊟ a (var-const subtraction).
 		 *        Implemented as z = x ⊞ ((-a) mod 2^n).
 		 */
-		static inline double corr_sub_const( uint64_t alpha, uint64_t beta, uint64_t a, int n ) noexcept
+		static inline double correlation_sub_const( uint64_t alpha, uint64_t constant, uint64_t beta, int n ) noexcept
 		{
 			const uint64_t MASK = ( n == 64 ) ? ~0ULL : ( ( 1ULL << n ) - 1ULL );
-			const uint64_t a_neg = ( ( ~a ) + 1ULL ) & MASK;  // two's complement mod 2^n
-			return corr_add_const( alpha, beta, a_neg, n );
+			const uint64_t neg_constant = ( ( ~constant ) + 1ULL ) & MASK;  // two's complement mod 2^n
+			return correlation_add_const( alpha, neg_constant, beta, n );
 		}
 
 		// ============================================================================
@@ -345,49 +356,49 @@ namespace neoalz
 		/**
 		 * @brief Helper to wrap corr → LinearCorrelation.
 		 */
-		static inline LinearCorrelation make_lc( double corr ) noexcept
+		static inline LinearCorrelation make_lc( double correlation ) noexcept
 		{
-			const double w = linear_weight_from_corr( corr );
-			return LinearCorrelation { corr, w };
+			const double w = linear_weight_from_corr( correlation );
+			return LinearCorrelation { correlation, w };
 		}
 
 		// -- var-const: 32/64 --------------------------------------------------------
 
-		static inline LinearCorrelation corr_add_x_plus_const32( uint32_t alpha, uint32_t beta, uint32_t K, int nbits = 32 ) noexcept
+		static inline LinearCorrelation linear_x_modulo_plus_const32( uint32_t alpha, uint32_t K, uint32_t beta, int nbits = 32 ) noexcept
 		{
-			const double c = corr_add_const( alpha, beta, K, nbits );
+			const double c = correlation_add_const( alpha, K, beta, nbits );
 			return make_lc( c );
 		}
 
-		static inline LinearCorrelation corr_add_x_minus_const32( uint32_t alpha, uint32_t beta, uint32_t C, int nbits = 32 ) noexcept
+		static inline LinearCorrelation linear_x_modulo_minus_const32( uint32_t alpha, uint32_t C, uint32_t beta, int nbits = 32 ) noexcept
 		{
-			const double c = corr_sub_const( alpha, beta, C, nbits );
+			const double c = correlation_sub_const( alpha, C, beta, nbits );
 			return make_lc( c );
 		}
 
-		static inline LinearCorrelation corr_add_x_plus_const64( uint64_t alpha, uint64_t beta, uint64_t K, int nbits = 64 ) noexcept
+		static inline LinearCorrelation linear_x_modulo_plus_const64( uint64_t alpha, uint64_t K, uint64_t beta, int nbits = 64 ) noexcept
 		{
-			const double c = corr_add_const( alpha, beta, K, nbits );
+			const double c = correlation_add_const( alpha, K, beta, nbits );
 			return make_lc( c );
 		}
 
-		static inline LinearCorrelation corr_add_x_minus_const64( uint64_t alpha, uint64_t beta, uint64_t C, int nbits = 64 ) noexcept
+		static inline LinearCorrelation linear_x_modulo_minus_const64( uint64_t alpha, uint64_t C, uint64_t beta, int nbits = 64 ) noexcept
 		{
-			const double c = corr_sub_const( alpha, beta, C, nbits );
+			const double c = correlation_sub_const( alpha, C, beta, nbits );
 			return make_lc( c );
 		}
 
 		// -- var-var: 32/64 ----------------------------------------------------------
 
-		static inline LinearCorrelation corr_add_varvar32( uint32_t alpha, uint32_t gamma, uint32_t beta, int nbits = 32 ) noexcept
+		static inline LinearCorrelation linear_add_varvar32( uint32_t alpha, uint32_t beta, uint32_t gamma, int nbits = 32 ) noexcept
 		{
-			const double c = corr_add_varvar( alpha, gamma, beta, nbits );
+			const double c = correlation_add_varvar( alpha, beta, gamma, nbits );
 			return make_lc( c );
 		}
 
-		static inline LinearCorrelation corr_add_varvar64( uint64_t alpha, uint64_t gamma, uint64_t beta, int nbits = 64 ) noexcept
+		static inline LinearCorrelation linear_add_varvar64( uint64_t alpha, uint64_t beta, uint64_t gamma, int nbits = 64 ) noexcept
 		{
-			const double c = corr_add_varvar( alpha, gamma, beta, nbits );
+			const double c = correlation_add_varvar( alpha, beta, gamma, nbits );
 			return make_lc( c );
 		}
 
@@ -417,50 +428,6 @@ namespace neoalz
 		 *
 		 * For var-var addition (x ⊞ y), call corr_add_varvar32(α_x, γ_y, β_z, n).
 		 */
-
-		// ============================================================================
-		//                          Optional: tiny self-checks
-		// ============================================================================
-
-		/**
-		 * These checks are O(n) per call and safe. Define the macro below to enable.
-		 *
-		 *  - Zero masks ⇒ corr = 1.
-		 *  - Subtraction vs addition of two's complement constant.
-		 *  - Bound: |corr| ∈ [0,1].
-		 *
-		 * NOTE: Keep disabled by default to avoid any runtime in hot paths.
-		 */
-// #define NEOALZ_ENABLE_SMALL_SELFTESTS 1
-#ifdef NEOALZ_ENABLE_SMALL_SELFTESTS
-		static inline void _selftest_linear_cor_add()
-		{
-			// 32-bit simple probes
-			{
-				const int n = 32;
-				// All-zero masks ⇒ corr = 1
-				double c1 = corr_add_const( 0, 0, 0x12345678u, n );
-				double c2 = corr_add_varvar( 0, 0, 0, n );
-				if ( std::fabs( c1 - 1.0 ) > 1e-12 )
-					__builtin_trap();
-				if ( std::fabs( c2 - 1.0 ) > 1e-12 )
-					__builtin_trap();
-			}
-			{
-				const int n = 32;
-				// Subtraction equals addition of two's complement
-				const uint32_t A = 0xDEADBEEFu;
-				const uint32_t alpha = 0xA5A5A5A5u;
-				const uint32_t beta = 0x5A5A5A5Au;
-				const double   c_sub = corr_sub_const( alpha, beta, A, n );
-				const double   c_add = corr_add_const( alpha, beta, ( ~uint64_t( A ) + 1ULL ) & 0xFFFFFFFFULL, n );
-				if ( std::fabs( c_sub - c_add ) > 1e-12 )
-					__builtin_trap();
-				if ( !( std::fabs( c_sub ) <= 1.0 + 1e-12 ) )
-					__builtin_trap();
-			}
-		}
-#endif	// NEOALZ_ENABLE_SMALL_SELFTESTS
 
 		// ============================================================================
 		//                 Explanation (math → code) — long notes
@@ -509,4 +476,4 @@ namespace neoalz
 		*/
 
 	}  // namespace arx_operators
-}  // namespace neoalz
+}  // namespace TwilightDream

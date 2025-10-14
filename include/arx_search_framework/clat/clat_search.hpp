@@ -13,10 +13,10 @@
 #include <cstdint>
 #include <vector>
 #include <functional>
-#include "clat_linear.hpp"
-#include "neoalzette_linear_model.hpp"
+// NOTE: clat_linear.hpp is not required here; keep interfaces minimal.
+// Removed dependency on legacy linear model; interfaces provided by clat_builder.hpp
 
-namespace neoalz {
+namespace TwilightDream {
 
 /**
  * @brief Algorithm 3實現：ARX線性軌道搜索
@@ -298,4 +298,4 @@ private:
     }
 };
 
-} // namespace neoalz
+} // namespace TwilightDream
