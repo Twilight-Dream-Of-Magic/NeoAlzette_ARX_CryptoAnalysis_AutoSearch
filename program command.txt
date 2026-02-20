@@ -1,0 +1,18 @@
+test_neoalzette_differential_best_search.exe strategy time --round-count 1 --delta-a 0x0 --delta-b 0x1 --total-work 10000000
+test_neoalzette_differential_best_search.exe strategy time --round-count 1 --batch --total-work 10000000 --thread-count 24 --seed 0x1234
+
+
+test_neoalzette_differential_best_search.exe strategy time --round-count 1 --delta-a 0x0000 --delta-b 0x0102  --process-sec 10
+
+.\test_neoalzette_differential_best_search.exe auto --round-count 1 --delta-a 0x80404100 --delta-b 0x41004041 ^
+  --auto-breadth-jobs 2048 --auto-breadth-top_candidates 32 --auto-breadth-threads 0 ^
+  --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 ^
+  --auto-breadth-maxnodes 16777216 ^
+  --auto-deep-maxnodes 200000000 --auto-target-best-weight 8 ^
+  --progress-sec 60 --memory-ballast --memory-headroom-mib 2048
+
+.\test_neoalzette_differential_best_search.exe auto --round-count 1 --delta-a 0x00004100 --delta-b 0x00004041 --auto-breadth-jobs 4096 --auto-breadth-top_candidates 64 --auto-breadth-threads 16 --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 --auto-breadth-maxnodes 16777216 --auto-deep-maxnodes 0 --auto-max-time 1d --auto-target-best-weight 8 --progress-sec 60 --memory-ballast --memory-headroom-mib 2048
+
+
+test_neoalzette_differential_best_search.exe strategy time --round-count R --delta-a  0x0000 --delta-b 0x0102 --target-best-weight W
+test_neoalzette_differential_best_search.exe auto --round-count R --delta-a  0x0000 --delta-b 0x0102 --auto-target-best-weight --auto-max-time 18h
