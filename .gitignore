@@ -1,4 +1,6 @@
 build/
+out/
+_smoke_5min/
 cmake-build*/
 *.o
 *.obj

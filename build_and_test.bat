@@ -1,53 +1,70 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-chcp 65001
+chcp 65001 >nul
 
-rem ============================================================================
-rem build_and_test.bat
-rem
-rem Goals:
-rem   - Robust on Windows cmd.exe even when the repo path contains spaces and []
-rem   - Clear errors; minimal cmd escaping tricks
-rem
-rem Requirements:
-rem   - Set env var MINGW64 to your mingw64\bin directory containing clang++.exe
-rem     OR pass: --mingw64 "X:\path\to\mingw64\bin"
-rem
-rem Options:
-rem   --no-pause     : do not pause at the end (useful for CI / scripting)
-rem   --no-clean     : do not delete old .exe files before building
-rem   --build-only   : build but do not run tests
-rem   --run-only     : run tests without rebuilding
-rem ============================================================================
+rem Build-only compile check for non-root AutoSearch modules.
+rem Root-level .cpp research programs are intentionally not built or run here.
 
 set "NO_PAUSE=0"
 set "DO_CLEAN=1"
-set "DO_BUILD=1"
-set "DO_RUN=1"
+set "BUILD_DIR="
+set "GENERATOR="
 
 :parse_args
 if "%~1"=="" goto :args_done
-if /I "%~1"=="--no-pause"   (set "NO_PAUSE=1" & shift & goto :parse_args)
-if /I "%~1"=="--no-clean"   (set "DO_CLEAN=0" & shift & goto :parse_args)
-if /I "%~1"=="--build-only" (set "DO_RUN=0"   & shift & goto :parse_args)
-if /I "%~1"=="--run-only"   (set "DO_BUILD=0" & set "DO_CLEAN=0" & shift & goto :parse_args)
-if /I "%~1"=="--mingw64" (
+if /I "%~1"=="--no-pause" (
+  set "NO_PAUSE=1"
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="--no-clean" (
+  set "DO_CLEAN=0"
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="--build-only" (
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="build-only" (
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="--smoke" (
+  set "DO_CLEAN=0"
+  set "NO_PAUSE=1"
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="--build-dir" (
   if "%~2"=="" (
-    echo ERROR: --mingw64 requires a path argument.
+    echo ERROR: --build-dir requires a path argument.
     exit /b 2
   )
-  set "MINGW64=%~2"
+  set "BUILD_DIR=%~2"
   shift
   shift
   goto :parse_args
+)
+if /I "%~1"=="--generator" (
+  if "%~2"=="" (
+    echo ERROR: --generator requires a generator name.
+    exit /b 2
+  )
+  set "GENERATOR=%~2"
+  shift
+  shift
+  goto :parse_args
+)
+if /I "%~1"=="--run-only" (
+  echo ERROR: this script no longer runs programs.
+  exit /b 2
 )
 echo ERROR: unknown argument: %~1
 exit /b 2
 
 :args_done
-
-rem ---- Detect project root (prefer script dir; fallback to current dir) ----
 set "ROOT="
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%.") do set "ROOT_SCRIPT=%%~fI"
@@ -63,161 +80,63 @@ if "%ERRORLEVEL%"=="0" (
 
 if not defined ROOT (
   echo ERROR: cannot locate project root directory.
-  echo   Tried:
-  echo     script dir = "%ROOT_SCRIPT%"
-  echo     current dir = "%ROOT_CWD%"
-  echo   Expected file:
-  echo     test_neoalzette_arx_trace.cpp
+  goto :fail_nopopd
+)
+
+if not defined BUILD_DIR set "BUILD_DIR=%ROOT%\build\compile-check"
+
+where cmake.exe >nul 2>nul
+if errorlevel 1 (
+  echo ERROR: cmake.exe not found on PATH.
   goto :fail_nopopd
 )
 
 pushd "%ROOT%"
-if errorlevel 1 (
-  echo ERROR: cannot cd to project root: "%ROOT%"
-  goto :fail_nopopd
-)
+if errorlevel 1 goto :fail_nopopd
 
 echo ============================================================
-echo Build and Test - NeoAlzette AutoSearch (clang++ / C++20)
+echo Build - NeoAlzette AutoSearch compile checks
 echo ============================================================
-echo.
-
-rem Trim leading spaces (common when env vars are edited manually)
-for /f "tokens=* delims= " %%A in ("%MINGW64%") do set "MINGW64=%%A"
-
-if "%MINGW64%"=="" (
-  echo ERROR: MINGW64 is not set.
-  echo   Example:
-  echo     set MINGW64=E:\[About Programming]\WindowsLibsGCC\mingw64\bin
-  echo   Or:
-  echo     build_and_test.bat --mingw64 "E:\...\mingw64\bin"
-  goto :fail
-)
-
-set "CXX=%MINGW64%\clang++.exe"
-if not exist "%CXX%" (
-  echo ERROR: clang++.exe not found at:
-  echo   "%CXX%"
-  goto :fail
-)
-
-set "INCLUDE_DIR=%ROOT%\include"
-set "CORE_SRC=%ROOT%\src\neoalzette\neoalzette_core.cpp"
-
-if not exist "%CORE_SRC%" (
-  echo ERROR: core source not found:
-  echo   "%CORE_SRC%"
-  goto :fail
-)
-
-set "COMMON_FLAGS=-std=c++20 -O3 -static -Wall -Wextra"
-
-echo Toolchain:
-echo   ROOT = "%ROOT%"
-echo   CXX  = "%CXX%"
+echo ROOT      = "%ROOT%"
+echo BUILD_DIR = "%BUILD_DIR%"
 echo.
 
 if "%DO_CLEAN%"=="1" (
-  echo [1/3] Cleaning old builds...
-  del /Q test_neoalzette_arx_trace.exe 2>nul
-  del /Q test_neoalzette_differential_best_search.exe 2>nul
-  del /Q test_neoalzette_linear_best_search.exe 2>nul
-  del /Q test_neoalzette_arx_probabilistic_neutral_bits.exe 2>nul
-  del /Q test_neoalzette_arx_probabilistic_neutral_bits_average.exe 2>nul
-  del /Q test_nb_*.exe 2>nul
+  echo [1/3] Cleaning build directory...
+  if exist "%BUILD_DIR%" rmdir /S /Q "%BUILD_DIR%"
   echo.
 ) else (
-  echo [1/3] Cleaning old builds... ^(skipped: --no-clean^)
+  echo [1/3] Cleaning build directory... ^(skipped^)
   echo.
 )
 
-if "%DO_BUILD%"=="1" (
-  echo [2/3] Compiling ^(5 targets^)^...
-  echo.
-
-  echo   - test_neoalzette_arx_trace.exe
-  "%CXX%" %COMMON_FLAGS% -I"%INCLUDE_DIR%" -I"%ROOT%" "%ROOT%\test_neoalzette_arx_trace.cpp" "%CORE_SRC%" -o "%ROOT%\test_neoalzette_arx_trace.exe"
-  if errorlevel 1 goto :build_failed
-  echo.
-
-  echo   - test_neoalzette_differential_best_search.exe
-  "%CXX%" %COMMON_FLAGS% -I"%INCLUDE_DIR%" -I"%ROOT%" "%ROOT%\test_neoalzette_differential_best_search.cpp" "%ROOT%\test_arx_operator_self_test.cpp" "%ROOT%\common\runtime_component.cpp" "%CORE_SRC%" -o "%ROOT%\test_neoalzette_differential_best_search.exe"
-  if errorlevel 1 goto :build_failed
-  echo.
-
-  echo   - test_neoalzette_linear_best_search.exe
-  "%CXX%" %COMMON_FLAGS% -I"%INCLUDE_DIR%" -I"%ROOT%" "%ROOT%\test_neoalzette_linear_best_search.cpp" "%ROOT%\test_arx_operator_self_test.cpp" "%ROOT%\common\runtime_component.cpp" "%CORE_SRC%" -o "%ROOT%\test_neoalzette_linear_best_search.exe"
-  if errorlevel 1 goto :build_failed
-  echo.
-
-  echo   - test_neoalzette_arx_probabilistic_neutral_bits.exe
-  "%CXX%" %COMMON_FLAGS% -I"%INCLUDE_DIR%" -I"%ROOT%" "%ROOT%\test_neoalzette_arx_probabilistic_neutral_bits.cpp" "%CORE_SRC%" -o "%ROOT%\test_neoalzette_arx_probabilistic_neutral_bits.exe"
-  if errorlevel 1 goto :build_failed
-  echo.
-
-  echo   - test_neoalzette_arx_probabilistic_neutral_bits_average.exe
-  "%CXX%" %COMMON_FLAGS% -I"%INCLUDE_DIR%" -I"%ROOT%" "%ROOT%\test_neoalzette_arx_probabilistic_neutral_bits_average.cpp" "%CORE_SRC%" -o "%ROOT%\test_neoalzette_arx_probabilistic_neutral_bits_average.exe"
-  if errorlevel 1 goto :build_failed
-  echo.
-
-  echo OK: compilation successful.
-  echo.
+echo [2/3] Configuring CMake...
+if defined GENERATOR (
+  cmake -S "%ROOT%" -B "%BUILD_DIR%" -G "%GENERATOR%" -DNEOALZETTE_BUILD_PROGRAMS=OFF -DCMAKE_BUILD_TYPE=Release
 ) else (
-  echo [2/3] Compiling... ^(skipped: --run-only^)
-  echo.
+  cmake -S "%ROOT%" -B "%BUILD_DIR%" -DNEOALZETTE_BUILD_PROGRAMS=OFF -DCMAKE_BUILD_TYPE=Release
 )
+if errorlevel 1 goto :fail
+echo.
 
-if "%DO_RUN%"=="1" (
-  echo [3/3] Running tests...
-  echo ============================================================
-
-  if not exist "%ROOT%\test_neoalzette_differential_best_search.exe" (
-    echo ERROR: missing executable: test_neoalzette_differential_best_search.exe
-    goto :fail
-  )
-  "%ROOT%\test_neoalzette_differential_best_search.exe" --selftest
-
-  echo.
-  echo ============================================================
-  if not exist "%ROOT%\test_neoalzette_linear_best_search.exe" (
-    echo ERROR: missing executable: test_neoalzette_linear_best_search.exe
-    goto :fail
-  )
-  "%ROOT%\test_neoalzette_linear_best_search.exe" --selftest
-
-  echo.
-  echo ============================================================
-  if not exist "%ROOT%\test_neoalzette_arx_probabilistic_neutral_bits.exe" (
-    echo ERROR: missing executable: test_neoalzette_arx_probabilistic_neutral_bits.exe
-    goto :fail
-  )
-  "%ROOT%\test_neoalzette_arx_probabilistic_neutral_bits.exe"
-
-  echo.
-  echo ============================================================
-  echo OK: all done.
-  echo ============================================================
-) else (
-  echo [3/3] Running tests... ^(skipped: --build-only^)
-)
-
+echo [3/3] Building non-root compile targets...
+cmake --build "%BUILD_DIR%" --config Release --target neoalzette_linear_best_search_compile neoalzette_differential_best_search_compile --parallel
+if errorlevel 1 goto :fail
+echo.
+echo OK: compile checks completed. No program was run.
 goto :ok
 
 :is_project_root
 setlocal
 set "CAND=%~1"
-if exist "%CAND%\test_neoalzette_arx_trace.cpp" (
+if exist "%CAND%\CMakeLists.txt" (
   endlocal & exit /b 0
 )
 endlocal & exit /b 1
 
-:build_failed
-echo.
-echo ERROR: compilation failed.
-goto :fail
-
 :fail
 echo.
+echo ERROR: build failed.
 if "%NO_PAUSE%"=="0" pause
 popd
 exit /b 1
@@ -232,4 +151,3 @@ echo.
 if "%NO_PAUSE%"=="0" pause
 popd
 exit /b 0
-rem (end)
