@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <mutex>
@@ -36,6 +37,11 @@ namespace
 	using TwilightDream::runtime_component::governor_poll_system_memory_once;
 	using TwilightDream::runtime_component::IosStateGuard;
 	using TwilightDream::runtime_component::MemoryBallast;
+	using TwilightDream::runtime_component::alloc_rebuildable;
+	using TwilightDream::runtime_component::release_rebuildable_pool;
+	using TwilightDream::runtime_component::memory_pressure_set_checkpoint_fn;
+	using TwilightDream::runtime_component::memory_pressure_set_must_live_degrade_fn;
+	using TwilightDream::runtime_component::print_system_memory_status_line;
 	using TwilightDream::runtime_component::query_system_memory_info;
 	using TwilightDream::runtime_component::resolve_worker_thread_count_for_command_line_interface;
 	using TwilightDream::runtime_component::run_worker_threads_with_monitor;
@@ -72,7 +78,20 @@ namespace
 		bool		   strategy_batch_was_requested = false;
 
 		bool selftest = false;
+		std::uint64_t selftest_seed = 0;
+		bool		  selftest_seed_was_provided = false;
+		std::size_t	  selftest_case_count = 0;
+		bool		  selftest_case_count_was_provided = false;
 		bool show_help = false;
+		bool resume_was_provided = false;
+		std::string resume_path {};
+		bool checkpoint_out_was_provided = false;
+		std::string checkpoint_out_path {};
+		std::uint64_t checkpoint_every_seconds = 1800;
+		bool checkpoint_every_seconds_was_provided = false;
+		bool search_configuration_was_provided = false;
+		bool search_mode_was_provided = false;
+		bool round_count_was_provided = false;
 
 		// Memory (safety-first "near-limit" mode): keep some headroom, optionally allocate/release ballast to stay near the limit.
 		bool memory_ballast_enabled = false;
@@ -80,6 +99,8 @@ namespace
 		// Memory budgeting for PMR bounded resource
 		std::uint64_t memory_headroom_mib = 0;	// 0 = default headroom rule
 		bool		  memory_headroom_mib_was_provided = false;
+		std::uint64_t rebuildable_reserve_mib = 0; // 0 = disabled
+		bool		  rebuildable_reserve_mib_was_provided = false;
 
 		int			  round_count = 1;
 		std::uint32_t output_branch_a_mask = 0;
@@ -128,6 +149,67 @@ namespace
 		}
 		return s;
 	}
+
+	static BinaryCheckpointManager* g_pressure_binary_checkpoint = nullptr;
+
+	static void pressure_checkpoint_callback()
+	{
+		if ( g_pressure_binary_checkpoint )
+			g_pressure_binary_checkpoint->mark_best_changed();
+	}
+
+	static void pressure_degrade_callback()
+	{
+		// Disable TLS caches (best-effort) to reduce memory pressure.
+		g_disable_linear_tls_caches.store( true, std::memory_order_relaxed );
+	}
+
+	struct PressureCallbackGuard
+	{
+		bool previous_disable = false;
+		explicit PressureCallbackGuard( BinaryCheckpointManager* checkpoint )
+		{
+			previous_disable = g_disable_linear_tls_caches.load( std::memory_order_relaxed );
+			g_pressure_binary_checkpoint = checkpoint;
+			memory_pressure_set_checkpoint_fn( &pressure_checkpoint_callback );
+			memory_pressure_set_must_live_degrade_fn( &pressure_degrade_callback );
+		}
+		~PressureCallbackGuard()
+		{
+			memory_pressure_set_checkpoint_fn( nullptr );
+			memory_pressure_set_must_live_degrade_fn( nullptr );
+			g_pressure_binary_checkpoint = nullptr;
+			g_disable_linear_tls_caches.store( previous_disable, std::memory_order_relaxed );
+		}
+	};
+
+	struct RebuildableReserveGuard
+	{
+		void*		  ptr = nullptr;
+		std::uint64_t bytes = 0;
+		explicit RebuildableReserveGuard( std::uint64_t reserve_mib )
+		{
+			if ( reserve_mib == 0 )
+				return;
+			const std::uint64_t mib = 1024ull * 1024ull;
+			bytes = reserve_mib * mib;
+			ptr = alloc_rebuildable( bytes, true );
+			IosStateGuard g( std::cout );
+			if ( ptr )
+			{
+				std::cout << "[Rebuildable] reserved_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( bytes ) << "\n";
+			}
+			else
+			{
+				std::cout << "[Rebuildable] reserve_failed_mib=" << reserve_mib << "\n";
+			}
+		}
+		~RebuildableReserveGuard()
+		{
+			if ( ptr )
+				release_rebuildable_pool();
+		}
+	};
 
 	static inline const char* to_string( CommandLineOptions::FrontendMode m )
 	{
@@ -217,13 +299,14 @@ namespace
 				  << "  " << executable_name << " detail --round-count R --output-branch-a-mask MASK_A --output-branch-b-mask MASK_B [options]\n\n"
 				  << "Auto mode (two-stage: breadth scan -> deep search, requires explicit output masks):\n"
 				  << "  " << executable_name << " auto --round-count R --output-branch-a-mask MASK_A --output-branch-b-mask MASK_B [options]\n"
+				  << "    (breadth) strict enumeration over many candidate output mask pairs.\n"
 				  << "  auto options:\n"
 				  << "    --auto-breadth-jobs N           Alias: --auto-breadth-max-runs. Candidate count (default=256).\n"
 				  << "    --auto-breadth-top_candidates K Keep/print top K breadth candidates (default=3). Deep runs the best one.\n"
 				  << "    --auto-breadth-threads T        Breadth threads (0=auto).\n"
 				  << "    --auto-breadth-seed S           RNG seed for breadth candidates (default: derived from start masks).\n"
 				  << "    --auto-breadth-maxnodes N       Breadth per-candidate maximum_search_nodes.\n"
-				  << "    --auto-breadth-hcap N           Breadth maximum_round_predecessors cap.\n"
+				  << "    --auto-breadth-hcap N           Ignored (breadth is strict).\n"
 				  << "    --auto-breadth-max-bitflips F   Structured neighborhood: max random bit flips (default=4).\n"
 				  << "    --auto-print-breadth-candidates  Print ALL breadth candidates (warning: verbose).\n"
 				  << "    --auto-deep-maxnodes N          Deep per-candidate maximum_search_nodes (0=unlimited).\n"
@@ -231,6 +314,8 @@ namespace
 				  << "    --auto-target-best-weight W     Stop once best_weight <= W.\n\n"
 				  << "Common options:\n"
 				  << "  --selftest                       Run ARX operator self-tests and exit.\n"
+				  << "  --selftest-seed SEED             Seed for regression selftests (hex or decimal).\n"
+				  << "  --selftest-cases N               Extra random selftest cases (default: 8).\n"
 				  << "  --help, -h                       Show this help.\n"
 				  << "  --mode strategy|detail|auto      Select CLI frontend (when no subcommand is used).\n\n"
 				  << "Common parameters:\n"
@@ -238,22 +323,30 @@ namespace
 				  << "  --output-branch-a-mask MASK_A    Alias: --out-mask-a, --mask-a\n"
 				  << "  --output-branch-b-mask MASK_B    Alias: --out-mask-b, --mask-b\n\n"
 				  << "Search options (detail):\n"
+				  << "  --search-mode strict|fast       Candidate semantics (strict disables caps; fast keeps heuristics).\n"
+				  << "  --enable-linear-z-shell         Enable exact z-shell enumeration for var-var addition (strict path).\n"
+				  << "  --disable-linear-z-shell        Disable z-shell enumeration (use split-8 SLR).\n"
+				  << "  --linear-z-shell-max-candidates N\n"
+				  << "                                   Abort z-shell enumeration after N candidates (0=unlimited; fallback to split-8 SLR).\n"
 				  << "  --maximum-search-nodes N         Alias: --maxnodes. Node budget (0=unlimited). Default: 2000000\n"
 				  << "  --maximum-search-seconds T       Alias: --maxsec. Time budget (0=unlimited). Examples: 3600, 30d, 4w.\n"
 				  << "  --target-best-weight W           Alias: --target-weight. Stop early once best_weight <= W.\n"
-				  << "  --addition-weight-cap N          Alias: --add-weight-cap, --add. Per modular-addition weight cap (0..31).\n"
-				  << "  --maximum-addition-candidates N  Alias: --add-candidates. Cap enumerated (v,w) pairs per addition (0=no cap).\n"
-				  << "  --maximum-constant-subtraction-candidates N\n"
-				  << "                                   Alias: --sub-candidates, --maxconst. Per-subconst candidate input masks.\n"
+				  << "  --addition-weight-cap N     Alias: --add. Per modular-addition weight cap (0..31).\n"
+				  << "  --constant-subtraction-weight-cap N\n"
+				  << "                             Alias: --subtract. Per modular-subtraction-constant weight cap (0..32).\n"
 				  << "  --maximum-injection-input-masks N\n"
 				  << "                                   Alias: --injection-candidates, --maximum-injection-candidates.\n"
 				  << "  --maximum-round-predecessors N   Alias: --max-round-predecessors, --heuristic-branch-cap, --hcap.\n"
 				  << "  --disable-state-memoization      Alias: --nomemo. Disable memoization (less memory, usually slower).\n"
 				  << "  --enable-verbose-output          Alias: --verbose. Verbose output.\n\n"
 				  << "Memory options:\n"
-				  << "  --memory-headroom-mib M          Keep ~M MiB of free RAM headroom for PMR budgeting.\n"
-				  << "                                   Default: max(2GiB, min(4GiB, avail/10)).\n"
-				  << "  --memory-ballast                Adaptive ballast: allocate/release RAM to keep free RAM near headroom.\n\n"
+				  << "  --memory-headroom-mib M          Keep ~M MiB of free RAM headroom (default: ~6-8GiB).\n"
+				  << "  --memory-ballast                Adaptive ballast: allocate/release RAM to keep free RAM near headroom.\n"
+				  << "  --rebuildable-reserve-mib M      Reserve M MiB from rebuildable pool (touched, released on pressure).\n\n"
+				  << "Checkpoint options:\n"
+				  << "  --resume PATH                   Resume deep search from binary checkpoint (single-run only; skips breadth).\n"
+				  << "  --checkpoint-out PATH           Write binary checkpoint (default: auto_checkpoint_linear_R... .ckpt).\n"
+				  << "  --checkpoint-every-seconds S    Periodic checkpoint interval (default=1800). 0=disable timer.\n\n"
 				  << "Batch options (detail/strategy):\n"
 				  << "  --batch-job-count N              Alias: --batch. Enable batch mode with N random output masks.\n"
 				  << "  --batch-file PATH                Batch mode from file. Each non-empty line is either:\n"
@@ -318,6 +411,24 @@ namespace
 			return false;
 		value_out = static_cast<std::uint64_t>( v );
 		return true;
+	}
+
+	static bool parse_search_mode( const char* text, SearchMode& out )
+	{
+		if ( !text )
+			return false;
+		const std::string mode = to_lowercase_ascii( std::string( text ) );
+		if ( mode == "strict" )
+		{
+			out = SearchMode::Strict;
+			return true;
+		}
+		if ( mode == "fast" )
+		{
+			out = SearchMode::Fast;
+			return true;
+		}
+		return false;
 	}
 
 	static bool parse_duration_in_seconds( const char* text, std::uint64_t& seconds_out )
@@ -445,8 +556,6 @@ namespace
 			command_line_options.search_configuration.maximum_search_nodes = saturating_mul_u64( 25'000'000ull, std::uint64_t( scale ) );
 			command_line_options.search_configuration.enable_state_memoization = true;
 			command_line_options.search_configuration.maximum_round_predecessors = 4096;
-			command_line_options.search_configuration.maximum_addition_candidates = 65'536;
-			command_line_options.search_configuration.maximum_constant_subtraction_candidates = 64;
 			command_line_options.search_configuration.maximum_injection_input_masks = 4096;
 			break;
 		case CommandLineOptions::StrategyPreset::Balanced:
@@ -454,8 +563,6 @@ namespace
 			command_line_options.search_configuration.maximum_search_nodes = saturating_mul_u64( 5'000'000ull, std::uint64_t( scale ) );
 			command_line_options.search_configuration.enable_state_memoization = true;
 			command_line_options.search_configuration.maximum_round_predecessors = 512;
-			command_line_options.search_configuration.maximum_addition_candidates = 16'384;
-			command_line_options.search_configuration.maximum_constant_subtraction_candidates = 16;
 			command_line_options.search_configuration.maximum_injection_input_masks = 256;
 			break;
 		case CommandLineOptions::StrategyPreset::SpaceFirst:
@@ -463,8 +570,6 @@ namespace
 			command_line_options.search_configuration.maximum_search_nodes = saturating_mul_u64( 1'000'000ull, std::uint64_t( scale ) );
 			command_line_options.search_configuration.enable_state_memoization = false;
 			command_line_options.search_configuration.maximum_round_predecessors = 256;
-			command_line_options.search_configuration.maximum_addition_candidates = 4096;
-			command_line_options.search_configuration.maximum_constant_subtraction_candidates = 8;
 			command_line_options.search_configuration.maximum_injection_input_masks = 64;
 			break;
 		case CommandLineOptions::StrategyPreset::None:
@@ -473,8 +578,6 @@ namespace
 			command_line_options.search_configuration.maximum_search_nodes = saturating_mul_u64( 5'000'000ull, std::uint64_t( scale ) );
 			command_line_options.search_configuration.enable_state_memoization = true;
 			command_line_options.search_configuration.maximum_round_predecessors = 512;
-			command_line_options.search_configuration.maximum_addition_candidates = 16'384;
-			command_line_options.search_configuration.maximum_constant_subtraction_candidates = 16;
 			command_line_options.search_configuration.maximum_injection_input_masks = 256;
 			break;
 		}
@@ -519,12 +622,86 @@ namespace
 				continue;
 			}
 
-			if ( ( argument == "--round-count" || argument == "--rounds" ) && argument_index + 1 < argument_count )
+			if ( argument == "--resume" && argument_index + 1 < argument_count )
+			{
+				command_line_options.resume_path = argument_values[ ++argument_index ];
+				command_line_options.resume_was_provided = true;
+			}
+			else if ( argument == "--checkpoint-out" && argument_index + 1 < argument_count )
+			{
+				command_line_options.checkpoint_out_path = argument_values[ ++argument_index ];
+				command_line_options.checkpoint_out_was_provided = true;
+			}
+			else if ( ( argument == "--checkpoint-every-seconds" || argument == "--checkpoint-sec" ) && argument_index + 1 < argument_count )
+			{
+				std::uint64_t seconds = 0;
+				if ( !parse_duration_in_seconds( argument_values[ ++argument_index ], seconds ) )
+					return false;
+				command_line_options.checkpoint_every_seconds = seconds;
+				command_line_options.checkpoint_every_seconds_was_provided = true;
+			}
+			else if ( argument == "--selftest-seed" && argument_index + 1 < argument_count )
+			{
+				std::uint64_t seed = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], seed ) )
+					return false;
+				command_line_options.selftest_seed = seed;
+				command_line_options.selftest_seed_was_provided = true;
+			}
+			else if ( argument == "--selftest-cases" && argument_index + 1 < argument_count )
+			{
+				std::uint64_t count = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], count ) )
+					return false;
+				if ( count > std::numeric_limits<std::size_t>::max() )
+					return false;
+				command_line_options.selftest_case_count = static_cast<std::size_t>( count );
+				command_line_options.selftest_case_count_was_provided = true;
+			}
+			else if ( argument == "--selftest-seed" && argument_index + 1 < argument_count )
+			{
+				std::uint64_t seed = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], seed ) )
+					return false;
+				command_line_options.selftest_seed = seed;
+				command_line_options.selftest_seed_was_provided = true;
+			}
+			else if ( argument == "--selftest-cases" && argument_index + 1 < argument_count )
+			{
+				std::uint64_t count = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], count ) )
+					return false;
+				if ( count > std::numeric_limits<std::size_t>::max() )
+					return false;
+				command_line_options.selftest_case_count = static_cast<std::size_t>( count );
+				command_line_options.selftest_case_count_was_provided = true;
+			}
+			else if ( argument == "--selftest-seed" && argument_index + 1 < argument_count )
+			{
+				std::uint64_t seed = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], seed ) )
+					return false;
+				command_line_options.selftest_seed = seed;
+				command_line_options.selftest_seed_was_provided = true;
+			}
+			else if ( argument == "--selftest-cases" && argument_index + 1 < argument_count )
+			{
+				std::uint64_t count = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], count ) )
+					return false;
+				if ( count > std::numeric_limits<std::size_t>::max() )
+					return false;
+				command_line_options.selftest_case_count = static_cast<std::size_t>( count );
+				command_line_options.selftest_case_count_was_provided = true;
+			}
+
+			else if ( ( argument == "--round-count" || argument == "--rounds" ) && argument_index + 1 < argument_count )
 			{
 				int round_count = 0;
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], round_count ) || round_count <= 0 )
 					return false;
 				command_line_options.round_count = round_count;
+				command_line_options.round_count_was_provided = true;
 			}
 			else if ( ( argument == "--output-branch-a-mask" || argument == "--out-mask-a" || argument == "--mask-a" ) && argument_index + 1 < argument_count )
 			{
@@ -544,6 +721,7 @@ namespace
 				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], maximum_search_nodes ) )
 					return false;
 				command_line_options.search_configuration.maximum_search_nodes = maximum_search_nodes;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--maximum-search-seconds" || argument == "--maxsec" ) && argument_index + 1 < argument_count )
 			{
@@ -551,6 +729,7 @@ namespace
 				if ( !parse_duration_in_seconds( argument_values[ ++argument_index ], seconds ) )
 					return false;
 				command_line_options.search_configuration.maximum_search_seconds = seconds;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--target-best-weight" || argument == "--target-weight" ) && argument_index + 1 < argument_count )
 			{
@@ -558,6 +737,33 @@ namespace
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], w ) )
 					return false;
 				command_line_options.search_configuration.target_best_weight = w;
+				command_line_options.search_configuration_was_provided = true;
+			}
+			else if ( argument == "--search-mode" && argument_index + 1 < argument_count )
+			{
+				SearchMode mode = SearchMode::Fast;
+				if ( !parse_search_mode( argument_values[ ++argument_index ], mode ) )
+					return false;
+				command_line_options.search_configuration.search_mode = mode;
+				command_line_options.search_mode_was_provided = true;
+			}
+			else if ( argument == "--enable-linear-z-shell" || argument == "--linear-z-shell" )
+			{
+				command_line_options.search_configuration.enable_addition_z_shell = true;
+				command_line_options.search_configuration_was_provided = true;
+			}
+			else if ( argument == "--disable-linear-z-shell" )
+			{
+				command_line_options.search_configuration.enable_addition_z_shell = false;
+				command_line_options.search_configuration_was_provided = true;
+			}
+			else if ( ( argument == "--linear-z-shell-max-candidates" || argument == "--z-shell-max-candidates" || argument == "--z-shell-max" ) && argument_index + 1 < argument_count )
+			{
+				std::size_t v = 0;
+				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
+					return false;
+				command_line_options.search_configuration.addition_z_shell_max_candidates = v;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--maximum-round-predecessors" || argument == "--max-round-predecessors" || argument == "--heuristic-branch-cap" || argument == "--hcap" ) && argument_index + 1 < argument_count )
 			{
@@ -565,6 +771,7 @@ namespace
 				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.maximum_round_predecessors = v;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--addition-weight-cap" || argument == "--add-weight-cap" || argument == "--add" ) && argument_index + 1 < argument_count )
 			{
@@ -572,27 +779,15 @@ namespace
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.addition_weight_cap = std::clamp( v, 0, 31 );
+				command_line_options.search_configuration_was_provided = true;
 			}
-			else if ( ( argument == "--constant-subtraction-weight-cap" || argument == "--subconst-weight-cap" || argument == "--subconst-cap" || argument == "--subcap" ) && argument_index + 1 < argument_count )
+			else if ( ( argument == "--constant-subtraction-weight-cap" || argument == "--subconst-weight-cap" || argument == "--subconst-cap" || argument == "--subcap" || argument == "--subtract" ) && argument_index + 1 < argument_count )
 			{
 				int v = 0;
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.constant_subtraction_weight_cap = std::clamp( v, 0, 32 );
-			}
-			else if ( ( argument == "--maximum-addition-candidates" || argument == "--add-candidates" ) && argument_index + 1 < argument_count )
-			{
-				std::size_t v = 0;
-				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
-					return false;
-				command_line_options.search_configuration.maximum_addition_candidates = v;
-			}
-			else if ( ( argument == "--maximum-constant-subtraction-candidates" || argument == "--sub-candidates" || argument == "--maxconst" ) && argument_index + 1 < argument_count )
-			{
-				std::size_t v = 0;
-				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
-					return false;
-				command_line_options.search_configuration.maximum_constant_subtraction_candidates = v;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--maximum-injection-input-masks" || argument == "--maximum-injection-candidates" ) && argument_index + 1 < argument_count )
 			{
@@ -600,18 +795,22 @@ namespace
 				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.maximum_injection_input_masks = v;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( argument == "--disable-state-memoization" || argument == "--nomemo" )
 			{
 				command_line_options.search_configuration.enable_state_memoization = false;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( argument == "--enable-state-memoization" )
 			{
 				command_line_options.search_configuration.enable_state_memoization = true;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( argument == "--enable-verbose-output" || argument == "--verbose" )
 			{
 				command_line_options.search_configuration.enable_verbose_output = true;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--batch-job-count" || argument == "--batch" ) && argument_index + 1 < argument_count )
 			{
@@ -665,6 +864,14 @@ namespace
 			{
 				command_line_options.memory_ballast_enabled = true;
 			}
+			else if ( ( argument == "--rebuildable-reserve-mib" || argument == "--rebuildable-reserve" ) && argument_index + 1 < argument_count )
+			{
+				std::uint64_t mib = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], mib ) )
+					return false;
+				command_line_options.rebuildable_reserve_mib = mib;
+				command_line_options.rebuildable_reserve_mib_was_provided = true;
+			}
 			else
 			{
 				std::cerr << "ERROR: unknown argument: " << argument << "\n";
@@ -691,7 +898,7 @@ namespace
 
 		const bool batch_enabled = ( command_line_options.batch_job_count > 0 ) || command_line_options.batch_job_file_was_provided;
 
-		if ( !batch_enabled )
+		if ( !batch_enabled && !command_line_options.resume_was_provided )
 		{
 			if ( !command_line_options.output_masks_were_provided )
 				return false;
@@ -704,7 +911,7 @@ namespace
 		}
 		if ( batch_enabled )
 			return true;
-		return command_line_options.output_masks_were_provided;
+		return command_line_options.output_masks_were_provided || command_line_options.resume_was_provided;
 	}
 
 	static bool parse_command_line_strategy_mode( int argument_count, char** argument_values, int start_index, CommandLineOptions& command_line_options )
@@ -741,7 +948,26 @@ namespace
 				continue;
 			}
 
-			if ( ( argument == "--preset" || argument == "--strategy" ) && argument_index + 1 < argument_count )
+			if ( argument == "--resume" && argument_index + 1 < argument_count )
+			{
+				command_line_options.resume_path = argument_values[ ++argument_index ];
+				command_line_options.resume_was_provided = true;
+			}
+			else if ( argument == "--checkpoint-out" && argument_index + 1 < argument_count )
+			{
+				command_line_options.checkpoint_out_path = argument_values[ ++argument_index ];
+				command_line_options.checkpoint_out_was_provided = true;
+			}
+			else if ( ( argument == "--checkpoint-every-seconds" || argument == "--checkpoint-sec" ) && argument_index + 1 < argument_count )
+			{
+				std::uint64_t seconds = 0;
+				if ( !parse_duration_in_seconds( argument_values[ ++argument_index ], seconds ) )
+					return false;
+				command_line_options.checkpoint_every_seconds = seconds;
+				command_line_options.checkpoint_every_seconds_was_provided = true;
+			}
+
+			else if ( ( argument == "--preset" || argument == "--strategy" ) && argument_index + 1 < argument_count )
 			{
 				if ( !parse_strategy_preset( argument_values[ ++argument_index ], preset ) )
 					return false;
@@ -752,6 +978,7 @@ namespace
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], round_count ) || round_count <= 0 )
 					return false;
 				command_line_options.round_count = round_count;
+				command_line_options.round_count_was_provided = true;
 			}
 			else if ( ( argument == "--output-branch-a-mask" || argument == "--out-mask-a" || argument == "--mask-a" ) && argument_index + 1 < argument_count )
 			{
@@ -819,6 +1046,7 @@ namespace
 					return false;
 				maximum_search_nodes_override = n;
 				maximum_search_nodes_was_provided = true;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--target-best-weight" || argument == "--target-weight" ) && argument_index + 1 < argument_count )
 			{
@@ -826,6 +1054,15 @@ namespace
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], w ) )
 					return false;
 				command_line_options.search_configuration.target_best_weight = w;
+				command_line_options.search_configuration_was_provided = true;
+			}
+			else if ( argument == "--search-mode" && argument_index + 1 < argument_count )
+			{
+				SearchMode mode = SearchMode::Fast;
+				if ( !parse_search_mode( argument_values[ ++argument_index ], mode ) )
+					return false;
+				command_line_options.search_configuration.search_mode = mode;
+				command_line_options.search_mode_was_provided = true;
 			}
 			else if ( argument == "--seed" && argument_index + 1 < argument_count )
 			{
@@ -858,6 +1095,14 @@ namespace
 			else if ( argument == "--memory-ballast" )
 			{
 				command_line_options.memory_ballast_enabled = true;
+			}
+			else if ( ( argument == "--rebuildable-reserve-mib" || argument == "--rebuildable-reserve" ) && argument_index + 1 < argument_count )
+			{
+				std::uint64_t mib = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], mib ) )
+					return false;
+				command_line_options.rebuildable_reserve_mib = mib;
+				command_line_options.rebuildable_reserve_mib_was_provided = true;
 			}
 			else
 			{
@@ -902,7 +1147,7 @@ namespace
 			return true;
 
 		const bool batch_enabled = ( command_line_options.batch_job_count > 0 ) || command_line_options.batch_job_file_was_provided;
-		if ( !batch_enabled )
+		if ( !batch_enabled && !command_line_options.resume_was_provided )
 		{
 			if ( !command_line_options.output_masks_were_provided )
 			{
@@ -944,6 +1189,7 @@ namespace
 			if ( !parse_signed_integer_32( argument_values[ argument_index ], round_count ) || round_count <= 0 )
 				return false;
 			command_line_options.round_count = round_count;
+			command_line_options.round_count_was_provided = true;
 			++argument_index;
 		}
 		if ( argument_index < argument_count && !is_option( argument_values[ argument_index ] ) )
@@ -979,12 +1225,32 @@ namespace
 				continue;
 			}
 
-			if ( ( argument == "--round-count" || argument == "--rounds" ) && argument_index + 1 < argument_count )
+			if ( argument == "--resume" && argument_index + 1 < argument_count )
+			{
+				command_line_options.resume_path = argument_values[ ++argument_index ];
+				command_line_options.resume_was_provided = true;
+			}
+			else if ( argument == "--checkpoint-out" && argument_index + 1 < argument_count )
+			{
+				command_line_options.checkpoint_out_path = argument_values[ ++argument_index ];
+				command_line_options.checkpoint_out_was_provided = true;
+			}
+			else if ( ( argument == "--checkpoint-every-seconds" || argument == "--checkpoint-sec" ) && argument_index + 1 < argument_count )
+			{
+				std::uint64_t seconds = 0;
+				if ( !parse_duration_in_seconds( argument_values[ ++argument_index ], seconds ) )
+					return false;
+				command_line_options.checkpoint_every_seconds = seconds;
+				command_line_options.checkpoint_every_seconds_was_provided = true;
+			}
+
+			else if ( ( argument == "--round-count" || argument == "--rounds" ) && argument_index + 1 < argument_count )
 			{
 				int round_count = 0;
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], round_count ) || round_count <= 0 )
 					return false;
 				command_line_options.round_count = round_count;
+				command_line_options.round_count_was_provided = true;
 			}
 			else if ( ( argument == "--output-branch-a-mask" || argument == "--out-mask-a" || argument == "--mask-a" ) && argument_index + 1 < argument_count )
 			{
@@ -1005,13 +1271,15 @@ namespace
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.addition_weight_cap = std::clamp( v, 0, 31 );
+				command_line_options.search_configuration_was_provided = true;
 			}
-			else if ( ( argument == "--constant-subtraction-weight-cap" || argument == "--subconst-weight-cap" || argument == "--subconst-cap" || argument == "--subcap" ) && argument_index + 1 < argument_count )
+			else if ( ( argument == "--constant-subtraction-weight-cap" || argument == "--subconst-weight-cap" || argument == "--subconst-cap" || argument == "--subcap" || argument == "--subtract" ) && argument_index + 1 < argument_count )
 			{
 				int v = 0;
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.constant_subtraction_weight_cap = std::clamp( v, 0, 32 );
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--maximum-search-nodes" || argument == "--maxnodes" ) && argument_index + 1 < argument_count )
 			{
@@ -1019,6 +1287,7 @@ namespace
 				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], maximum_search_nodes ) )
 					return false;
 				command_line_options.search_configuration.maximum_search_nodes = maximum_search_nodes;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--maximum-round-predecessors" || argument == "--max-round-predecessors" || argument == "--hcap" ) && argument_index + 1 < argument_count )
 			{
@@ -1026,20 +1295,7 @@ namespace
 				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.maximum_round_predecessors = v;
-			}
-			else if ( ( argument == "--maximum-addition-candidates" || argument == "--add-candidates" ) && argument_index + 1 < argument_count )
-			{
-				std::size_t v = 0;
-				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
-					return false;
-				command_line_options.search_configuration.maximum_addition_candidates = v;
-			}
-			else if ( ( argument == "--maximum-constant-subtraction-candidates" || argument == "--sub-candidates" || argument == "--maxconst" ) && argument_index + 1 < argument_count )
-			{
-				std::size_t v = 0;
-				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
-					return false;
-				command_line_options.search_configuration.maximum_constant_subtraction_candidates = v;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( ( argument == "--maximum-injection-input-masks" || argument == "--injection-candidates" ) && argument_index + 1 < argument_count )
 			{
@@ -1047,14 +1303,17 @@ namespace
 				if ( !parse_unsigned_size( argument_values[ ++argument_index ], v ) )
 					return false;
 				command_line_options.search_configuration.maximum_injection_input_masks = v;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( argument == "--disable-state-memoization" || argument == "--nomemo" )
 			{
 				command_line_options.search_configuration.enable_state_memoization = false;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( argument == "--enable-state-memoization" )
 			{
 				command_line_options.search_configuration.enable_state_memoization = true;
+				command_line_options.search_configuration_was_provided = true;
 			}
 
 			else if ( ( argument == "--auto-breadth-jobs" || argument == "--auto-breadth-max-runs" ) && argument_index + 1 < argument_count )
@@ -1122,6 +1381,7 @@ namespace
 				if ( !parse_duration_in_seconds( argument_values[ ++argument_index ], seconds ) )
 					return false;
 				command_line_options.auto_max_time_seconds = seconds;
+				command_line_options.search_configuration_was_provided = true;
 			}
 			else if ( argument == "--auto-target-best-weight" && argument_index + 1 < argument_count )
 			{
@@ -1129,6 +1389,15 @@ namespace
 				if ( !parse_signed_integer_32( argument_values[ ++argument_index ], w ) )
 					return false;
 				command_line_options.auto_target_best_weight = w;
+				command_line_options.search_configuration_was_provided = true;
+			}
+			else if ( argument == "--search-mode" && argument_index + 1 < argument_count )
+			{
+				SearchMode mode = SearchMode::Fast;
+				if ( !parse_search_mode( argument_values[ ++argument_index ], mode ) )
+					return false;
+				command_line_options.search_configuration.search_mode = mode;
+				command_line_options.search_mode_was_provided = true;
 			}
 			else if ( argument == "--memory-headroom-mib" && argument_index + 1 < argument_count )
 			{
@@ -1141,6 +1410,14 @@ namespace
 			else if ( argument == "--memory-ballast" )
 			{
 				command_line_options.memory_ballast_enabled = true;
+			}
+			else if ( ( argument == "--rebuildable-reserve-mib" || argument == "--rebuildable-reserve" ) && argument_index + 1 < argument_count )
+			{
+				std::uint64_t mib = 0;
+				if ( !parse_unsigned_integer_64( argument_values[ ++argument_index ], mib ) )
+					return false;
+				command_line_options.rebuildable_reserve_mib = mib;
+				command_line_options.rebuildable_reserve_mib_was_provided = true;
 			}
 			else
 			{
@@ -1175,9 +1452,9 @@ namespace
 			return true;
 
 		// Auto mode requires explicit masks (no --seed fallback).
-		if ( !command_line_options.output_masks_were_provided )
+		if ( !command_line_options.output_masks_were_provided && !command_line_options.resume_was_provided )
 			return false;
-		if ( command_line_options.output_branch_a_mask == 0u && command_line_options.output_branch_b_mask == 0u )
+		if ( !command_line_options.resume_was_provided && command_line_options.output_branch_a_mask == 0u && command_line_options.output_branch_b_mask == 0u )
 			return false;
 		return true;
 	}
@@ -1264,9 +1541,117 @@ namespace
 		return std::pow( 2.0, -double( weight ) );
 	}
 
+	static bool configs_equal( const LinearBestSearchConfiguration& a, const LinearBestSearchConfiguration& b )
+	{
+		return a.round_count == b.round_count &&
+			a.addition_weight_cap == b.addition_weight_cap &&
+			a.constant_subtraction_weight_cap == b.constant_subtraction_weight_cap &&
+			a.enable_addition_z_shell == b.enable_addition_z_shell &&
+			a.addition_z_shell_max_candidates == b.addition_z_shell_max_candidates &&
+			a.maximum_injection_input_masks == b.maximum_injection_input_masks &&
+			a.maximum_round_predecessors == b.maximum_round_predecessors &&
+			a.maximum_search_nodes == b.maximum_search_nodes &&
+			a.maximum_search_seconds == b.maximum_search_seconds &&
+			a.target_best_weight == b.target_best_weight &&
+			a.enable_state_memoization == b.enable_state_memoization &&
+			a.enable_remaining_round_lower_bound == b.enable_remaining_round_lower_bound &&
+			a.remaining_round_min_weight == b.remaining_round_min_weight &&
+			a.auto_generate_remaining_round_lower_bound == b.auto_generate_remaining_round_lower_bound &&
+			a.remaining_round_lower_bound_generation_nodes == b.remaining_round_lower_bound_generation_nodes &&
+			a.remaining_round_lower_bound_generation_seconds == b.remaining_round_lower_bound_generation_seconds &&
+			a.strict_remaining_round_lower_bound == b.strict_remaining_round_lower_bound &&
+			a.enable_verbose_output == b.enable_verbose_output;
+	}
+
+	static SearchMode infer_search_mode_from_caps( const LinearBestSearchConfiguration& c )
+	{
+		if ( c.maximum_injection_input_masks == 0 &&
+			 c.maximum_round_predecessors == 0 )
+		{
+			return SearchMode::Strict;
+		}
+		return SearchMode::Fast;
+	}
+
+	static bool apply_search_mode_overrides( LinearBestSearchConfiguration& c )
+	{
+		if ( c.search_mode != SearchMode::Strict )
+			return false;
+
+		bool changed = false;
+		if ( c.maximum_injection_input_masks != 0 )
+		{
+			c.maximum_injection_input_masks = 0;
+			changed = true;
+		}
+		if ( c.maximum_round_predecessors != 0 )
+		{
+			c.maximum_round_predecessors = 0;
+			changed = true;
+		}
+		return changed;
+	}
+
+	static void normalize_config_for_compare( LinearBestSearchConfiguration& c )
+	{
+		if ( c.enable_remaining_round_lower_bound )
+		{
+			const bool generation_limited =
+				c.auto_generate_remaining_round_lower_bound &&
+				( c.remaining_round_lower_bound_generation_nodes != 0 || c.remaining_round_lower_bound_generation_seconds != 0 );
+			if ( generation_limited && c.strict_remaining_round_lower_bound )
+			{
+				c.enable_remaining_round_lower_bound = false;
+				c.remaining_round_min_weight.clear();
+			}
+
+			if ( c.enable_remaining_round_lower_bound )
+			{
+				auto& remaining_round_min_weight_table = c.remaining_round_min_weight;
+				if ( !remaining_round_min_weight_table.empty() )
+				{
+					if ( remaining_round_min_weight_table.size() < 1u )
+						remaining_round_min_weight_table.resize( 1u, 0 );
+					remaining_round_min_weight_table[ 0 ] = 0;
+					const std::size_t need = std::size_t( std::max( 0, c.round_count ) ) + 1u;
+					if ( remaining_round_min_weight_table.size() < need )
+						remaining_round_min_weight_table.resize( need, 0 );
+					for ( int& round_min_weight : remaining_round_min_weight_table )
+					{
+						if ( round_min_weight < 0 )
+							round_min_weight = 0;
+					}
+				}
+			}
+		}
+	}
+
+	static bool configs_compatible_for_resume( LinearBestSearchConfiguration a, LinearBestSearchConfiguration b )
+	{
+		normalize_config_for_compare( a );
+		normalize_config_for_compare( b );
+
+		const bool a_autogen_empty = a.auto_generate_remaining_round_lower_bound && a.remaining_round_min_weight.empty();
+		if ( a_autogen_empty )
+		{
+			// Allow auto-generated table to differ; require all other fields to match.
+			auto a_copy = a;
+			auto b_copy = b;
+			a_copy.remaining_round_min_weight.clear();
+			b_copy.remaining_round_min_weight.clear();
+			return configs_equal( a_copy, b_copy );
+		}
+		return configs_equal( a, b );
+	}
+
 	static int run_auto_mode( const CommandLineOptions& command_line_options )
 	{
 		// Auto mode is single-run only (no batch).
+		if ( command_line_options.resume_was_provided )
+		{
+			std::cerr << "[Auto] ERROR: resume is not compatible with auto mode (breadth stage is skipped).\n";
+			return 1;
+		}
 		if ( command_line_options.batch_job_count > 0 || command_line_options.batch_job_file_was_provided )
 		{
 			std::cerr << "[Auto] ERROR: auto mode does not support batch mode.\n";
@@ -1408,18 +1793,23 @@ namespace
 		}
 
 		LinearBestSearchConfiguration breadth_configuration = command_line_options.search_configuration;
+		breadth_configuration.search_mode = SearchMode::Strict;
 		breadth_configuration.round_count = command_line_options.round_count;
 		breadth_configuration.maximum_search_nodes = std::max<std::uint64_t>( 1, command_line_options.auto_breadth_maximum_search_nodes );
 		breadth_configuration.maximum_search_seconds = 0;
-		breadth_configuration.maximum_round_predecessors = command_line_options.auto_breadth_maximum_round_predecessors;
+		// Auto breadth policy: keep the legacy fast path for candidate generation.
+		breadth_configuration.enable_addition_z_shell = false;
+		breadth_configuration.addition_z_shell_max_candidates = 0;
+		apply_search_mode_overrides( breadth_configuration );
 		breadth_configuration.enable_verbose_output = false;
 
 		std::cout << "[Auto][Breadth] jobs=" << jobs.size() << "  threads=" << breadth_threads << "  seed=0x" << std::hex << seed << std::dec << ( command_line_options.auto_breadth_seed_was_provided ? "" : " (derived)" ) << "\n";
-		std::cout << "  per_candidate: maximum_search_nodes=" << breadth_configuration.maximum_search_nodes << "  maximum_round_predecessors=" << breadth_configuration.maximum_round_predecessors << "  maximum_addition_candidates=" << breadth_configuration.maximum_addition_candidates << "  maximum_constant_subtraction_candidates=" << breadth_configuration.maximum_constant_subtraction_candidates << "  maximum_injection_input_masks=" << breadth_configuration.maximum_injection_input_masks << "  maximum_bit_flips=" << command_line_options.auto_breadth_max_bit_flips << "  state_memoization=" << ( breadth_configuration.enable_state_memoization ? "on" : "off" ) << "\n";
+		std::cout << "  per_candidate: maximum_search_nodes=" << breadth_configuration.maximum_search_nodes << "  maximum_round_predecessors=" << breadth_configuration.maximum_round_predecessors << "  maximum_injection_input_masks=" << breadth_configuration.maximum_injection_input_masks << "  maximum_bit_flips=" << command_line_options.auto_breadth_max_bit_flips << "  state_memoization=" << ( breadth_configuration.enable_state_memoization ? "on" : "off" )
+				  << "  addition_z_shell=" << ( breadth_configuration.enable_addition_z_shell ? "on" : "off" )
+				  << "  addition_z_shell_max_candidates=" << breadth_configuration.addition_z_shell_max_candidates << "\n";
 		if ( mem.available_physical_bytes != 0 )
 		{
-			IosStateGuard g( std::cout );
-			std::cout << "  system_memory: available_physical_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( mem.available_physical_bytes ) << "\n";
+			print_system_memory_status_line( std::cout, mem, "  system_memory: " );
 		}
 		std::cout << "\n";
 
@@ -1593,7 +1983,7 @@ namespace
 
 					IosStateGuard g( std::cout );
 					std::cout << "[Auto][Breadth] progress " << done << "/" << total << " (" << std::fixed << std::setprecision( 2 ) << ( 100.0 * double( done ) / double( total ) ) << "%)"
-							  << "  jobs_per_sec=" << std::setprecision( 2 ) << rate << "  elapsed_sec=" << std::setprecision( 2 ) << elapsed;
+							  << "  jobs_per_second=" << std::setprecision( 2 ) << rate << "  elapsed_seconds=" << std::setprecision( 2 ) << elapsed;
 					if ( has_best )
 					{
 						std::cout << "  best_w=" << best_snapshot.best_weight << "  best_start=";
@@ -1659,14 +2049,19 @@ namespace
 		// Stage 2: deep search on the best candidate (selected from the top-K pool)
 		// ---------------------------------------------------------------------
 		LinearBestSearchConfiguration deep_configuration = command_line_options.search_configuration;
+		deep_configuration.search_mode = SearchMode::Strict;
 		deep_configuration.round_count = command_line_options.round_count;
 		// Deep stage: remove the breadth-only branching limiter.
 		deep_configuration.maximum_round_predecessors = 0;
 		deep_configuration.maximum_search_nodes = command_line_options.auto_deep_maximum_search_nodes;	// 0=unlimited
 		deep_configuration.maximum_search_seconds = ( deep_configuration.maximum_search_nodes == 0 ) ? command_line_options.auto_max_time_seconds : 0;
 		deep_configuration.enable_verbose_output = true;
+		// Auto deep policy: always use strict z-shell enumeration for var-var addition.
+		deep_configuration.enable_addition_z_shell = true;
+		deep_configuration.addition_z_shell_max_candidates = 0;
 		if ( command_line_options.auto_target_best_weight >= 0 )
 			deep_configuration.target_best_weight = command_line_options.auto_target_best_weight;
+		apply_search_mode_overrides( deep_configuration );
 
 		const AutoCandidate& selected = top_candidates.front();
 
@@ -1675,6 +2070,10 @@ namespace
 		std::cout << "  ";
 		print_word32_hex( "mask_b=", selected.start_mask_b );
 		std::cout << "\n";
+		std::cout << "  search_mode=strict (breadth=strict)\n";
+		std::cout << "  strict_caps=0 (max_injection_input_masks,max_round_predecessors)\n";
+		std::cout << "  addition_z_shell=" << ( deep_configuration.enable_addition_z_shell ? "on" : "off" )
+				  << "  addition_z_shell_max_candidates=" << deep_configuration.addition_z_shell_max_candidates << "\n";
 		if ( deep_configuration.target_best_weight >= 0 )
 		{
 			std::cout << "  target_best_weight=" << deep_configuration.target_best_weight << "  (|corr| >= 2^-" << deep_configuration.target_best_weight << ")\n";
@@ -1691,12 +2090,37 @@ namespace
 		const std::string		   checkpoint_path = BestWeightCheckpointWriter::default_path( command_line_options.round_count, selected.start_mask_a, selected.start_mask_b );
 		if ( checkpoint.open_append( checkpoint_path ) )
 		{
-			std::cout << "[Auto][Deep] checkpoint_file=" << checkpoint_path << " (append on best-weight changes)\n\n";
+			std::cout << "[Automatic][DeepSearch] checkpoint_log_path=" << checkpoint_path << "\n";
+			std::cout << "[Automatic][DeepSearch] checkpoint_log_write_mode=append_on_best_weight_changes\n\n";
 		}
 		else
 		{
-			std::cout << "[Auto][Deep] WARNING: cannot open checkpoint file for writing: " << checkpoint_path << "\n\n";
+			std::cout << "[Automatic][DeepSearch] WARNING: cannot open checkpoint log file for writing: " << checkpoint_path << "\n\n";
 		}
+
+		BinaryCheckpointManager binary_checkpoint {};
+		if ( command_line_options.checkpoint_out_was_provided || command_line_options.checkpoint_every_seconds_was_provided )
+		{
+			if ( command_line_options.checkpoint_out_was_provided && command_line_options.checkpoint_out_path.empty() )
+			{
+				std::cerr << "[Automatic][DeepSearch] ERROR: --checkpoint-out requires a non-empty path.\n";
+				memory_governor_disable_for_run();
+				return 1;
+			}
+			const std::string path = command_line_options.checkpoint_out_was_provided ? command_line_options.checkpoint_out_path :
+				default_binary_checkpoint_path( command_line_options.round_count, selected.start_mask_a, selected.start_mask_b );
+			binary_checkpoint.path = path;
+			binary_checkpoint.every_seconds = command_line_options.checkpoint_every_seconds;
+			std::cout << "[Automatic][DeepSearch] binary_checkpoint_output_path=" << binary_checkpoint.path << "\n";
+			std::cout << "[Automatic][DeepSearch] binary_checkpoint_interval_seconds=" << binary_checkpoint.every_seconds << "\n";
+			std::cout << "[Automatic][DeepSearch] binary_checkpoint_write_triggers=best_weight_change";
+			if ( binary_checkpoint.every_seconds != 0 )
+				std::cout << ",periodic_timer";
+			std::cout << "\n\n";
+		}
+
+		RebuildableReserveGuard rebuildable_reserve( command_line_options.rebuildable_reserve_mib );
+		PressureCallbackGuard	 pressure_guard( binary_checkpoint.enabled() ? &binary_checkpoint : nullptr );
 
 		BestSearchResult best_result {};
 		const std::string prefix = "[Job#1@0] ";
@@ -1705,7 +2129,7 @@ namespace
 		{
 			const int								  seed_weight = selected.best_weight;
 			const std::vector<LinearTrailStepRecord>* seed_trail = selected.trail.empty() ? nullptr : &selected.trail;
-			best_result = run_linear_best_search( selected.start_mask_a, selected.start_mask_b, deep_configuration, true, deep_progress_sec, true, seed_weight, seed_trail, checkpoint.out ? &checkpoint : nullptr );
+			best_result = run_linear_best_search( selected.start_mask_a, selected.start_mask_b, deep_configuration, true, deep_progress_sec, true, seed_weight, seed_trail, checkpoint.out ? &checkpoint : nullptr, binary_checkpoint.enabled() ? &binary_checkpoint : nullptr );
 		}
 		catch ( const std::bad_alloc& )
 		{
@@ -1721,6 +2145,243 @@ namespace
 
 		print_result( best_result );
 		memory_governor_disable_for_run();
+		return 0;
+	}
+
+	static int run_resume_mode( const CommandLineOptions& command_line_options )
+	{
+		if ( !command_line_options.resume_was_provided || command_line_options.resume_path.empty() )
+		{
+			std::cerr << "[Resume] ERROR: --resume PATH is required.\n";
+			return 1;
+		}
+		if ( command_line_options.batch_job_count > 0 || command_line_options.batch_job_file_was_provided || command_line_options.strategy_batch_was_requested )
+		{
+			std::cerr << "[Resume] ERROR: resume does not support batch mode.\n";
+			return 1;
+		}
+		if ( command_line_options.frontend_mode == CommandLineOptions::FrontendMode::Auto )
+		{
+			std::cerr << "[Resume] ERROR: resume is not compatible with auto mode (breadth stage is skipped).\n";
+			return 1;
+		}
+		if ( command_line_options.batch_thread_count > 1 )
+		{
+			std::cerr << "[Resume] ERROR: resume requires single-thread deep search.\n";
+			return 1;
+		}
+		if ( command_line_options.batch_seed_was_provided )
+		{
+			std::cerr << "[Resume] ERROR: --seed is not applicable when resuming.\n";
+			return 1;
+		}
+
+		const SystemMemoryInfo mem = query_system_memory_info();
+		const std::uint64_t	   avail_bytes = mem.available_physical_bytes;
+		std::uint64_t		   headroom_bytes = ( command_line_options.strategy_target_headroom_bytes != 0 ) ? command_line_options.strategy_target_headroom_bytes : compute_memory_headroom_bytes( avail_bytes, command_line_options.memory_headroom_mib, command_line_options.memory_headroom_mib_was_provided );
+		if ( avail_bytes != 0 && headroom_bytes > avail_bytes )
+			headroom_bytes = avail_bytes;
+
+		pmr_configure_for_run( avail_bytes, headroom_bytes );
+		memory_governor_enable_for_run( headroom_bytes );
+		memory_governor_set_poll_fn( &governor_poll_system_memory_once );
+
+		MemoryBallast memory_ballast( headroom_bytes );
+		if ( command_line_options.memory_ballast_enabled && headroom_bytes != 0 )
+		{
+			IosStateGuard g( std::cout );
+			std::cout << "[MemoryBallast] enabled  headroom_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( headroom_bytes ) << "\n";
+			memory_ballast.start();
+		}
+
+		const std::size_t cache_per_thread = command_line_options.cache_was_provided ? command_line_options.cache_max_entries_per_thread : std::size_t( 262144 );
+		g_injection_cache_max_entries_per_thread = cache_per_thread;
+		g_shared_injection_cache_branch_a.configure( command_line_options.shared_cache_total_entries, command_line_options.shared_cache_shards );
+		g_shared_injection_cache_branch_b.configure( command_line_options.shared_cache_total_entries, command_line_options.shared_cache_shards );
+
+		auto cleanup = [ & ]() {
+			memory_governor_disable_for_run();
+			g_shared_injection_cache_branch_a.clear_and_release_with_progress( "shared_cache.branch_a" );
+			g_shared_injection_cache_branch_b.clear_and_release_with_progress( "shared_cache.branch_b" );
+		};
+
+		LinearBestSearchContext  context {};
+		LinearCheckpointLoadResult load {};
+		if ( !read_linear_checkpoint( command_line_options.resume_path, load, context.memoization ) )
+		{
+			std::cerr << "[Resume] ERROR: failed to read binary checkpoint: " << command_line_options.resume_path << "\n";
+			std::cerr << "[Resume] ERROR: binary checkpoints must use the current format with a configuration extension tag; older checkpoints without tags are not supported.\n";
+			cleanup();
+			return 1;
+		}
+
+		const double elapsed_seconds = static_cast<double>( load.elapsed_usec ) / 1e6;
+		std::cout << "[Resume] checkpoint_path=" << command_line_options.resume_path << "\n";
+		std::cout << "[Resume] round_count=" << load.configuration.round_count << "  visited_node_count=" << load.visited_node_count << "  best_weight=" << load.best_weight << "\n";
+		{
+			IosStateGuard g( std::cout );
+			std::cout << "[Resume] elapsed_seconds_recorded_in_checkpoint=" << std::fixed << std::setprecision( 3 ) << elapsed_seconds << "\n";
+		}
+		print_word32_hex( "[Resume] start_output_mask_branch_a=", load.start_mask_a );
+		std::cout << " ";
+		print_word32_hex( "start_output_mask_branch_b=", load.start_mask_b );
+		std::cout << "\n";
+
+		if ( command_line_options.round_count_was_provided && command_line_options.round_count != load.configuration.round_count )
+		{
+			std::cerr << "[Resume] ERROR: --round-count does not match checkpoint (checkpoint_rounds=" << load.configuration.round_count << ").\n";
+			cleanup();
+			return 1;
+		}
+		if ( command_line_options.output_masks_were_provided &&
+			( command_line_options.output_branch_a_mask != load.start_mask_a || command_line_options.output_branch_b_mask != load.start_mask_b ) )
+		{
+			std::cerr << "[Resume] ERROR: provided output masks do not match checkpoint.\n";
+			cleanup();
+			return 1;
+		}
+		if ( command_line_options.search_configuration_was_provided )
+		{
+			LinearBestSearchConfiguration cli_config = command_line_options.search_configuration;
+			cli_config.round_count = command_line_options.round_count_was_provided ? command_line_options.round_count : load.configuration.round_count;
+			if ( !configs_compatible_for_resume( cli_config, load.configuration ) )
+			{
+				std::cerr << "[Resume] ERROR: search configuration does not match checkpoint.\n";
+				cleanup();
+				return 1;
+			}
+		}
+
+		context.configuration = load.configuration;
+		context.start_output_branch_a_mask = load.start_mask_a;
+		context.start_output_branch_b_mask = load.start_mask_b;
+		context.visited_node_count = load.visited_node_count;
+		context.best_weight = load.best_weight;
+		context.best_input_branch_a_mask = load.best_input_mask_a;
+		context.best_input_branch_b_mask = load.best_input_mask_b;
+		context.best_linear_trail = std::move( load.best_trail );
+		context.current_linear_trail = std::move( load.current_trail );
+
+		if ( command_line_options.search_mode_was_provided )
+		{
+			context.configuration.search_mode = command_line_options.search_configuration.search_mode;
+			apply_search_mode_overrides( context.configuration );
+			if ( context.configuration.search_mode == SearchMode::Strict )
+			{
+				std::cout << "  search_mode=strict (override)\n";
+				std::cout << "  strict_mode_candidate_limits=0 (maximum_injection_input_masks, maximum_round_predecessors)\n";
+			}
+			else
+			{
+				std::cout << "  search_mode=fast (override)\n";
+			}
+		}
+		else
+		{
+			context.configuration.search_mode = infer_search_mode_from_caps( context.configuration );
+			std::cout << "  search_mode=" << search_mode_to_string( context.configuration.search_mode ) << " (inferred)\n";
+		}
+		std::cout << "  addition_z_shell=" << ( context.configuration.enable_addition_z_shell ? "on" : "off" )
+				  << "  addition_z_shell_max_candidates=" << context.configuration.addition_z_shell_max_candidates << "\n";
+
+		const auto now = std::chrono::steady_clock::now();
+		context.run_start_time = ( load.elapsed_usec == 0 ) ? now : ( now - std::chrono::microseconds( load.elapsed_usec ) );
+		// Resume: if checkpoint already meets target, avoid extra search work.
+		if ( context.configuration.target_best_weight >= 0 && context.best_weight < INFINITE_WEIGHT && context.best_weight <= context.configuration.target_best_weight )
+		{
+			context.stop_due_to_target = true;
+		}
+
+		BinaryCheckpointManager binary_checkpoint {};
+		if ( command_line_options.checkpoint_out_was_provided && command_line_options.checkpoint_out_path.empty() )
+		{
+			std::cerr << "[Resume] ERROR: --checkpoint-out requires a non-empty path.\n";
+			cleanup();
+			return 1;
+		}
+		const std::string binary_checkpoint_path = command_line_options.checkpoint_out_was_provided ? command_line_options.checkpoint_out_path : command_line_options.resume_path;
+		if ( !binary_checkpoint_path.empty() )
+		{
+			binary_checkpoint.path = binary_checkpoint_path;
+			binary_checkpoint.every_seconds = command_line_options.checkpoint_every_seconds;
+			binary_checkpoint.pending_best = true;
+			context.binary_checkpoint = &binary_checkpoint;
+		}
+
+		if ( context.binary_checkpoint )
+		{
+			std::cout << "[Resume] binary_checkpoint_output_path=" << binary_checkpoint.path << "\n";
+			std::cout << "[Resume] binary_checkpoint_interval_seconds=" << binary_checkpoint.every_seconds << "\n";
+			std::cout << "[Resume] binary_checkpoint_write_triggers=best_weight_change";
+			if ( binary_checkpoint.every_seconds != 0 )
+				std::cout << ",periodic_timer";
+			std::cout << "\n";
+		}
+
+		RebuildableReserveGuard rebuildable_reserve( command_line_options.rebuildable_reserve_mib );
+		PressureCallbackGuard	 pressure_guard( context.binary_checkpoint );
+
+		if ( command_line_options.progress_every_seconds != 0 )
+		{
+			context.progress_every_seconds = command_line_options.progress_every_seconds;
+			context.progress_start_time = context.run_start_time;
+			context.progress_last_print_time = {};
+			context.progress_last_print_nodes = 0;
+			context.progress_print_masks = false;
+			{
+				std::scoped_lock lk( TwilightDream::runtime_component::cout_mutex() );
+				TwilightDream::runtime_component::print_progress_prefix( std::cout );
+				std::cout << "[Progress] enabled: every " << context.progress_every_seconds << " seconds (time-check granularity ~" << ( context.progress_node_mask + 1 ) << " nodes)\n\n";
+			}
+		}
+
+		if ( context.configuration.maximum_search_seconds != 0 )
+		{
+			context.time_limit_start_time = context.run_start_time;
+			// Resume: keep time-check granularity consistent with single-run logic.
+			// Match single-run granularity for time checks (avoids large overshoot for small limits).
+			if ( context.configuration.maximum_search_seconds <= 2 )
+				context.progress_node_mask = ( 1ull << 8 ) - 1;
+			else if ( context.configuration.maximum_search_seconds <= 10 )
+				context.progress_node_mask = ( 1ull << 10 ) - 1;
+			else
+				context.progress_node_mask = ( 1ull << 12 ) - 1;
+
+			// Resume: if elapsed time already exceeds limit, mark stop immediately.
+			const std::uint64_t limit_usec =
+				( context.configuration.maximum_search_seconds > ( std::numeric_limits<std::uint64_t>::max() / 1000000ull ) )
+					? std::numeric_limits<std::uint64_t>::max()
+					: ( context.configuration.maximum_search_seconds * 1000000ull );
+			if ( load.elapsed_usec >= limit_usec )
+				context.stop_due_to_time_limit = true;
+		}
+
+		LinearSearchCursor cursor = std::move( load.cursor );
+		LinearBestTrailSearcherCursor searcher( context, cursor );
+		searcher.search_from_cursor();
+
+		MatsuiSearchRunLinearResult result {};
+		result.nodes_visited = context.visited_node_count;
+		result.hit_maximum_search_nodes = ( context.configuration.maximum_search_nodes != 0 ) && ( context.visited_node_count >= context.configuration.maximum_search_nodes );
+		result.hit_time_limit = ( context.configuration.maximum_search_seconds != 0 ) && context.stop_due_to_time_limit;
+		result.hit_target_best_weight = context.stop_due_to_target;
+		result.best_input_branch_a_mask = context.best_input_branch_a_mask;
+		result.best_input_branch_b_mask = context.best_input_branch_b_mask;
+		if ( context.best_linear_trail.empty() )
+		{
+			result.found = false;
+			result.best_weight = INFINITE_WEIGHT;
+		}
+		else
+		{
+			result.found = true;
+			result.best_weight = context.best_weight;
+			result.best_linear_trail = std::move( context.best_linear_trail );
+		}
+
+		print_result( result );
+
+		cleanup();
 		return 0;
 	}
 
@@ -1764,6 +2425,7 @@ namespace
 
 		LinearBestSearchConfiguration search_configuration = command_line_options.search_configuration;
 		search_configuration.round_count = command_line_options.round_count;
+		const bool strict_overrides_applied = apply_search_mode_overrides( search_configuration );
 
 		std::cout << "round_count=" << search_configuration.round_count;
 		if ( command_line_options.output_masks_were_generated && command_line_options.batch_seed_was_provided )
@@ -1773,6 +2435,13 @@ namespace
 		std::cout << "\n";
 		print_word32_hex( "output_branch_b_mask=", command_line_options.output_branch_b_mask );
 		std::cout << "\n\n";
+
+		if ( search_configuration.search_mode == SearchMode::Strict )
+		{
+			std::cout << "[Strict] enabled: candidate caps forced to 0 (max_injection_input_masks,max_round_predecessors)\n";
+			if ( strict_overrides_applied )
+				std::cout << "\n";
+		}
 
 		// Strategy mode is meant to be "lazy": show all auto-derived knobs up-front.
 		if ( command_line_options.frontend_mode == CommandLineOptions::FrontendMode::Strategy )
@@ -1786,30 +2455,75 @@ namespace
 			std::cout << "  resolved_worker_threads=" << command_line_options.strategy_resolved_worker_threads << "\n";
 			if ( command_line_options.strategy_available_physical_bytes != 0 )
 			{
-				IosStateGuard g( std::cout );
-				std::cout << "  system_memory: total_physical_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( command_line_options.strategy_total_physical_bytes ) << "  available_physical_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( command_line_options.strategy_available_physical_bytes );
+				SystemMemoryInfo mem_now = query_system_memory_info();
+				if ( mem_now.total_physical_bytes == 0 )
+					mem_now.total_physical_bytes = command_line_options.strategy_total_physical_bytes;
+				if ( mem_now.available_physical_bytes == 0 )
+					mem_now.available_physical_bytes = command_line_options.strategy_available_physical_bytes;
+				print_system_memory_status_line( std::cout, mem_now, "  system_memory: " );
 				if ( command_line_options.strategy_target_headroom_bytes != 0 )
 				{
+					IosStateGuard g( std::cout );
 					std::cout << "  headroom_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( command_line_options.strategy_target_headroom_bytes );
 				}
 				if ( command_line_options.strategy_derived_budget_bytes != 0 )
 				{
+					IosStateGuard g( std::cout );
 					std::cout << "  derived_budget_gibibytes=" << std::fixed << std::setprecision( 2 ) << bytes_to_gibibytes( command_line_options.strategy_derived_budget_bytes );
 				}
-				std::cout << "\n";
+				if ( command_line_options.strategy_target_headroom_bytes != 0 || command_line_options.strategy_derived_budget_bytes != 0 )
+					std::cout << "\n";
 			}
-			std::cout << "  addition_weight_cap=" << search_configuration.addition_weight_cap << "  constant_subtraction_weight_cap=" << search_configuration.constant_subtraction_weight_cap << "  maximum_search_nodes=" << search_configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_configuration.maximum_search_seconds << "  target_best_weight=" << search_configuration.target_best_weight << "  maximum_round_predecessors=" << search_configuration.maximum_round_predecessors << "  maximum_addition_candidates=" << search_configuration.maximum_addition_candidates << "  maximum_constant_subtraction_candidates=" << search_configuration.maximum_constant_subtraction_candidates << "  maximum_injection_input_masks=" << search_configuration.maximum_injection_input_masks << "  enable_state_memoization=" << ( search_configuration.enable_state_memoization ? "on" : "off" ) << "\n\n";
+			std::cout << "  addition_weight_cap=" << search_configuration.addition_weight_cap << "  constant_subtraction_weight_cap=" << search_configuration.constant_subtraction_weight_cap
+					  << "  search_mode=" << search_mode_to_string( search_configuration.search_mode )
+					  << "  addition_z_shell=" << ( search_configuration.enable_addition_z_shell ? "on" : "off" )
+					  << "  addition_z_shell_max_candidates=" << search_configuration.addition_z_shell_max_candidates
+					  << "  maximum_search_nodes=" << search_configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_configuration.maximum_search_seconds
+					  << "  target_best_weight=" << search_configuration.target_best_weight << "  maximum_round_predecessors=" << search_configuration.maximum_round_predecessors
+					  << "  maximum_injection_input_masks=" << search_configuration.maximum_injection_input_masks << "  enable_state_memoization=" << ( search_configuration.enable_state_memoization ? "on" : "off" ) << "\n\n";
 		}
 		else
 		{
 			IosStateGuard g( std::cout );
-			std::cout << "[Config] maximum_search_nodes=" << search_configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_configuration.maximum_search_seconds << "  target_best_weight=" << search_configuration.target_best_weight << "  maximum_round_predecessors=" << search_configuration.maximum_round_predecessors << "  addition_weight_cap=" << search_configuration.addition_weight_cap << "  constant_subtraction_weight_cap=" << search_configuration.constant_subtraction_weight_cap << "  maximum_addition_candidates=" << search_configuration.maximum_addition_candidates << "  maximum_constant_subtraction_candidates=" << search_configuration.maximum_constant_subtraction_candidates << "  maximum_injection_input_masks=" << search_configuration.maximum_injection_input_masks << "  state_memoization=" << ( search_configuration.enable_state_memoization ? "on" : "off" ) << "\n\n";
+			std::cout << "[Config] maximum_search_nodes=" << search_configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_configuration.maximum_search_seconds
+					  << "  target_best_weight=" << search_configuration.target_best_weight << "  search_mode=" << search_mode_to_string( search_configuration.search_mode )
+					  << "  addition_z_shell=" << ( search_configuration.enable_addition_z_shell ? "on" : "off" )
+					  << "  addition_z_shell_max_candidates=" << search_configuration.addition_z_shell_max_candidates
+					  << "  maximum_round_predecessors=" << search_configuration.maximum_round_predecessors << "  addition_weight_cap=" << search_configuration.addition_weight_cap
+					  << "  constant_subtraction_weight_cap=" << search_configuration.constant_subtraction_weight_cap
+					  << "  maximum_injection_input_masks=" << search_configuration.maximum_injection_input_masks
+					  << "  state_memoization=" << ( search_configuration.enable_state_memoization ? "on" : "off" ) << "\n\n";
 		}
+
+		BinaryCheckpointManager binary_checkpoint {};
+		if ( command_line_options.checkpoint_out_was_provided || command_line_options.checkpoint_every_seconds_was_provided )
+		{
+			if ( command_line_options.checkpoint_out_was_provided && command_line_options.checkpoint_out_path.empty() )
+			{
+				std::cerr << "[Checkpoint] ERROR: --checkpoint-out requires a non-empty path.\n";
+				memory_governor_disable_for_run();
+				return 1;
+			}
+			const std::string path = command_line_options.checkpoint_out_was_provided ? command_line_options.checkpoint_out_path :
+				default_binary_checkpoint_path( search_configuration.round_count, command_line_options.output_branch_a_mask, command_line_options.output_branch_b_mask );
+			binary_checkpoint.path = path;
+			binary_checkpoint.every_seconds = command_line_options.checkpoint_every_seconds;
+			std::cout << "[Checkpoint] binary_checkpoint_output_path=" << binary_checkpoint.path << "\n";
+			std::cout << "[Checkpoint] binary_checkpoint_interval_seconds=" << binary_checkpoint.every_seconds << "\n";
+			std::cout << "[Checkpoint] binary_checkpoint_write_triggers=best_weight_change";
+			if ( binary_checkpoint.every_seconds != 0 )
+				std::cout << ",periodic_timer";
+			std::cout << "\n\n";
+		}
+
+		RebuildableReserveGuard rebuildable_reserve( command_line_options.rebuildable_reserve_mib );
+		PressureCallbackGuard	 pressure_guard( binary_checkpoint.enabled() ? &binary_checkpoint : nullptr );
 
 		BestSearchResult best_search_result {};
 		try
 		{
-			best_search_result = run_linear_best_search( command_line_options.output_branch_a_mask, command_line_options.output_branch_b_mask, search_configuration, true, command_line_options.progress_every_seconds );
+			best_search_result = run_linear_best_search( command_line_options.output_branch_a_mask, command_line_options.output_branch_b_mask, search_configuration, true, command_line_options.progress_every_seconds, false, INFINITE_WEIGHT, nullptr, nullptr,
+														 binary_checkpoint.enabled() ? &binary_checkpoint : nullptr );
 		}
 		catch ( const std::bad_alloc& )
 		{
@@ -1825,6 +2539,17 @@ namespace
 
 	static int run_batch_mode( const CommandLineOptions& command_line_options )
 	{
+		if ( command_line_options.resume_was_provided )
+		{
+			std::cerr << "[Batch] ERROR: resume is not supported in batch mode.\n";
+			return 1;
+		}
+		if ( command_line_options.checkpoint_out_was_provided || command_line_options.checkpoint_every_seconds_was_provided )
+		{
+			std::cerr << "[Batch] ERROR: binary checkpoints are supported only in single-run deep search.\n";
+			return 1;
+		}
+
 		if ( command_line_options.batch_job_count == 0 && !command_line_options.batch_job_file_was_provided )
 		{
 			std::cerr << "[Batch] ERROR: batch mode requested but no jobs provided.\n";
@@ -2023,16 +2748,25 @@ namespace
 		// Stage 1: breadth scan across ALL batch jobs (small budget, keep top-K)
 		// ---------------------------------------------------------------------
 		LinearBestSearchConfiguration breadth_configuration = command_line_options.search_configuration;
-		// Breadth stage: enforce a small per-job node budget and a predecessor limiter.
+		breadth_configuration.search_mode = SearchMode::Strict;
+		// Breadth stage: enforce a small per-job node budget (strict enumeration).
 		breadth_configuration.maximum_search_nodes = std::max<std::uint64_t>( 1, command_line_options.auto_breadth_maximum_search_nodes );
 		breadth_configuration.maximum_search_seconds = 0;
-		breadth_configuration.maximum_round_predecessors = command_line_options.auto_breadth_maximum_round_predecessors;
+		// Auto breadth policy: keep the legacy fast path for candidate generation.
+		breadth_configuration.enable_addition_z_shell = false;
+		breadth_configuration.addition_z_shell_max_candidates = 0;
+		apply_search_mode_overrides( breadth_configuration );
 		breadth_configuration.enable_verbose_output = false;
 
 		std::cout << "[Batch][Breadth] jobs=" << jobs.size() << "  threads=" << worker_threads_clamped << "  top_k=" << deep_top_k << "\n";
 		{
 			IosStateGuard g( std::cout );
-			std::cout << "  per_job: maximum_search_nodes=" << breadth_configuration.maximum_search_nodes << "  maximum_round_predecessors=" << breadth_configuration.maximum_round_predecessors << "  maximum_addition_candidates=" << breadth_configuration.maximum_addition_candidates << "  maximum_constant_subtraction_candidates=" << breadth_configuration.maximum_constant_subtraction_candidates << "  maximum_injection_input_masks=" << breadth_configuration.maximum_injection_input_masks << "  state_memoization=" << ( breadth_configuration.enable_state_memoization ? "on" : "off" ) << "\n\n";
+			std::cout << "  per_job: maximum_search_nodes=" << breadth_configuration.maximum_search_nodes << "  search_mode=strict"
+					  << "  maximum_round_predecessors=" << breadth_configuration.maximum_round_predecessors
+					  << "  maximum_injection_input_masks=" << breadth_configuration.maximum_injection_input_masks
+					  << "  state_memoization=" << ( breadth_configuration.enable_state_memoization ? "on" : "off" )
+					  << "  addition_z_shell=" << ( breadth_configuration.enable_addition_z_shell ? "on" : "off" )
+					  << "  addition_z_shell_max_candidates=" << breadth_configuration.addition_z_shell_max_candidates << "\n\n";
 		}
 
 		struct BreadthCandidate
@@ -2209,7 +2943,7 @@ namespace
 
 					IosStateGuard g( std::cout );
 					std::cout << "[Batch][Breadth] progress " << done << "/" << total << " (" << std::fixed << std::setprecision( 2 ) << ( 100.0 * double( done ) / double( total ) ) << "%)"
-							  << "  jobs_per_sec=" << std::setprecision( 2 ) << rate << "  elapsed_sec=" << std::setprecision( 2 ) << elapsed;
+							  << "  jobs_per_second=" << std::setprecision( 2 ) << rate << "  elapsed_seconds=" << std::setprecision( 2 ) << elapsed;
 					if ( has_best )
 					{
 						std::cout << "  best_w=" << best_snapshot.best_weight << "  best_job=#" << ( best_snapshot.job_index + 1 );
@@ -2271,12 +3005,17 @@ namespace
 		// Stage 2: deep run on TOP-K jobs (parallel, one job per thread)
 		// ---------------------------------------------------------------------
 		LinearBestSearchConfiguration deep_configuration = command_line_options.search_configuration;
+		deep_configuration.search_mode = SearchMode::Strict;
 		deep_configuration.maximum_round_predecessors = 0;												// remove breadth-only branching limiter
 		deep_configuration.maximum_search_nodes = command_line_options.auto_deep_maximum_search_nodes;	// 0=unlimited
 		deep_configuration.maximum_search_seconds = ( deep_configuration.maximum_search_nodes == 0 ) ? command_line_options.auto_max_time_seconds : 0;
 		deep_configuration.enable_verbose_output = true;
+		// Auto deep policy: always use strict z-shell enumeration for var-var addition.
+		deep_configuration.enable_addition_z_shell = true;
+		deep_configuration.addition_z_shell_max_candidates = 0;
 		if ( command_line_options.auto_target_best_weight >= 0 )
 			deep_configuration.target_best_weight = command_line_options.auto_target_best_weight;
+		apply_search_mode_overrides( deep_configuration );
 
 		const std::uint64_t deep_progress_sec = ( command_line_options.progress_every_seconds == 0 ) ? 1 : command_line_options.progress_every_seconds;
 
@@ -2287,7 +3026,12 @@ namespace
 			const auto& current_job = jobs[ current_candidate.job_index ];
 			std::cout << "  #" << ( i + 1 ) << "  job=#" << ( current_candidate.job_index + 1 ) << "  rounds=" << current_job.rounds << "  breadth_best_w=" << current_candidate.best_weight << "\n";
 		}
-		std::cout << "  deep_threads=" << top_candidates.size() << "  progress_every_seconds=" << deep_progress_sec << "\n\n";
+		std::cout << "  deep_threads=" << top_candidates.size() << "  progress_every_seconds=" << deep_progress_sec << "\n";
+		std::cout << "  search_mode=strict (breadth=strict)\n";
+		std::cout << "  strict_caps=0 (max_injection_input_masks,max_round_predecessors)\n";
+		std::cout << "  addition_z_shell=" << ( deep_configuration.enable_addition_z_shell ? "on" : "off" )
+				  << "  addition_z_shell_max_candidates=" << deep_configuration.addition_z_shell_max_candidates << "\n";
+		std::cout << "\n";
 
 		struct DeepResult
 		{
@@ -2323,9 +3067,12 @@ namespace
 				std::scoped_lock lk( TwilightDream::runtime_component::cout_mutex() );
 				TwilightDream::runtime_component::print_progress_prefix( std::cout );
 				if ( checkpoint_ok )
-					std::cout << "[Deep] checkpoint_file=" << checkpoint_path << " (append on best-weight changes)\n";
+				{
+					std::cout << "[DeepSearch] checkpoint_log_path=" << checkpoint_path << "\n";
+					std::cout << "[DeepSearch] checkpoint_log_write_mode=append_on_best_weight_changes\n";
+				}
 				else
-					std::cout << "[Deep] WARNING: cannot open checkpoint file for writing: " << checkpoint_path << "\n";
+					std::cout << "[DeepSearch] WARNING: cannot open checkpoint log file for writing: " << checkpoint_path << "\n";
 			}
 
 			deep_configuration.round_count = current_job.rounds;
@@ -2457,6 +3204,440 @@ namespace
 		}
 	}
 
+	struct LinearTestCase
+	{
+		std::uint32_t output_mask_u = 0;
+		int			  weight_cap = 0;
+		int			  word_bits = 32;
+	};
+
+	struct CandidateKey
+	{
+		std::uint32_t x = 0;
+		std::uint32_t y = 0;
+		int			  w = 0;
+	};
+
+	struct CandidateKeyHash
+	{
+		std::size_t operator()( const CandidateKey& k ) const noexcept
+		{
+			const std::size_t h1 = std::hash<std::uint32_t> {}( k.x );
+			const std::size_t h2 = std::hash<std::uint32_t> {}( k.y );
+			const std::size_t h3 = std::hash<int> {}( k.w );
+			return ( h1 * 1315423911u ) ^ ( h2 + 0x9e3779b97f4a7c15ull ) ^ ( h3 << 1 );
+		}
+	};
+
+	static inline bool operator==( const CandidateKey& a, const CandidateKey& b )
+	{
+		return a.x == b.x && a.y == b.y && a.w == b.w;
+	}
+
+	static CandidateKey make_key( const AddCandidate& c )
+	{
+		return CandidateKey { c.input_mask_x, c.input_mask_y, c.linear_weight };
+	}
+
+	static std::string format_word32_hex( std::uint32_t v )
+	{
+		std::ostringstream oss;
+		oss << "0x" << std::hex << std::setw( 8 ) << std::setfill( '0' ) << v << std::dec;
+		return oss.str();
+	}
+
+	static void print_linear_case( std::ostream& os, const LinearTestCase& c )
+	{
+		os << "output_mask_u=" << format_word32_hex( c.output_mask_u )
+		   << " weight_cap=" << c.weight_cap
+		   << " word_bits=" << c.word_bits;
+	}
+
+	static bool find_duplicate_candidate( const std::vector<AddCandidate>& candidates, std::size_t& index_out, CandidateKey& key_out )
+	{
+		std::unordered_set<CandidateKey, CandidateKeyHash> seen;
+		seen.reserve( candidates.size() * 2u + 1u );
+		for ( std::size_t i = 0; i < candidates.size(); ++i )
+		{
+			const CandidateKey key = make_key( candidates[ i ] );
+			if ( !seen.insert( key ).second )
+			{
+				index_out = i;
+				key_out = key;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static std::unordered_map<int, std::size_t> build_weight_multiset( const std::vector<AddCandidate>& candidates )
+	{
+		std::unordered_map<int, std::size_t> counts;
+		counts.reserve( candidates.size() + 1u );
+		for ( const auto& c : candidates )
+			++counts[ c.linear_weight ];
+		return counts;
+	}
+
+	static bool compare_weight_multiset( const std::unordered_map<int, std::size_t>& expected, const std::unordered_map<int, std::size_t>& actual, int& weight_out, std::size_t& expected_count, std::size_t& actual_count )
+	{
+		for ( const auto& kv : expected )
+		{
+			const int w = kv.first;
+			const std::size_t count = kv.second;
+			const auto it = actual.find( w );
+			const std::size_t actual_value = ( it == actual.end() ) ? 0u : it->second;
+			if ( count != actual_value )
+			{
+				weight_out = w;
+				expected_count = count;
+				actual_count = actual_value;
+				return false;
+			}
+		}
+		for ( const auto& kv : actual )
+		{
+			if ( expected.find( kv.first ) == expected.end() )
+			{
+				weight_out = kv.first;
+				expected_count = 0u;
+				actual_count = kv.second;
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static bool check_non_decreasing_weight( const LinearTestCase& tc, const std::vector<AddCandidate>& candidates, const char* label, const char* test_label )
+	{
+		if ( candidates.empty() )
+			return true;
+		for ( std::size_t i = 1; i < candidates.size(); ++i )
+		{
+			if ( candidates[ i ].linear_weight < candidates[ i - 1 ].linear_weight )
+			{
+				std::cerr << "[SelfTest][Linear] " << test_label << " ordering violation in " << label << ": ";
+				print_linear_case( std::cerr, tc );
+				std::cerr << " at index " << i
+						  << " prev_w=" << candidates[ i - 1 ].linear_weight
+						  << " curr_w=" << candidates[ i ].linear_weight << "\n";
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static bool compare_candidate_sets(
+		const LinearTestCase& tc,
+		const std::vector<AddCandidate>& expected,
+		const std::vector<AddCandidate>& actual,
+		const char* expected_label,
+		const char* actual_label,
+		const char* test_label )
+	{
+		bool ok = true;
+		bool header_printed = false;
+		auto print_header = [ & ] {
+			if ( header_printed )
+				return;
+			std::cerr << "[SelfTest][Linear] " << test_label << " mismatch: ";
+			print_linear_case( std::cerr, tc );
+			std::cerr << "\n";
+			header_printed = true;
+		};
+
+		if ( expected.size() != actual.size() )
+		{
+			print_header();
+			std::cerr << "  count mismatch expected=" << expected.size() << " actual=" << actual.size() << "\n";
+			ok = false;
+		}
+
+		{
+			std::size_t dup_index = 0;
+			CandidateKey dup_key {};
+			if ( find_duplicate_candidate( expected, dup_index, dup_key ) )
+			{
+				print_header();
+				std::cerr << "  duplicate in " << expected_label << " at index " << dup_index
+						  << " x=" << format_word32_hex( dup_key.x ) << " y=" << format_word32_hex( dup_key.y ) << " w=" << dup_key.w << "\n";
+				ok = false;
+			}
+			if ( find_duplicate_candidate( actual, dup_index, dup_key ) )
+			{
+				print_header();
+				std::cerr << "  duplicate in " << actual_label << " at index " << dup_index
+						  << " x=" << format_word32_hex( dup_key.x ) << " y=" << format_word32_hex( dup_key.y ) << " w=" << dup_key.w << "\n";
+				ok = false;
+			}
+		}
+
+		{
+			const auto expected_weights = build_weight_multiset( expected );
+			const auto actual_weights = build_weight_multiset( actual );
+			int w = 0;
+			std::size_t expected_count = 0;
+			std::size_t actual_count = 0;
+			if ( !compare_weight_multiset( expected_weights, actual_weights, w, expected_count, actual_count ) )
+			{
+				print_header();
+				std::cerr << "  weight multiset mismatch weight=" << w << " expected_count=" << expected_count << " actual_count=" << actual_count << "\n";
+				ok = false;
+			}
+		}
+
+		{
+			std::unordered_set<CandidateKey, CandidateKeyHash> expected_set;
+			std::unordered_set<CandidateKey, CandidateKeyHash> actual_set;
+			expected_set.reserve( expected.size() * 2u + 1u );
+			actual_set.reserve( actual.size() * 2u + 1u );
+			for ( const auto& c : expected )
+				expected_set.insert( make_key( c ) );
+			for ( const auto& c : actual )
+				actual_set.insert( make_key( c ) );
+
+			for ( const auto& c : expected )
+			{
+				if ( actual_set.find( make_key( c ) ) == actual_set.end() )
+				{
+					print_header();
+					std::cerr << "  missing candidate x=" << format_word32_hex( c.input_mask_x ) << " y=" << format_word32_hex( c.input_mask_y ) << " w=" << c.linear_weight << "\n";
+					ok = false;
+					break;
+				}
+			}
+			for ( const auto& c : actual )
+			{
+				if ( expected_set.find( make_key( c ) ) == expected_set.end() )
+				{
+					print_header();
+					std::cerr << "  unexpected candidate x=" << format_word32_hex( c.input_mask_x ) << " y=" << format_word32_hex( c.input_mask_y ) << " w=" << c.linear_weight << "\n";
+					ok = false;
+					break;
+				}
+			}
+		}
+
+		return ok;
+	}
+
+	static int popcount_u32( std::uint32_t v )
+	{
+		int count = 0;
+		while ( v )
+		{
+			count += int( v & 1u );
+			v >>= 1u;
+		}
+		return count;
+	}
+
+	static std::vector<AddCandidate> generate_oracle_candidates_small_n( std::uint32_t output_mask_u, int word_bits )
+	{
+		std::vector<AddCandidate> out;
+		if ( word_bits <= 0 || word_bits > 16 )
+			return out;
+		const std::uint32_t mask = ( word_bits >= 32 ) ? 0xFFFFFFFFu : ( ( 1u << word_bits ) - 1u );
+		output_mask_u &= mask;
+		const std::uint32_t limit = ( word_bits >= 32 ) ? 0u : ( 1u << word_bits );
+		out.reserve( std::size_t( limit ) * std::size_t( limit ) );
+
+		for ( std::uint32_t v = 0; v < limit; ++v )
+		{
+			for ( std::uint32_t w = 0; w < limit; ++w )
+			{
+				std::uint32_t z_mask = 0;
+				int z_next = 0; // z_{n-1} = 0
+				for ( int i = word_bits - 2; i >= 0; --i )
+				{
+					const int u_ip1 = int( ( output_mask_u >> ( i + 1 ) ) & 1u );
+					const int v_ip1 = int( ( v >> ( i + 1 ) ) & 1u );
+					const int w_ip1 = int( ( w >> ( i + 1 ) ) & 1u );
+					const int z_i = z_next ^ u_ip1 ^ v_ip1 ^ w_ip1;
+					if ( z_i )
+						z_mask |= ( 1u << i );
+					z_next = z_i;
+				}
+
+				bool ok = true;
+				for ( int i = 0; i < word_bits; ++i )
+				{
+					const int z_i = ( i == word_bits - 1 ) ? 0 : int( ( z_mask >> i ) & 1u );
+					const int u_i = int( ( output_mask_u >> i ) & 1u );
+					const int v_i = int( ( v >> i ) & 1u );
+					const int w_i = int( ( w >> i ) & 1u );
+					if ( z_i == 0 && ( ( u_i ^ v_i ) != 0 || ( u_i ^ w_i ) != 0 ) )
+					{
+						ok = false;
+						break;
+					}
+				}
+
+				if ( ok )
+				{
+					const int weight = popcount_u32( z_mask );
+					out.push_back( AddCandidate { v, w, weight } );
+				}
+			}
+		}
+
+		return out;
+	}
+
+	static std::vector<AddCandidate> filter_candidates_by_word_bits( const std::vector<AddCandidate>& candidates, int word_bits )
+	{
+		std::vector<AddCandidate> out;
+		if ( word_bits <= 0 || word_bits > 32 )
+			return out;
+		const std::uint32_t mask = ( word_bits >= 32 ) ? 0xFFFFFFFFu : ( ( 1u << word_bits ) - 1u );
+		out.reserve( candidates.size() );
+		for ( const auto& c : candidates )
+		{
+			if ( ( c.input_mask_x & ~mask ) != 0u || ( c.input_mask_y & ~mask ) != 0u )
+				continue;
+			out.push_back( AddCandidate { c.input_mask_x & mask, c.input_mask_y & mask, c.linear_weight } );
+		}
+		return out;
+	}
+
+	static std::vector<LinearTestCase> make_fixed_linear_equivalence_cases()
+	{
+		const int weight_cap = 5;
+		return {
+			LinearTestCase { 0x00000000u, weight_cap, 32 },
+			LinearTestCase { 0x00000001u, weight_cap, 32 },
+			LinearTestCase { 0x00000003u, weight_cap, 32 },
+			LinearTestCase { 0x0000000Fu, weight_cap, 32 },
+			LinearTestCase { 0x00000080u, weight_cap, 32 },
+			LinearTestCase { 0x00008000u, weight_cap, 32 },
+			LinearTestCase { 0x00010001u, weight_cap, 32 },
+			LinearTestCase { 0x00FF00FFu, weight_cap, 32 },
+			LinearTestCase { 0x80000000u, weight_cap, 32 },
+			LinearTestCase { 0x40000000u, weight_cap, 32 }
+		};
+	}
+
+	static std::vector<LinearTestCase> make_fixed_linear_oracle_cases()
+	{
+		const int word_bits = 8;
+		const int weight_cap = 8;
+		return {
+			LinearTestCase { 0x00000000u, weight_cap, word_bits },
+			LinearTestCase { 0x00000001u, weight_cap, word_bits },
+			LinearTestCase { 0x00000003u, weight_cap, word_bits },
+			LinearTestCase { 0x00000005u, weight_cap, word_bits },
+			LinearTestCase { 0x0000000Fu, weight_cap, word_bits },
+			LinearTestCase { 0x00000033u, weight_cap, word_bits },
+			LinearTestCase { 0x00000055u, weight_cap, word_bits },
+			LinearTestCase { 0x00000080u, weight_cap, word_bits },
+			LinearTestCase { 0x000000A5u, weight_cap, word_bits },
+			LinearTestCase { 0x000000FFu, weight_cap, word_bits }
+		};
+	}
+
+	static bool run_linear_z_shell_vs_slr_tests( const std::vector<LinearTestCase>& cases )
+	{
+		bool ok = true;
+		for ( const auto& tc : cases )
+		{
+			const auto& z_shell_ref =
+				AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
+					tc.output_mask_u,
+					tc.weight_cap,
+					SearchMode::Strict,
+					true,
+					0 );
+			const auto& slr_ref =
+				AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
+					tc.output_mask_u,
+					tc.weight_cap,
+					SearchMode::Strict,
+					false,
+					0 );
+
+			const std::vector<AddCandidate> z_shell( z_shell_ref.begin(), z_shell_ref.end() );
+			const std::vector<AddCandidate> slr( slr_ref.begin(), slr_ref.end() );
+
+			if ( !compare_candidate_sets( tc, slr, z_shell, "slr", "z-shell", "z-shell-vs-slr" ) )
+				ok = false;
+			if ( !check_non_decreasing_weight( tc, slr, "slr", "z-shell-vs-slr" ) )
+				ok = false;
+			if ( !check_non_decreasing_weight( tc, z_shell, "z-shell", "z-shell-vs-slr" ) )
+				ok = false;
+		}
+		return ok;
+	}
+
+	static bool run_linear_oracle_tests( const std::vector<LinearTestCase>& cases )
+	{
+		bool ok = true;
+		for ( const auto& tc : cases )
+		{
+			const std::vector<AddCandidate> oracle = generate_oracle_candidates_small_n( tc.output_mask_u, tc.word_bits );
+			const auto& z_shell_ref =
+				AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
+					tc.output_mask_u,
+					tc.weight_cap,
+					SearchMode::Strict,
+					true,
+					0 );
+			const std::vector<AddCandidate> z_shell_filtered = filter_candidates_by_word_bits( z_shell_ref, tc.word_bits );
+
+			if ( !compare_candidate_sets( tc, oracle, z_shell_filtered, "oracle", "z-shell", "z-shell-oracle" ) )
+				ok = false;
+			if ( !check_non_decreasing_weight( tc, z_shell_filtered, "z-shell", "z-shell-oracle" ) )
+				ok = false;
+		}
+		return ok;
+	}
+
+	static bool run_linear_regression_tests( const CommandLineOptions& options )
+	{
+		constexpr std::uint64_t kDefaultSelftestSeed = 0xC0FFEE4321ull;
+		constexpr std::size_t  kDefaultExtraCases = 8;
+
+		const std::uint64_t seed = options.selftest_seed_was_provided ? options.selftest_seed : kDefaultSelftestSeed;
+		const std::size_t extra_cases = options.selftest_case_count_was_provided ? options.selftest_case_count : kDefaultExtraCases;
+		std::mt19937_64 rng( seed );
+
+		std::vector<LinearTestCase> equivalence_cases = make_fixed_linear_equivalence_cases();
+		const std::size_t fixed_equivalence_count = equivalence_cases.size();
+		for ( std::size_t i = 0; i < extra_cases; ++i )
+		{
+			LinearTestCase tc {};
+			tc.output_mask_u = static_cast<std::uint32_t>( rng() );
+			tc.weight_cap = 5;
+			tc.word_bits = 32;
+			equivalence_cases.push_back( tc );
+		}
+
+		std::vector<LinearTestCase> oracle_cases = make_fixed_linear_oracle_cases();
+		const std::size_t fixed_oracle_count = oracle_cases.size();
+		for ( std::size_t i = 0; i < extra_cases; ++i )
+		{
+			LinearTestCase tc {};
+			tc.output_mask_u = static_cast<std::uint32_t>( rng() ) & 0xFFu;
+			tc.weight_cap = 8;
+			tc.word_bits = 8;
+			oracle_cases.push_back( tc );
+		}
+
+		std::cout << "[SelfTest][Linear] fixed_equivalence_cases=" << fixed_equivalence_count
+				  << " fixed_oracle_cases=" << fixed_oracle_count
+				  << " random_cases=" << extra_cases
+				  << " seed=0x" << std::hex << seed << std::dec << "\n";
+
+		bool ok = true;
+		if ( !run_linear_z_shell_vs_slr_tests( equivalence_cases ) )
+			ok = false;
+		if ( !run_linear_oracle_tests( oracle_cases ) )
+			ok = false;
+
+		if ( ok )
+			std::cout << "[SelfTest][Linear] regression tests passed\n";
+		return ok;
+	}
+
 }  // namespace
 
 int main( int argument_count, char** argument_values )
@@ -2468,9 +3649,21 @@ int main( int argument_count, char** argument_values )
 		return command_line_options.show_help ? 0 : 1;
 	}
 	if ( command_line_options.selftest )
-		return run_arx_operator_self_test();
+	{
+		std::cout << "[SelfTest] operator correctness\n";
+		const int arx_rc = run_arx_operator_self_test();
+		if ( arx_rc != 0 )
+			return arx_rc;
+		std::cout << "[SelfTest] search/resume/cache correctness\n";
+		return run_linear_regression_tests( command_line_options ) ? 0 : 1;
+	}
 
 	print_banner_and_mode( command_line_options );
+
+	if ( command_line_options.resume_was_provided )
+	{
+		return run_resume_mode( command_line_options );
+	}
 
 	if ( command_line_options.frontend_mode == CommandLineOptions::FrontendMode::Auto )
 	{

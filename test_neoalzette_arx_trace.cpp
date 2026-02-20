@@ -306,12 +306,6 @@ static void trace_differential_trail_path(std::uint32_t initial_branch_a_differe
         print_differential_trace_step("A ^= injection_from_B(B) (affine-derivative offset)", branch_a_difference, branch_b_difference, total_probability);
     }
 
-    // B = l1_backward(B)
-    {
-        branch_b_difference = NeoAlzetteCore::l1_backward(branch_b_difference);
-        print_differential_trace_step("B = l1_backward(B)", branch_a_difference, branch_b_difference, total_probability);
-    }
-
     // --- Second subround ---
     // A += (rotl(B,31) ^ rotl(B,17) ^ ROUND_CONSTANTS[5])
     {
@@ -352,12 +346,6 @@ static void trace_differential_trail_path(std::uint32_t initial_branch_a_differe
         branch_b_difference ^= chosen_injected_xor_difference;
         total_probability *= weight_to_probability(transition.rank_weight);
         print_differential_trace_step("B ^= injection_from_A(A) (affine-derivative offset)", branch_a_difference, branch_b_difference, total_probability);
-    }
-
-    // A = l2_backward(A)
-    {
-        branch_a_difference = NeoAlzetteCore::l2_backward(branch_a_difference);
-        print_differential_trace_step("A = l2_backward(A)", branch_a_difference, branch_b_difference, total_probability);
     }
 
     std::cout << "\nTrace score (this single replayed path only): log2P = "  << std::log2(total_probability) << "\n";

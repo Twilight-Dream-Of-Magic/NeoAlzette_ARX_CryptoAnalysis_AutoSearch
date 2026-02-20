@@ -14,11 +14,7 @@ endif()
 # This repo primarily provides a small core library + several research programs
 # under `test_*.cpp` (they are not unit tests in the strict sense).
 option(NEOALZETTE_BUILD_PROGRAMS "Build research programs (test_*.cpp)" ON)
-# Backward-compatible alias (deprecated).
-option(BUILD_TESTS "Deprecated: use NEOALZETTE_BUILD_PROGRAMS" OFF)
-if(BUILD_TESTS)
-    set(NEOALZETTE_BUILD_PROGRAMS ON)
-endif()
+## (removed deprecated BUILD_TESTS alias; use NEOALZETTE_BUILD_PROGRAMS)
 
 # ============================================================================
 # Common target helpers
@@ -98,6 +94,9 @@ if(NEOALZETTE_BUILD_PROGRAMS)
         common/runtime_component.cpp
     )
     target_link_libraries(test_neoalzette_differential_best_search PRIVATE neoalzette Threads::Threads)
+    if(WIN32)
+        target_link_libraries(test_neoalzette_differential_best_search PRIVATE psapi)
+    endif()
     target_include_directories(test_neoalzette_differential_best_search PRIVATE
         ${PROJECT_SOURCE_DIR}
     )
@@ -110,6 +109,9 @@ if(NEOALZETTE_BUILD_PROGRAMS)
         common/runtime_component.cpp
     )
     target_link_libraries(test_neoalzette_linear_best_search PRIVATE neoalzette Threads::Threads)
+    if(WIN32)
+        target_link_libraries(test_neoalzette_linear_best_search PRIVATE psapi)
+    endif()
     target_include_directories(test_neoalzette_linear_best_search PRIVATE
         ${PROJECT_SOURCE_DIR}
     )

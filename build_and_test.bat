@@ -11,7 +11,7 @@ rem   - Robust on Windows cmd.exe even when the repo path contains spaces and []
 rem   - Clear errors; minimal cmd escaping tricks
 rem
 rem Requirements:
-rem   - Set env var MINGW64 to your mingw64\bin directory containing clang++.exe
+rem   - Set env var CLANG64 to your mingw64\bin directory containing clang++.exe
 rem     OR pass: --mingw64 "X:\path\to\mingw64\bin"
 rem
 rem Options:
@@ -37,7 +37,7 @@ if /I "%~1"=="--mingw64" (
     echo ERROR: --mingw64 requires a path argument.
     exit /b 2
   )
-  set "MINGW64=%~2"
+  set "CLANG64=%~2"
   shift
   shift
   goto :parse_args
@@ -83,18 +83,18 @@ echo ============================================================
 echo.
 
 rem Trim leading spaces (common when env vars are edited manually)
-for /f "tokens=* delims= " %%A in ("%MINGW64%") do set "MINGW64=%%A"
+for /f "tokens=* delims= " %%A in ("%CLANG64%") do set "CLANG64=%%A"
 
-if "%MINGW64%"=="" (
-  echo ERROR: MINGW64 is not set.
+if "%CLANG64%"=="" (
+  echo ERROR: CLANG64 is not set.
   echo   Example:
-  echo     set MINGW64=E:\[About Programming]\WindowsLibsGCC\mingw64\bin
+  echo     set CLANG64=E:\[About Programming]\WindowsLibsGCC\mingw64\bin
   echo   Or:
   echo     build_and_test.bat --mingw64 "E:\...\mingw64\bin"
   goto :fail
 )
 
-set "CXX=%MINGW64%\clang++.exe"
+set "CXX=%CLANG64%\clang++.exe"
 if not exist "%CXX%" (
   echo ERROR: clang++.exe not found at:
   echo   "%CXX%"
@@ -110,7 +110,7 @@ if not exist "%CORE_SRC%" (
   goto :fail
 )
 
-set "COMMON_FLAGS=-std=c++20 -O3 -static -Wall -Wextra"
+set "COMMON_FLAGS=-std=c++20 -O3 -static -Wall -Wextra -lpsapi"
 
 echo Toolchain:
 echo   ROOT = "%ROOT%"
@@ -132,7 +132,7 @@ if "%DO_CLEAN%"=="1" (
 )
 
 if "%DO_BUILD%"=="1" (
-  echo [2/3] Compiling ^(5 targets^)^...
+  echo [2/3] Compiling ^(5 targets^) ...
   echo.
 
   echo   - test_neoalzette_arx_trace.exe

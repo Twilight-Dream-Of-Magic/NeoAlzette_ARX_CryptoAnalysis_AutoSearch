@@ -21,6 +21,7 @@
 - `differential_addconst.hpp`：var-const 加/减的差分（精确 count/DP/weight + BvWeight^κ 近似）
 - `linear_correlation_add_logn.hpp`：Wallén 风格的“对数算法”实现（当前实现以 32-bit 为主）
 - `linear_correlation_addconst.hpp`：O(n) 精确线性相关（2×2 carry-state transfer matrices；var-const + var-var）
+- `linear_correlation_addconst_flat.hpp`：**精确**线性相关（var-const，run 扁平化 + β 稀疏；用于加速常量加/减）
 - `math_util.hpp`：小工具（目前提供 `neg_mod_2n<T>(k,n)`）
 - `modular_addition_ccz.hpp`：Addition mod \(2^n\) 的 CCZ 等价与显式差分/线性公式算子（Schulte-Geers）
 
@@ -111,6 +112,31 @@
   - `LinearCorrelation linear_add_varvar64(uint64_t alpha, uint64_t beta, uint64_t gamma, int nbits=64)`
   - `struct LinearCorrelation { double correlation; double weight; bool is_feasible() const; }`
 
+### 5b) `linear_correlation_addconst_flat.hpp` — 精确线性相关（var-const，run 扁平化 + β 稀疏，n≤64）
+
+- **定位 / Positioning**：只覆盖 \(y=x \boxplus c\)（变量-常量），但用 run-flatten + β-sparse 把逐位 2×2 链压到
+  \(O(#runs(c)+wt(\beta))\) 的常数级更新；适合作为 `linear_x_modulo_plus_const64/32` 的“高吞吐替代”。
+- **API（核心）/ Core API**（`TwilightDream::arx_operators`）：
+  - `DyadicCorrelation linear_correlation_add_const_exact_flat_dyadic(uint64_t alpha, uint64_t constant, uint64_t beta, int n)`
+  - `double          linear_correlation_add_const_exact_flat(uint64_t alpha, uint64_t constant, uint64_t beta, int n)`
+  - `long double     linear_correlation_add_const_exact_flat_ld(uint64_t alpha, uint64_t constant, uint64_t beta, int n)`
+  - `int             linear_correlation_add_const_exact_flat_weight_ceil_int(uint64_t alpha, uint64_t constant, uint64_t beta, int n)`
+  - 论文参数顺序别名（α,β,c,n）：`corr_add_const_exact_flat_* (alpha, beta, constant, n)`
+- **API（窗口/抬升/串接）/ Window + Lift + Cascade**（`TwilightDream::arx_operators`）：
+  - `WindowedCorrelationReport linear_correlation_add_const_flat_bin_report(uint64_t alpha, uint64_t constant, uint64_t beta, int n, int L)`
+    - 返回：`corr_hat`（dyadic, denom_log2==n）、`delta_bound`、`weight_conservative`、`working_set_mask`
+    - 误差界：\(\delta = 2\,\mathrm{wt}(\beta)\,2^{-L}\)
+  - 便捷封装：`linear_correlation_add_const_flat_bin_dyadic / _flat_bin / _flat_bin_ld`
+  - Binary-Lift：
+    - `BinaryLiftMasks binary_lift_addconst_masks(uint64_t alpha, uint64_t beta, uint64_t constant, int n)`
+    - `BinaryLiftedWindowedReport corr_add_const_binary_lifted_report(uint64_t alpha, uint64_t beta, uint64_t constant, int n, int L)`（强制 `L>=2`）
+  - Cascade：
+    - `struct CascadeRound { alpha,beta,constant,n,L,lift }`
+    - `CascadeReport corr_add_const_cascade(std::span<const CascadeRound> rounds)`
+- **数值与跨平台 / Numerics & portability**：
+  - 默认：GCC/Clang 使用 `__int128` 做分子（最快）；否则自动回退到内置 `FixedInt256`
+  - 可强制便携后端：编译时定义 `TWILIGHTDREAM_ARX_FORCE_INT256`
+
 ### 6) `modular_addition_ccz.hpp` — CCZ 等价与显式公式（差分 + 线性）
 
 - **定位 / Positioning**：给出 addition mod \(2^n\) 的**显式差分概率**（Theorem 3）与**显式 Walsh/相关系数**（Theorem 4）形式；适合作为“公式基准/交叉验证”，也可直接用于搜索中的可行性与权重计算。
@@ -135,6 +161,7 @@
 | XOR diff of ⊞a | var-const | BvWeight^κ（Qκ fixed-point） | **O(n)**（当前逐链实现） | **近似** |
 | linear corr of ⊞ | var-var | Wallén-logn（实现偏 32-bit） | 固定 32-bit 近似常数成本 | **精确**（权重/数值） |
 | linear corr of ⊞ / ⊞a | var-var / var-const | 2×2 transfer matrices | **O(n)** | **精确** |
+| linear corr of ⊞a | var-const | run-flatten + β-sparse (exact) | **O(log n + #runs(c)+wt(β))**（n≤64 时常数很小） | **精确** |
 
 ---
 

@@ -27,6 +27,7 @@
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_injection_constexpr.hpp"
 #include "common/runtime_component.hpp"
+#include "auto_search_frame/search_checkpoint.hpp"
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_optimal_gamma.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
@@ -92,6 +93,141 @@ namespace TwilightDream::auto_search_differential
 	}
 
 	// ============================================================================
+	// Weight-Sliced Partial DDT (w-pDDT) cache
+	// Exact weight-shells for XOR differential probability of modular addition
+	// (LM2001 xdp_add model). Rebuildable accelerator only; never defines truth.
+	// ============================================================================
+
+	struct WeightShellKey
+	{
+		std::uint32_t alpha = 0;
+		std::uint32_t beta = 0;
+		std::uint8_t	weight = 0;
+		std::uint8_t	word_bits = 32;
+
+		friend bool operator==( const WeightShellKey& a, const WeightShellKey& b ) noexcept
+		{
+			return a.alpha == b.alpha && a.beta == b.beta && a.weight == b.weight && a.word_bits == b.word_bits;
+		}
+	};
+
+	struct WeightShellKeyHash
+	{
+		std::size_t operator()( const WeightShellKey& k ) const noexcept
+		{
+			std::uint64_t h = ( std::uint64_t( k.alpha ) << 32 ) ^ std::uint64_t( k.beta );
+			h ^= ( std::uint64_t( k.weight ) << 7 );
+			h ^= ( std::uint64_t( k.word_bits ) << 17 );
+			h ^= ( h >> 33 );
+			h *= 0xff51afd7ed558ccdULL;
+			h ^= ( h >> 33 );
+			h *= 0xc4ceb9fe1a85ec53ULL;
+			h ^= ( h >> 33 );
+			return static_cast<std::size_t>( h );
+		}
+	};
+
+	struct WeightShell
+	{
+		std::uint32_t* data = nullptr;
+		std::uint32_t  size = 0;
+	};
+
+	class WeightShellCache
+	{
+	public:
+		void configure( bool enable, int max_weight )
+		{
+			std::scoped_lock lk( mutex_ );
+			enabled_ = enable;
+			max_weight_ = std::clamp( max_weight, 0, 31 );
+			if ( !enabled_ )
+				map_.clear();
+		}
+
+		bool enabled() const
+		{
+			std::scoped_lock lk( mutex_ );
+			return enabled_;
+		}
+
+		int max_weight() const
+		{
+			std::scoped_lock lk( mutex_ );
+			return max_weight_;
+		}
+
+		bool try_get_shell( std::uint32_t alpha, std::uint32_t beta, int weight, int word_bits, std::vector<std::uint32_t>& out )
+		{
+			if ( weight < 0 )
+				return false;
+			const WeightShellKey key { alpha, beta, static_cast<std::uint8_t>( weight ), static_cast<std::uint8_t>( word_bits ) };
+			std::scoped_lock	 lk( mutex_ );
+			if ( !enabled_ )
+				return false;
+			auto it = map_.find( key );
+			if ( it == map_.end() )
+				return false;
+			const WeightShell& shell = it->second;
+			out.clear();
+			out.reserve( shell.size );
+			for ( std::uint32_t i = 0; i < shell.size; ++i )
+				out.push_back( shell.data[ i ] );
+			return true;
+		}
+
+		void maybe_put_shell( std::uint32_t alpha, std::uint32_t beta, int weight, int word_bits, const std::vector<std::uint32_t>& shell )
+		{
+			if ( weight < 0 )
+				return;
+			if ( runtime_component::memory_governor_in_pressure() )
+				return;
+			const WeightShellKey key { alpha, beta, static_cast<std::uint8_t>( weight ), static_cast<std::uint8_t>( word_bits ) };
+			std::scoped_lock	 lk( mutex_ );
+			if ( !enabled_ )
+				return;
+			if ( map_.find( key ) != map_.end() )
+				return;
+
+			if ( shell.empty() )
+			{
+				map_.emplace( key, WeightShell { nullptr, 0 } );
+				return;
+			}
+
+			const std::uint64_t bytes = static_cast<std::uint64_t>( shell.size() ) * sizeof( std::uint32_t );
+			void* p = runtime_component::alloc_rebuildable( bytes, false );
+			if ( !p )
+				return;
+			std::uint32_t* dst = static_cast<std::uint32_t*>( p );
+			for ( std::size_t i = 0; i < shell.size(); ++i )
+				dst[ i ] = shell[ i ];
+			map_.emplace( key, WeightShell { dst, static_cast<std::uint32_t>( shell.size() ) } );
+		}
+
+		void clear_and_disable( const char* /*reason*/ = nullptr )
+		{
+			std::scoped_lock lk( mutex_ );
+			map_.clear();
+			enabled_ = false;
+		}
+
+		void clear_keep_enabled( const char* /*reason*/ = nullptr )
+		{
+			std::scoped_lock lk( mutex_ );
+			map_.clear();
+		}
+
+	private:
+		mutable std::mutex																	 mutex_ {};
+		bool																				 enabled_ = false;
+		int																					 max_weight_ = 0;
+		std::unordered_map<WeightShellKey, WeightShell, WeightShellKeyHash> map_ {};
+	};
+
+	inline WeightShellCache g_weight_shell_cache;
+
+	// ============================================================================
 	// Injection affine model (XOR with NOT-AND / NOT-OR): InjectionAffineTransition{ basis_vectors, offset, rank_weight }
 	//
 	// We must preserve the exact call structure of the cipher:
@@ -147,25 +283,34 @@ namespace TwilightDream::auto_search_differential
 	// In the transition builder we need D_Δ f(0) and D_Δ f(e_i) for i=0..31, where
 	//   D_Δ f(x) = f(x) ⊕ f(x ⊕ Δ).
 	// Precomputing f(0) and f(e_i) avoids half the f() evaluations per Δ without changing results.
+	// Use neoalzette_constexpr directly in consteval (same as linear search) so compile-time path has no extra indirection.
 	static consteval std::array<std::uint32_t, 32> make_injected_xor_term_basis_branch_b()
 	{
 		std::array<std::uint32_t, 32> out {};
 		for ( int i = 0; i < 32; ++i )
-			out[ static_cast<std::size_t>( i ) ] = compute_injected_xor_term_from_branch_b( 1u << i );
+			out[ static_cast<std::size_t>( i ) ] = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( 1u << i );
 		return out;
 	}
 	static consteval std::array<std::uint32_t, 32> make_injected_xor_term_basis_branch_a()
 	{
 		std::array<std::uint32_t, 32> out {};
 		for ( int i = 0; i < 32; ++i )
-			out[ static_cast<std::size_t>( i ) ] = compute_injected_xor_term_from_branch_a( 1u << i );
+			out[ static_cast<std::size_t>( i ) ] = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( 1u << i );
 		return out;
 	}
 
-	static constexpr std::uint32_t				   g_injected_xor_term_f0_branch_b = compute_injected_xor_term_from_branch_b( 0u );
-	static constexpr std::uint32_t				   g_injected_xor_term_f0_branch_a = compute_injected_xor_term_from_branch_a( 0u );
+	static constexpr std::uint32_t				   g_injected_xor_term_f0_branch_b = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( 0u );
+	static constexpr std::uint32_t				   g_injected_xor_term_f0_branch_a = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( 0u );
 	static constexpr std::array<std::uint32_t, 32> g_injected_xor_term_f_basis_branch_b = make_injected_xor_term_basis_branch_b();
 	static constexpr std::array<std::uint32_t, 32> g_injected_xor_term_f_basis_branch_a = make_injected_xor_term_basis_branch_a();
+
+	// Formula sanity: f(0) and f(e_i) must match wrapper so D_Δ f(0)=f(0)⊕f(Δ) and column_i = D_Δ f(e_i)⊕D_Δ f(0) are unchanged.
+	static_assert( g_injected_xor_term_f0_branch_b == compute_injected_xor_term_from_branch_b( 0u ), "f(0) branch_b: direct vs wrapper" );
+	static_assert( g_injected_xor_term_f0_branch_a == compute_injected_xor_term_from_branch_a( 0u ), "f(0) branch_a: direct vs wrapper" );
+	static_assert( g_injected_xor_term_f_basis_branch_b[ 0 ] == compute_injected_xor_term_from_branch_b( 1u ), "f(e_0) branch_b: direct vs wrapper" );
+	static_assert( g_injected_xor_term_f_basis_branch_a[ 0 ] == compute_injected_xor_term_from_branch_a( 1u ), "f(e_0) branch_a: direct vs wrapper" );
+	static_assert( g_injected_xor_term_f_basis_branch_b[ 31 ] == compute_injected_xor_term_from_branch_b( 1u << 31 ), "f(e_31) branch_b: direct vs wrapper" );
+	static_assert( g_injected_xor_term_f_basis_branch_a[ 31 ] == compute_injected_xor_term_from_branch_a( 1u << 31 ), "f(e_31) branch_a: direct vs wrapper" );
 
 	static int xor_basis_add( std::array<std::uint32_t, 32>& basis, std::uint32_t v )
 	{
@@ -577,29 +722,25 @@ namespace TwilightDream::auto_search_differential
 	//   - We DO NOT remove cd_injection_from_* from the cipher implementation.
 	//   - We DO propagate differences through cd_injection_from_* (structure preserved),
 	//     and we also include InjectionAffineTransition-based rank_weight.
-	//   - We DO keep adjacent linear layers from the real code:
-	//       B ← L1^{-1}(B)  and  A ← L2^{-1}(A)
 	//
 	// One forward round (as implemented):
 	//   Input: (A0, B0)
 	//   (1)  B1 = B0 ⊞ (ROTL_31(A0) ⊕ ROTL_17(A0) ⊕ RC[0])
-	//        A1 = A0 ⊟ RC1
+	//        A1 = A0 - RC1
 	//        A2 = A1 ⊕ ROTL_{R0}(B1)
 	//        B2 = B1 ⊕ ROTL_{R1}(A2)
 	//        (C0, D0) = cd_injection_from_B(B2; rc0, rc1)
 	//        A3 = A2 ⊕ (ROTL_24(C0) ⊕ ROTL_16(D0) ⊕ RC4)
-	//        B3 = L1^{-1}(B2)
 	//
-	//   (2)  A4 = A3 ⊞ (ROTL_31(B3) ⊕ ROTL_17(B3) ⊕ RC5)
-	//        B4 = B3 ⊟ RC6
-	//        B5 = B4 ⊕ ROTL_{R0}(A4)
-	//        A5 = A4 ⊕ ROTL_{R1}(B5)
+	//   (2)  A4 = A3 ⊞ (ROTL_31(B2) ⊕ ROTL_17(B2) ⊕ RC5)
+	//        B3 = B2 - RC6
+	//        B4 = B3 ⊕ ROTL_{R0}(A4)
+	//        A5 = A4 ⊕ ROTL_{R1}(B4)
 	//        (C1, D1) = cd_injection_from_A(A5; rc0, rc1)
-	//        B6 = B5 ⊕ (ROTL_24(C1) ⊕ ROTL_16(D1) ⊕ RC9)
-	//        A6 = L2^{-1}(A5)
+	//        B5 = B4 ⊕ (ROTL_24(C1) ⊕ ROTL_16(D1) ⊕ RC9)
 	//
-	//   (3)  A_out = A6 ⊕ RC10
-	//        B_out = B6 ⊕ RC11
+	//   (3)  A_out = A5 ⊕ RC10
+	//        B_out = B5 ⊕ RC11
 	//
 	// Record fields below store Δ-values at each boundary and the per-step weight.
 	// ============================================================================
@@ -693,9 +834,6 @@ namespace TwilightDream::auto_search_differential
 		int			round_count = 2;
 		int			addition_weight_cap = 31;						// extra cap (0..31). default=31 (no extra cap beyond the B&B bound)
 		int			constant_subtraction_weight_cap = 32;			// cap for subconst weight (0..32). 32 means no extra cap.
-		// cap number of enumerated subconst output diffs per subconst op (0=exact/all).
-		// NOTE: set to 0 to preserve integer-weight optimality (no branch limiting).
-		std::size_t maximum_constant_subtraction_candidates = 0;
 		// Performance knob: branch limiter for enumerating injected transition output differences (0=exact/all).
 		// NOTE: This does not change the underlying transition model; it only limits branching during search.
 		std::size_t	  maximum_transition_output_differences = 0;
@@ -704,6 +842,9 @@ namespace TwilightDream::auto_search_differential
 		int			  target_best_weight = -1;				// if >=0: stop early once best_total_weight <= target_best_weight
 		std::uint64_t maximum_search_seconds = 0;			// 0=unlimited; stop early once elapsed >= maximum_search_seconds
 		bool		  enable_state_memoization = true;		// prune revisits: (depth, difference_a, difference_b) -> best weight so far
+		// Weight-Sliced Partial DDT (w-pDDT) cache: exact weight shells for modular addition.
+		bool		  enable_wpddt_cache = true;			// accelerator only; miss => exact fallback
+		int			  wpddt_max_cached_weight = -1;			// -1 = auto from budget; otherwise 0..31
 		bool		  enable_verbose_output = false;
 
 		// Matsui-style remaining-round lower bound (weight domain):
@@ -729,7 +870,8 @@ namespace TwilightDream::auto_search_differential
 		std::vector<DifferentialTrailStepRecord> best_trail;
 	};
 
-	struct BestWeightCheckpointWriter;	// forward
+	struct BestWeightHistory;	// forward
+	struct BinaryCheckpointManager;		// forward
 
 	struct DifferentialBestSearchContext
 	{
@@ -762,10 +904,13 @@ namespace TwilightDream::auto_search_differential
 		bool								  stop_due_to_time_limit = false;
 
 		// Optional: checkpoint writer (e.g., auto mode) to persist best-weight changes.
-		BestWeightCheckpointWriter* checkpoint = nullptr;
+		BestWeightHistory* checkpoint = nullptr;
+
+		// Optional: binary checkpoint manager for resumable DFS.
+		BinaryCheckpointManager* binary_checkpoint = nullptr;
 	};
 
-	struct BestWeightCheckpointWriter
+	struct BestWeightHistory
 	{
 		std::ofstream out {};
 		int			  last_written_weight = INFINITE_WEIGHT;
@@ -793,21 +938,49 @@ namespace TwilightDream::auto_search_differential
 				return;
 
 			const auto	 now = std::chrono::steady_clock::now();
-			const double elapsed_sec = ( context.run_start_time.time_since_epoch().count() == 0 ) ? 0.0 : std::chrono::duration<double>( now - context.run_start_time ).count();
+			const double elapsed_seconds = ( context.run_start_time.time_since_epoch().count() == 0 ) ? 0.0 : std::chrono::duration<double>( now - context.run_start_time ).count();
+			const auto&	 config = context.configuration;
 
 			out << "=== checkpoint ===\n";
 			out << "timestamp_local=" << format_local_time_now() << "\n";
-			out << "reason=" << ( reason ? reason : "best_changed" ) << "\n";
-			out << "rounds=" << context.configuration.round_count << "\n";
-			out << "start_delta_a=" << hex8( context.start_difference_a ) << "\n";
-			out << "start_dalta_b=" << hex8( context.start_difference_b ) << "\n";
-			out << "best_weight=" << context.best_total_weight << "\n";
-			out << "nodes_visited=" << context.visited_node_count << "\n";
-			out << "elapsed_sec=" << std::fixed << std::setprecision( 3 ) << elapsed_sec << "\n";
-			out << "trail_steps=" << context.best_differential_trail.size() << "\n";
+			out << "checkpoint_reason=" << ( reason ? reason : "best_weight_changed" ) << "\n";
+			out << "round_count=" << config.round_count << "\n";
+			out << "start_difference_branch_a=" << hex8( context.start_difference_a ) << "\n";
+			out << "start_difference_branch_b=" << hex8( context.start_difference_b ) << "\n";
+			out << "best_total_weight=" << context.best_total_weight << "\n";
+			out << "visited_node_count=" << context.visited_node_count << "\n";
+			out << "elapsed_seconds=" << std::fixed << std::setprecision( 3 ) << elapsed_seconds << "\n";
+			out << "target_best_weight=" << config.target_best_weight << "\n";
+			out << "addition_weight_cap=" << config.addition_weight_cap << "\n";
+			out << "constant_subtraction_weight_cap=" << config.constant_subtraction_weight_cap << "\n";
+			out << "maximum_transition_output_differences=" << config.maximum_transition_output_differences << "\n";
+			out << "maximum_search_nodes=" << config.maximum_search_nodes << "\n";
+			out << "maximum_search_seconds=" << config.maximum_search_seconds << "\n";
+			out << "enable_state_memoization=" << ( config.enable_state_memoization ? 1 : 0 ) << "\n";
+			out << "enable_remaining_round_lower_bound=" << ( config.enable_remaining_round_lower_bound ? 1 : 0 ) << "\n";
+			out << "remaining_round_min_weight_count=" << config.remaining_round_min_weight.size() << "\n";
+			if ( !config.remaining_round_min_weight.empty() )
+			{
+				out << "remaining_round_min_weight_values=";
+				for ( std::size_t i = 0; i < config.remaining_round_min_weight.size(); ++i )
+				{
+					if ( i != 0 )
+						out << ",";
+					out << config.remaining_round_min_weight[ i ];
+				}
+				out << "\n";
+			}
+			out << "enable_wpddt_cache=" << ( config.enable_wpddt_cache ? 1 : 0 ) << "\n";
+			out << "wpddt_max_cached_weight=" << config.wpddt_max_cached_weight << "\n";
+			out << "trail_step_count=" << context.best_differential_trail.size() << "\n";
 			for ( const auto& s : context.best_differential_trail )
 			{
-				out << "R" << s.round_index << " round_w=" << s.round_weight << " in_DiffA=" << hex8( s.input_branch_a_difference ) << " in_DiffB=" << hex8( s.input_branch_b_difference ) << " out_DiffA=" << hex8( s.output_branch_a_difference ) << " out_DiffB=" << hex8( s.output_branch_b_difference ) << "\n";
+				out << "round_index=" << s.round_index
+					<< " round_weight=" << s.round_weight
+					<< " input_difference_branch_a=" << hex8( s.input_branch_a_difference )
+					<< " input_difference_branch_b=" << hex8( s.input_branch_b_difference )
+					<< " output_difference_branch_a=" << hex8( s.output_branch_a_difference )
+					<< " output_difference_branch_b=" << hex8( s.output_branch_b_difference ) << "\n";
 			}
 			out << "\n";
 			out.flush();
@@ -844,29 +1017,32 @@ namespace TwilightDream::auto_search_differential
 		const auto old_fill = std::cout.fill();
 
 		TwilightDream::runtime_component::print_progress_prefix( std::cout );
-		std::cout << "[Progress] nodes=" << context.visited_node_count << "  nodes_per_sec=" << std::fixed << std::setprecision( 2 ) << rate << "  elapsed_sec=" << std::fixed << std::setprecision( 2 ) << elapsed << "  best_weight=" << ( ( context.best_total_weight >= INFINITE_WEIGHT ) ? -1 : context.best_total_weight );
+		std::cout << "[Progress] visited_node_count=" << context.visited_node_count
+				  << "  visited_nodes_per_second=" << std::fixed << std::setprecision( 2 ) << rate
+				  << "  elapsed_seconds=" << std::fixed << std::setprecision( 2 ) << elapsed
+				  << "  best_total_weight=" << ( ( context.best_total_weight >= INFINITE_WEIGHT ) ? -1 : context.best_total_weight );
 		if ( round_boundary_depth_hint >= 0 )
 		{
-			std::cout << "  depth=" << round_boundary_depth_hint << "/" << context.configuration.round_count;
+			std::cout << "  current_depth=" << round_boundary_depth_hint << "  total_rounds=" << context.configuration.round_count;
 		}
 		if ( context.progress_print_differences )
 		{
 			std::cout << "  ";
-			print_word32_hex( "start_dA=", context.start_difference_a );
+			print_word32_hex( "start_difference_branch_a=", context.start_difference_a );
 			std::cout << " ";
-			print_word32_hex( "start_dB=", context.start_difference_b );
+			print_word32_hex( "start_difference_branch_b=", context.start_difference_b );
 			if ( !context.best_differential_trail.empty() )
 			{
 				const auto& r1 = context.best_differential_trail.front();
 				const auto& rn = context.best_differential_trail.back();
 				std::cout << " ";
-				print_word32_hex( "best_r1_dA=", r1.output_branch_a_difference );
+				print_word32_hex( "best_trail_round1_output_difference_branch_a=", r1.output_branch_a_difference );
 				std::cout << " ";
-				print_word32_hex( "best_r1_dB=", r1.output_branch_b_difference );
+				print_word32_hex( "best_trail_round1_output_difference_branch_b=", r1.output_branch_b_difference );
 				std::cout << " ";
-				print_word32_hex( "best_out_dA=", rn.output_branch_a_difference );
+				print_word32_hex( "best_trail_output_difference_branch_a=", rn.output_branch_a_difference );
 				std::cout << " ";
-				print_word32_hex( "best_out_dB=", rn.output_branch_b_difference );
+				print_word32_hex( "best_trail_output_difference_branch_b=", rn.output_branch_b_difference );
 			}
 		}
 		std::cout << "\n";
@@ -878,6 +1054,641 @@ namespace TwilightDream::auto_search_differential
 		context.progress_last_print_time = now;
 		context.progress_last_print_nodes = context.visited_node_count;
 	}
+
+	// Per-round shared state for nested enumeration (moved out for checkpointing).
+	struct DifferentialRoundSearchState
+	{
+		int round_boundary_depth = 0;
+		int accumulated_weight_so_far = 0;
+		int remaining_round_weight_lower_bound_after_this_round = 0;
+
+		std::uint32_t branch_a_input_difference = 0;
+		std::uint32_t branch_b_input_difference = 0;
+
+		DifferentialTrailStepRecord base_step {};
+
+		std::uint32_t first_addition_term_difference = 0;
+		std::uint32_t optimal_output_branch_b_difference_after_first_addition = 0;
+		int			  optimal_weight_first_addition = 0;
+		int			  weight_cap_first_addition = 0;
+
+		std::uint32_t output_branch_b_difference_after_first_addition = 0;
+		int			  weight_first_addition = 0;
+		int			  accumulated_weight_after_first_addition = 0;
+
+		std::uint32_t output_branch_a_difference_after_first_constant_subtraction = 0;
+		int			  weight_first_constant_subtraction = 0;
+		int			  accumulated_weight_after_first_constant_subtraction = 0;
+
+		std::uint32_t branch_a_difference_after_first_xor_with_rotated_branch_b = 0;
+		std::uint32_t branch_b_difference_after_first_xor_with_rotated_branch_a = 0;
+		std::uint32_t branch_b_difference_after_linear_layer_one_backward = 0;
+
+		int			  weight_injection_from_branch_b = 0;
+		int			  accumulated_weight_before_second_addition = 0;
+		std::uint32_t injection_from_branch_b_xor_difference = 0;
+		std::uint32_t branch_a_difference_after_injection_from_branch_b = 0;
+
+		std::uint32_t second_addition_term_difference = 0;
+		std::uint32_t optimal_output_branch_a_difference_after_second_addition = 0;
+		int			  optimal_weight_second_addition = 0;
+		int			  weight_cap_second_addition = 0;
+
+		std::uint32_t output_branch_a_difference_after_second_addition = 0;
+		int			  weight_second_addition = 0;
+		int			  accumulated_weight_after_second_addition = 0;
+
+		std::uint32_t output_branch_b_difference_after_second_constant_subtraction = 0;
+		int			  weight_second_constant_subtraction = 0;
+		int			  accumulated_weight_after_second_constant_subtraction = 0;
+
+		std::uint32_t branch_b_difference_after_second_xor_with_rotated_branch_a = 0;
+		std::uint32_t branch_a_difference_after_second_xor_with_rotated_branch_b = 0;
+
+		int			  weight_injection_from_branch_a = 0;
+		int			  accumulated_weight_at_round_end = 0;
+		std::uint32_t injection_from_branch_a_xor_difference = 0;
+
+		std::uint32_t output_branch_a_difference = 0;
+		std::uint32_t output_branch_b_difference = 0;
+	};
+
+	// ============================================================================
+	// Resumable enumerators (preserve traversal order)
+	// ============================================================================
+
+	static inline bool enumerate_add_shell_exact_collect(
+		DifferentialBestSearchContext& context,
+		std::uint32_t alpha,
+		std::uint32_t beta,
+		std::uint32_t output_hint,
+		int target_weight,
+		int word_bits,
+		std::vector<std::uint32_t>& out_shell,
+		bool& stop_due_to_limits )
+	{
+		out_shell.clear();
+		stop_due_to_limits = false;
+		if ( target_weight < 0 )
+			return false;
+
+		if ( word_bits < 1 )
+			return true;
+		if ( word_bits > 32 )
+			word_bits = 32;
+		const std::uint32_t mask = ( word_bits == 32 ) ? 0xFFFFFFFFu : ( ( 1u << word_bits ) - 1u );
+		alpha &= mask;
+		beta &= mask;
+		output_hint &= mask;
+
+		struct Frame
+		{
+			int			  bit_position = 0;
+			std::uint32_t prefix = 0;
+			std::uint32_t prefer = 0;
+			std::uint8_t  state = 0;	// 0=enter, 1=after prefer-branch, 2=done
+		};
+
+		static constexpr int MAX_STACK = 33;
+		std::array<Frame, MAX_STACK> stack {};
+		int							 stack_step = 0;
+		stack[ stack_step++ ] = Frame { 0, 0u, 0u, 0 };
+
+		while ( stack_step > 0 )
+		{
+			Frame& frame = stack[ stack_step - 1 ];
+
+			if ( frame.state == 0 )
+			{
+				++context.visited_node_count;
+				if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+				{
+					stop_due_to_limits = true;
+					return false;
+				}
+				maybe_print_single_run_progress( context, -1 );
+
+				if ( frame.bit_position > 0 )
+				{
+					const int w_prefix = xdp_add_lm2001_n( alpha, beta, frame.prefix, frame.bit_position );
+					if ( w_prefix < 0 || w_prefix > target_weight )
+					{
+						--stack_step;
+						continue;
+					}
+					const int remaining_max = word_bits - frame.bit_position;
+					if ( w_prefix + remaining_max < target_weight )
+					{
+						--stack_step;
+						continue;
+					}
+					if ( frame.bit_position == word_bits )
+					{
+						if ( w_prefix == target_weight )
+							out_shell.push_back( frame.prefix );
+						--stack_step;
+						continue;
+					}
+				}
+
+				frame.prefer = ( output_hint >> frame.bit_position ) & 1u;
+				frame.state = 1;
+				stack[ stack_step++ ] = Frame { frame.bit_position + 1, frame.prefix | ( frame.prefer << frame.bit_position ), 0u, 0 };
+				continue;
+			}
+
+			if ( frame.state == 1 )
+			{
+				if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+				{
+					stop_due_to_limits = true;
+					return false;
+				}
+
+				frame.state = 2;
+				const std::uint32_t other = 1u - frame.prefer;
+				stack[ stack_step++ ] = Frame { frame.bit_position + 1, frame.prefix | ( other << frame.bit_position ), 0u, 0 };
+				continue;
+			}
+
+			--stack_step;
+		}
+
+		return true;
+	}
+
+	struct ModularAdditionEnumerator
+	{
+		struct Frame
+		{
+			int			  bit_position = 0;
+			std::uint32_t prefix = 0;
+			std::uint32_t prefer = 0;
+			std::uint8_t  state = 0;  // 0=enter, 1=after prefer-branch, 2=done
+		};
+
+		static constexpr int MAX_STACK = 33;
+
+		bool initialized = false;
+		bool stop_due_to_limits = false;
+		bool dfs_active = false;
+		bool using_cached_shell = false;
+		std::uint32_t alpha = 0;
+		std::uint32_t beta = 0;
+		std::uint32_t output_hint = 0;
+		int			  weight_cap = 0;
+		int			  target_weight = 0;
+		int			  word_bits = 32;
+		std::size_t	  shell_index = 0;
+		std::vector<std::uint32_t> shell_cache {};
+		int			  stack_step = 0;
+		std::array<Frame, MAX_STACK> stack {};
+
+		void reset( std::uint32_t a, std::uint32_t b, std::uint32_t hint, int cap, int bit_position = 0, std::uint32_t prefix = 0, int bits = 32 )
+		{
+			initialized = true;
+			stop_due_to_limits = false;
+			dfs_active = false;
+			using_cached_shell = false;
+			alpha = a;
+			beta = b;
+			word_bits = std::clamp( bits, 1, 32 );
+			const std::uint32_t mask = ( word_bits == 32 ) ? 0xFFFFFFFFu : ( ( 1u << word_bits ) - 1u );
+			alpha &= mask;
+			beta &= mask;
+			output_hint = hint & mask;
+			weight_cap = std::min( cap, word_bits - 1 );
+			target_weight = 0;
+			shell_index = 0;
+			shell_cache.clear();
+			stack_step = 0;
+			stack[ stack_step++ ] = Frame { bit_position, prefix, 0u, 0 };
+		}
+
+		bool next( DifferentialBestSearchContext& context, std::uint32_t& out_gamma, int& out_weight )
+		{
+			if ( !initialized || stop_due_to_limits )
+				return false;
+
+			while ( true )
+			{
+				if ( weight_cap < 0 || target_weight > weight_cap )
+					return false;
+
+				// If we are iterating a cached shell, emit from it.
+				if ( using_cached_shell )
+				{
+					if ( shell_cache.empty() )
+					{
+						// Resume path: rebuild the shell cache if possible.
+						bool cache_hit = false;
+						if ( context.configuration.enable_wpddt_cache && target_weight <= context.configuration.wpddt_max_cached_weight )
+						{
+							std::vector<std::uint32_t> tmp;
+							if ( g_weight_shell_cache.try_get_shell( alpha, beta, target_weight, word_bits, tmp ) )
+							{
+								cache_hit = true;
+								shell_cache = std::move( tmp );
+							}
+						}
+						if ( cache_hit && shell_cache.empty() )
+						{
+							using_cached_shell = false;
+							shell_cache.clear();
+							shell_index = 0;
+							++target_weight;
+							continue;
+						}
+						if ( shell_cache.empty() )
+						{
+							bool stop = false;
+							if ( !enumerate_add_shell_exact_collect( context, alpha, beta, output_hint, target_weight, word_bits, shell_cache, stop ) )
+							{
+								stop_due_to_limits = stop;
+								return false;
+							}
+						}
+					}
+
+					if ( shell_index < shell_cache.size() )
+					{
+						out_gamma = shell_cache[ shell_index++ ];
+						out_weight = target_weight;
+						return true;
+					}
+
+					using_cached_shell = false;
+					shell_cache.clear();
+					shell_index = 0;
+					++target_weight;
+					continue;
+				}
+
+				// Weight-sliced pDDT cached shell path (low weights).
+				if ( context.configuration.enable_wpddt_cache && target_weight <= context.configuration.wpddt_max_cached_weight )
+				{
+					std::vector<std::uint32_t> shell;
+					if ( g_weight_shell_cache.try_get_shell( alpha, beta, target_weight, word_bits, shell ) )
+					{
+						if ( shell.empty() )
+						{
+							++target_weight;
+							continue;
+						}
+						shell_cache = std::move( shell );
+						using_cached_shell = true;
+						shell_index = 0;
+						continue;
+					}
+
+					bool stop = false;
+					if ( !enumerate_add_shell_exact_collect( context, alpha, beta, output_hint, target_weight, word_bits, shell, stop ) )
+					{
+						stop_due_to_limits = stop;
+						return false;
+					}
+					g_weight_shell_cache.maybe_put_shell( alpha, beta, target_weight, word_bits, shell );
+					if ( shell.empty() )
+					{
+						++target_weight;
+						continue;
+					}
+					shell_cache = std::move( shell );
+					using_cached_shell = true;
+					shell_index = 0;
+					continue;
+				}
+
+				// DFS shell enumeration (exact, resumable).
+				if ( !dfs_active )
+				{
+					dfs_active = true;
+					stack_step = 0;
+					stack[ stack_step++ ] = Frame { 0, 0u, 0u, 0 };
+				}
+
+				while ( stack_step > 0 )
+				{
+					Frame& frame = stack[ stack_step - 1 ];
+
+					if ( frame.state == 0 )
+					{
+						++context.visited_node_count;
+						if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+						{
+							stop_due_to_limits = true;
+							return false;
+						}
+						maybe_print_single_run_progress( context, -1 );
+
+						if ( frame.bit_position > 0 )
+						{
+							const int w_prefix = xdp_add_lm2001_n( alpha, beta, frame.prefix, frame.bit_position );
+							if ( w_prefix < 0 || w_prefix > target_weight )
+							{
+								--stack_step;
+								continue;
+							}
+							const int remaining_max = word_bits - frame.bit_position;
+							if ( w_prefix + remaining_max < target_weight )
+							{
+								--stack_step;
+								continue;
+							}
+							if ( frame.bit_position == word_bits )
+							{
+								if ( w_prefix == target_weight )
+								{
+									out_gamma = frame.prefix;
+									out_weight = w_prefix;
+									--stack_step;
+									return true;
+								}
+								--stack_step;
+								continue;
+							}
+						}
+
+						frame.prefer = ( output_hint >> frame.bit_position ) & 1u;
+						frame.state = 1;
+						stack[ stack_step++ ] = Frame { frame.bit_position + 1, frame.prefix | ( frame.prefer << frame.bit_position ), 0u, 0 };
+						continue;
+					}
+
+					if ( frame.state == 1 )
+					{
+						if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+						{
+							stop_due_to_limits = true;
+							return false;
+						}
+
+						frame.state = 2;
+						const std::uint32_t other = 1u - frame.prefer;
+						stack[ stack_step++ ] = Frame { frame.bit_position + 1, frame.prefix | ( other << frame.bit_position ), 0u, 0 };
+						continue;
+					}
+
+					--stack_step;
+				}
+
+				// Finished this shell; move to next weight.
+				dfs_active = false;
+				++target_weight;
+			}
+		}
+	};
+
+	struct SubConstEnumerator
+	{
+		struct Frame
+		{
+			int							 bit_position = 0;
+			std::uint32_t				 prefix = 0;
+			std::array<std::uint64_t, 4> prefix_counts {};
+			std::uint32_t				 preferred_bit = 0;
+			std::uint8_t				 state = 0;  // 0=enter, 1=after preferred-branch, 2=done
+		};
+
+		static constexpr int MAX_STACK = 33;
+		static constexpr int SLACK = 8;
+
+		bool initialized = false;
+		bool stop_due_to_limits = false;
+		std::uint32_t input_difference = 0;
+		std::uint32_t subtractive_constant = 0;
+		std::uint32_t additive_constant = 0;
+		std::uint32_t output_hint = 0;
+		int						  cap_bitvector = 0;
+		int						  cap_dynamic_planning = 0;
+		int						  stack_step = 0;
+		std::array<Frame, MAX_STACK> stack {};
+
+		void reset( std::uint32_t dx, std::uint32_t sub_const, int bvweight_cap )
+		{
+			initialized = true;
+			stop_due_to_limits = false;
+			input_difference = dx;
+			subtractive_constant = sub_const;
+			cap_bitvector = std::clamp( bvweight_cap, 0, 32 );
+			cap_dynamic_planning = std::min( 32, cap_bitvector + SLACK );
+			additive_constant = std::uint32_t( 0u ) - subtractive_constant;
+			output_hint = compute_greedy_output_difference_for_addition_by_constant( input_difference, additive_constant );
+			stack_step = 0;
+			std::array<std::uint64_t, 4> prefix_counts {};
+			prefix_counts[ 0 ] = 1;
+			stack[ stack_step++ ] = Frame { 0, 0u, prefix_counts, 0u, 0 };
+		}
+
+		bool next( DifferentialBestSearchContext& context, std::uint32_t& out_difference, int& out_weight )
+		{
+			if ( !initialized || stop_due_to_limits )
+				return false;
+
+			while ( stack_step > 0 )
+			{
+				Frame& frame = stack[ stack_step - 1 ];
+
+				if ( frame.state == 0 )
+				{
+					++context.visited_node_count;
+					if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+					{
+						stop_due_to_limits = true;
+						return false;
+					}
+					maybe_print_single_run_progress( context, -1 );
+
+					if ( frame.bit_position > 0 )
+					{
+						const std::uint64_t total_prefix_count = frame.prefix_counts[ 0 ] + frame.prefix_counts[ 1 ] + frame.prefix_counts[ 2 ] + frame.prefix_counts[ 3 ];
+						if ( total_prefix_count == 0 )
+						{
+							--stack_step;
+							continue;
+						}
+						const int log2_total_prefix_count = floor_log2_uint64( total_prefix_count );
+						const int prefix_weight_estimate = frame.bit_position - log2_total_prefix_count;
+						if ( prefix_weight_estimate > cap_dynamic_planning )
+						{
+							--stack_step;
+							continue;
+						}
+					}
+
+					if ( frame.bit_position == 32 )
+					{
+						const int weight = diff_subconst_bvweight( input_difference, subtractive_constant, frame.prefix );
+						if ( weight >= 0 && weight <= cap_bitvector )
+						{
+							out_difference = frame.prefix;
+							out_weight = weight;
+							--stack_step;
+							return true;
+						}
+						--stack_step;
+						continue;
+					}
+
+					const std::uint32_t input_difference_bit = ( input_difference >> frame.bit_position ) & 1u;
+					const std::uint32_t additive_constant_bit = ( additive_constant >> frame.bit_position ) & 1u;
+					frame.preferred_bit = ( output_hint >> frame.bit_position ) & 1u;
+
+					const auto next_prefix_counts = compute_next_prefix_counts_for_addition_by_constant_at_bit( frame.prefix_counts, input_difference_bit, additive_constant_bit, frame.preferred_bit );
+					frame.state = 1;
+					stack[ stack_step++ ] = Frame { frame.bit_position + 1, frame.prefix | ( frame.preferred_bit << frame.bit_position ), next_prefix_counts, 0u, 0 };
+					continue;
+				}
+
+				if ( frame.state == 1 )
+				{
+					if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+					{
+						stop_due_to_limits = ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes );
+						return false;
+					}
+
+					const std::uint32_t input_difference_bit = ( input_difference >> frame.bit_position ) & 1u;
+					const std::uint32_t additive_constant_bit = ( additive_constant >> frame.bit_position ) & 1u;
+					const std::uint32_t other_bit = 1u - frame.preferred_bit;
+					const auto			next_prefix_counts = compute_next_prefix_counts_for_addition_by_constant_at_bit( frame.prefix_counts, input_difference_bit, additive_constant_bit, other_bit );
+
+					frame.state = 2;
+					stack[ stack_step++ ] = Frame { frame.bit_position + 1, frame.prefix | ( other_bit << frame.bit_position ), next_prefix_counts, 0u, 0 };
+					continue;
+				}
+
+				--stack_step;
+			}
+
+			return false;
+		}
+	};
+
+	struct AffineSubspaceEnumerator
+	{
+		struct Frame
+		{
+			int			  basis_index = 0;
+			std::uint32_t current_difference = 0;
+			std::uint8_t  state = 0;  // 0=enter, 1=after branch0
+		};
+
+		static constexpr int MAX_STACK = 33;
+
+		bool initialized = false;
+		bool stop_due_to_limits = false;
+		InjectionAffineTransition transition {};
+		std::size_t maximum_output_difference_count = 0;
+		std::size_t produced_output_difference_count = 0;
+		int		  stack_step = 0;
+		std::array<Frame, MAX_STACK> stack {};
+
+		void reset( const InjectionAffineTransition& t, std::size_t max_outputs )
+		{
+			initialized = true;
+			stop_due_to_limits = false;
+			transition = t;
+			maximum_output_difference_count = max_outputs;
+			produced_output_difference_count = 0;
+			stack_step = 0;
+			stack[ stack_step++ ] = Frame { 0, transition.offset, 0 };
+		}
+
+		bool next( DifferentialBestSearchContext& context, std::uint32_t& out_difference )
+		{
+			if ( !initialized || stop_due_to_limits )
+				return false;
+
+			while ( stack_step > 0 )
+			{
+				if ( maximum_output_difference_count != 0 && produced_output_difference_count >= maximum_output_difference_count )
+					return false;
+
+				Frame& frame = stack[ stack_step - 1 ];
+
+				if ( frame.state == 0 )
+				{
+					++context.visited_node_count;
+					if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+					{
+						stop_due_to_limits = true;
+						return false;
+					}
+					maybe_print_single_run_progress( context, -1 );
+
+					if ( frame.basis_index >= transition.rank_weight )
+					{
+						out_difference = frame.current_difference;
+						++produced_output_difference_count;
+						--stack_step;
+						return true;
+					}
+
+					frame.state = 1;
+					stack[ stack_step++ ] = Frame { frame.basis_index + 1, frame.current_difference, 0 };
+					continue;
+				}
+
+				if ( context.configuration.maximum_search_nodes != 0 && context.visited_node_count > context.configuration.maximum_search_nodes )
+				{
+					stop_due_to_limits = true;
+					return false;
+				}
+				if ( maximum_output_difference_count != 0 && produced_output_difference_count >= maximum_output_difference_count )
+					return false;
+
+				frame = Frame { frame.basis_index + 1, frame.current_difference ^ transition.basis_vectors[ size_t( frame.basis_index ) ], 0 };
+			}
+
+			return false;
+		}
+	};
+
+	enum class DifferentialSearchStage : std::uint8_t
+	{
+		Enter = 0,
+		FirstAdd = 1,
+		FirstConst = 2,
+		InjB = 3,
+		SecondAdd = 4,
+		SecondConst = 5,
+		InjA = 6
+	};
+
+	struct DifferentialSearchFrame
+	{
+		DifferentialSearchStage stage = DifferentialSearchStage::Enter;
+		std::size_t			   trail_size_at_entry = 0;
+		DifferentialRoundSearchState state {};
+		ModularAdditionEnumerator	  enum_first_add {};
+		SubConstEnumerator			  enum_first_const {};
+		AffineSubspaceEnumerator	  enum_inj_b {};
+		ModularAdditionEnumerator	  enum_second_add {};
+		SubConstEnumerator			  enum_second_const {};
+		AffineSubspaceEnumerator	  enum_inj_a {};
+	};
+
+	struct DifferentialSearchCursor
+	{
+		std::vector<DifferentialSearchFrame> stack;
+	};
+
+	struct BinaryCheckpointManager
+	{
+		std::string path {};
+		std::uint64_t every_seconds = 0;
+		bool pending_best = false;
+		std::chrono::steady_clock::time_point last_write_time {};
+
+		bool enabled() const { return !path.empty(); }
+		bool pending_best_change() const { return pending_best; }
+		void mark_best_changed() { pending_best = true; }
+
+		// Implemented later (needs serialization helpers).
+		void poll( const DifferentialBestSearchContext& context, const DifferentialSearchCursor& cursor );
+		bool write_now( const DifferentialBestSearchContext& context, const DifferentialSearchCursor& cursor, const char* reason );
+	};
 
 	static int compute_greedy_upper_bound_weight( const DifferentialBestSearchConfiguration& search_configuration, std::uint32_t initial_branch_a_difference, std::uint32_t initial_branch_b_difference )
 	{
@@ -915,8 +1726,7 @@ namespace TwilightDream::auto_search_differential
 				current_branch_a_difference ^= injection_transition.offset;
 			}
 
-			// Linear layer on branch B
-			current_branch_b_difference = NeoAlzetteCore::l1_backward( current_branch_b_difference );
+			// Linear layer on branch B (L1 removed)
 
 			// Second modular addition on branch A
 			const std::uint32_t second_addition_term_difference = NeoAlzetteCore::rotl<std::uint32_t>( current_branch_b_difference, 31 ) ^ NeoAlzetteCore::rotl<std::uint32_t>( current_branch_b_difference, 17 );
@@ -945,8 +1755,7 @@ namespace TwilightDream::auto_search_differential
 				current_branch_b_difference ^= injection_transition.offset;
 			}
 
-			// Linear layer on branch A
-			current_branch_a_difference = NeoAlzetteCore::l2_backward( current_branch_a_difference );
+			// Linear layer on branch A (L2 removed)
 		}
 		if ( total_weight > INFINITE_WEIGHT )
 			return INFINITE_WEIGHT;
@@ -1004,8 +1813,8 @@ namespace TwilightDream::auto_search_differential
 			step_record.branch_a_difference_after_injection_from_branch_b = step_record.branch_a_difference_after_first_xor_with_rotated_branch_b ^ step_record.injection_from_branch_b_xor_difference;
 			total_weight += step_record.weight_injection_from_branch_b;
 
-			// Linear layer on branch B
-			step_record.branch_b_difference_after_linear_layer_one_backward = NeoAlzetteCore::l1_backward( step_record.branch_b_difference_after_first_xor_with_rotated_branch_a );
+			// Linear layer on branch B (L1 removed)
+			step_record.branch_b_difference_after_linear_layer_one_backward = step_record.branch_b_difference_after_first_xor_with_rotated_branch_a;
 
 			// Second modular addition on branch A
 			step_record.second_addition_term_difference = NeoAlzetteCore::rotl<std::uint32_t>( step_record.branch_b_difference_after_linear_layer_one_backward, 31 ) ^ NeoAlzetteCore::rotl<std::uint32_t>( step_record.branch_b_difference_after_linear_layer_one_backward, 17 );
@@ -1041,7 +1850,7 @@ namespace TwilightDream::auto_search_differential
 
 			// End-of-round boundary differences
 			step_record.output_branch_b_difference = step_record.branch_b_difference_after_second_xor_with_rotated_branch_a ^ step_record.injection_from_branch_a_xor_difference;
-			step_record.output_branch_a_difference = NeoAlzetteCore::l2_backward( step_record.branch_a_difference_after_second_xor_with_rotated_branch_b );
+			step_record.output_branch_a_difference = step_record.branch_a_difference_after_second_xor_with_rotated_branch_b;
 
 			step_record.round_weight = step_record.weight_first_addition + step_record.weight_first_constant_subtraction + step_record.weight_injection_from_branch_b + step_record.weight_second_addition + step_record.weight_second_constant_subtraction + step_record.weight_injection_from_branch_a;
 
@@ -1211,7 +2020,7 @@ namespace TwilightDream::auto_search_differential
 	//   offset ⊕ span(basis_vectors)
 	//
 	// Why is this a template with `OnOutputDifferenceFn&&`?
-	// - `OnOutputDifferenceFn` here means a callable type (a function object), NOT "faith/belief" (信念).
+	// - `OnOutputDifferenceFn` here means a callable type (a function object), NOT "faith/belief".
 	// - `on_output_difference` is a callback that will be INVOKED for every generated output difference.
 	//   Call sites typically pass a lambda that captures the current search state and immediately scores/prunes.
 	// - This design avoids allocating/storing all differences in a container, and avoids `std::function`'s
@@ -1302,15 +2111,14 @@ namespace TwilightDream::auto_search_differential
 	}
 
 	template <class OnOutputDifference>
-	static void enumerate_addition_by_constant_output_differences_by_bit_recursion( DifferentialBestSearchContext& search_context, std::uint32_t input_difference, std::uint32_t additive_constant, std::uint32_t output_difference_hint, int bit_position, std::uint32_t output_difference_prefix, std::array<std::uint64_t, 4> prefix_counts_by_carry_pair_state, int weight_cap_for_prefix_count_pruning, std::size_t& produced_output_difference_count, std::size_t maximum_output_difference_count, OnOutputDifference&& on_output_difference )
+	static void enumerate_addition_by_constant_output_differences_by_bit_recursion( DifferentialBestSearchContext& search_context, std::uint32_t input_difference, std::uint32_t additive_constant, std::uint32_t output_difference_hint, int bit_position, std::uint32_t output_difference_prefix, std::array<std::uint64_t, 4> prefix_counts_by_carry_pair_state, int weight_cap_for_prefix_count_pruning, OnOutputDifference&& on_output_difference )
 	{
 		// Iterative DFS to avoid recursion overhead.
 		// IMPORTANT: preserve the recursive version's:
-		// - max-output cap checks (produced_output_difference_count is updated by the callback)
 		// - pre-order node budget check per frame (visited_node_count++)
 		// - maybe_print placement
 		// - branch order: preferred bit first, then (1-preferred)
-		// - between-branch stop checks (max nodes OR max outputs)
+		// - between-branch stop checks (max nodes)
 		struct Frame
 		{
 			int							 bit_position = 0;
@@ -1329,10 +2137,6 @@ namespace TwilightDream::auto_search_differential
 
 		while ( stack_step > 0 )
 		{
-			// maximum_output_difference_count == 0 means "no cap" (enumerate all).
-			if ( maximum_output_difference_count != 0 && produced_output_difference_count >= maximum_output_difference_count )
-				return;
-
 			Frame& frame = stack[ stack_step - 1 ];
 
 			if ( frame.state == 0 )
@@ -1377,7 +2181,7 @@ namespace TwilightDream::auto_search_differential
 
 			if ( frame.state == 1 )
 			{
-				if ( ( search_context.configuration.maximum_search_nodes != 0 && search_context.visited_node_count > search_context.configuration.maximum_search_nodes ) || ( maximum_output_difference_count != 0 && produced_output_difference_count >= maximum_output_difference_count ) )
+				if ( search_context.configuration.maximum_search_nodes != 0 && search_context.visited_node_count > search_context.configuration.maximum_search_nodes )
 					return;
 
 				const std::uint32_t input_difference_bit = ( input_difference >> frame.bit_position ) & 1u;
@@ -1395,36 +2199,32 @@ namespace TwilightDream::auto_search_differential
 	}
 
 	template <class OnOutputDifferenceFn>
-	static void enumerate_subtraction_by_constant_output_differences( DifferentialBestSearchContext& search_context, std::uint32_t input_difference, std::uint32_t subtractive_constant, int bvweight_cap, std::size_t maximum_output_difference_count, OnOutputDifferenceFn&& on_out )
+	static void enumerate_subtraction_by_constant_output_differences( DifferentialBestSearchContext& search_context, std::uint32_t input_difference, std::uint32_t subtractive_constant, int bvweight_cap, OnOutputDifferenceFn&& on_out )
 	{
 		// Enumerate Δout for y=x-subtractive_constant using DP enumeration, then score with diff_subconst_bvweight.
-		// We allow some slack between DP-pruning weight and bvweight to avoid missing candidates
-		// due to approximation differences.
+		// Exact enumeration (no max-candidate cap). We allow some slack between DP-pruning weight and bvweight
+		// to avoid missing candidates due to approximation differences.
 		constexpr int SLACK = 8;
 		const int	  cap_bitvector = std::clamp( bvweight_cap, 0, 32 );
 		const int	  cap_dynamic_planning = std::min( 32, cap_bitvector + SLACK );
-
-		const std::uint32_t additive_constant = std::uint32_t( 0u ) - subtractive_constant;	 // x - c == x + (-c) (mod 2^32)
+	
+		const std::uint32_t additive_constant = std::uint32_t( 0u ) - subtractive_constant;  // x - c == x + (-c) (mod 2^32)
 		const std::uint32_t output_difference_hint = compute_greedy_output_difference_for_addition_by_constant( input_difference, additive_constant );
-
+	
 		std::array<std::uint64_t, 4> prefix_counts_by_carry_pair_state {};
-		prefix_counts_by_carry_pair_state[ 0 ] = 1;	 // (carry,carry')=(0,0)
-		std::size_t produced_output_difference_count = 0;
-
-		enumerate_addition_by_constant_output_differences_by_bit_recursion
-		(
-			search_context, input_difference, additive_constant, output_difference_hint, 0, 0u, prefix_counts_by_carry_pair_state, cap_dynamic_planning, produced_output_difference_count, maximum_output_difference_count, 
-			[ & ]( std::uint32_t output_difference
-		) 
-		{
-			const int weight = diff_subconst_bvweight( input_difference, subtractive_constant, output_difference );
-			if ( weight < 0 )
-				return;
-			if ( weight > cap_bitvector )
-				return;
-			on_out( output_difference, weight );
-			++produced_output_difference_count;
-		} );
+		prefix_counts_by_carry_pair_state[ 0 ] = 1;  // (carry,carry')=(0,0)
+	
+		enumerate_addition_by_constant_output_differences_by_bit_recursion(
+			search_context, input_difference, additive_constant, output_difference_hint, 0, 0u, prefix_counts_by_carry_pair_state, cap_dynamic_planning,
+			[ & ]( std::uint32_t output_difference )
+			{
+				const int weight = diff_subconst_bvweight( input_difference, subtractive_constant, output_difference );
+				if ( weight < 0 )
+					return;
+				if ( weight > cap_bitvector )
+					return;
+				on_out( output_difference, weight );
+			} );
 	}
 
 	//ARX Automatic Search Frame - Differential Analysis Paper:
@@ -1435,18 +2235,7 @@ namespace TwilightDream::auto_search_differential
 	public:
 		
 		// Differential round model (Δ denotes XOR difference; constants do not change Δ directly):
-		//   T0 = ROTL_31(A0) ⊕ ROTL_17(A0) ⊕ RC0
-		//   B1 = B0 ⊞ T0,  A1 = A0 ⊟ RC1
-		//   A2 = A1 ⊕ ROTL_{R0}(B1),  B2 = B1 ⊕ ROTL_{R1}(A2)
-		//   (C0,D0) = cd_injection_from_B(B2; rc0,rc1)
-		//   A3 = A2 ⊕ ROTL_24(C0) ⊕ ROTL_16(D0) ⊕ RC4,  B3 = L1^{-1}(B2)
-		//   T1 = ROTL_31(B3) ⊕ ROTL_17(B3) ⊕ RC5
-		//   A4 = A3 ⊞ T1,  B4 = B3 ⊟ RC6
-		//   B5 = B4 ⊕ ROTL_{R0}(A4),  A5 = A4 ⊕ ROTL_{R1}(B5)
-		//   (C1,D1) = cd_injection_from_A(A5; rc0,rc1)
-		//   B6 = B5 ⊕ ROTL_24(C1) ⊕ ROTL_16(D1) ⊕ RC9,  A6 = L2^{-1}(A5)
-		//   A_out = A6 ⊕ RC10,  B_out = B6 ⊕ RC11
-		// Differences: ΔT0 = ROTL_31(ΔA0) ⊕ ROTL_17(ΔA0), ΔT1 = ROTL_31(ΔB3) ⊕ ROTL_17(ΔB3).
+
 		// Engineering: DFS over reachable Δ values; probabilistic steps use BV-weight (≈ -log2 Pr),
 		// with Matsui-style pruning: prune if W_acc + W_rem >= W_best.
 		explicit DifferentialBestTrailSearcher( DifferentialBestSearchContext& search_context_in )
@@ -1732,7 +2521,7 @@ namespace TwilightDream::auto_search_differential
 			return true;
 		}
 
-		// Enumerate ΔB1 for B1 = B0 ⊞ T0.
+		// Enumerate ΔB1 for B1 = B0 ⊕ T0.
 		// Engineering: bit-recursion enumerator yields (ΔB1, w_add0) candidates.
 		void enumerate_first_addition_candidates()
 		{
@@ -1771,7 +2560,7 @@ namespace TwilightDream::auto_search_differential
 
 			enumerate_subtraction_by_constant_output_differences
 			(
-				search_context, state.branch_a_input_difference, round_constant_for_first_subtraction, weight_cap_first_constant_subtraction, search_context.configuration.maximum_constant_subtraction_candidates,
+				search_context, state.branch_a_input_difference, round_constant_for_first_subtraction, weight_cap_first_constant_subtraction,
 				[ this ]( std::uint32_t output_branch_a_difference_after_first_constant_subtraction, int weight_first_constant_subtraction )
 				{
 					handle_first_constant_subtraction_candidate( output_branch_a_difference_after_first_constant_subtraction, weight_first_constant_subtraction );
@@ -1797,7 +2586,7 @@ namespace TwilightDream::auto_search_differential
 				output_branch_a_difference_after_first_constant_subtraction ^ NeoAlzetteCore::rotl<std::uint32_t>( state.output_branch_b_difference_after_first_addition, NeoAlzetteCore::CROSS_XOR_ROT_R0 );
 			state.branch_b_difference_after_first_xor_with_rotated_branch_a =
 				state.output_branch_b_difference_after_first_addition ^ NeoAlzetteCore::rotl<std::uint32_t>( state.branch_a_difference_after_first_xor_with_rotated_branch_b, NeoAlzetteCore::CROSS_XOR_ROT_R1 );
-			state.branch_b_difference_after_linear_layer_one_backward = NeoAlzetteCore::l1_backward( state.branch_b_difference_after_first_xor_with_rotated_branch_a );
+			state.branch_b_difference_after_linear_layer_one_backward = state.branch_b_difference_after_first_xor_with_rotated_branch_a;
 
 			const InjectionAffineTransition injection_transition_from_branch_b = compute_injection_transition_from_branch_b( state.branch_b_difference_after_first_xor_with_rotated_branch_a );
 			state.weight_injection_from_branch_b = injection_transition_from_branch_b.rank_weight;
@@ -1880,7 +2669,7 @@ namespace TwilightDream::auto_search_differential
 
 			enumerate_subtraction_by_constant_output_differences
 			(
-				search_context, state.branch_b_difference_after_linear_layer_one_backward, round_constant_for_second_subtraction, weight_cap_second_constant_subtraction, search_context.configuration.maximum_constant_subtraction_candidates,
+				search_context, state.branch_b_difference_after_linear_layer_one_backward, round_constant_for_second_subtraction, weight_cap_second_constant_subtraction,
 				[ this ]( std::uint32_t output_branch_b_difference_after_second_constant_subtraction, int weight_second_constant_subtraction )
 				{
 					handle_second_constant_subtraction_candidate( output_branch_b_difference_after_second_constant_subtraction, weight_second_constant_subtraction );
@@ -1929,7 +2718,7 @@ namespace TwilightDream::auto_search_differential
 			auto& state = current_round_state();
 			state.injection_from_branch_a_xor_difference = injection_from_branch_a_xor_difference;
 			state.output_branch_b_difference = state.branch_b_difference_after_second_xor_with_rotated_branch_a ^ injection_from_branch_a_xor_difference;
-			state.output_branch_a_difference = NeoAlzetteCore::l2_backward( state.branch_a_difference_after_second_xor_with_rotated_branch_b );
+			state.output_branch_a_difference = state.branch_a_difference_after_second_xor_with_rotated_branch_b;
 
 			if ( should_prune_with_remaining_round_lower_bound( state.accumulated_weight_at_round_end ) )
 				return;
@@ -1966,7 +2755,499 @@ namespace TwilightDream::auto_search_differential
 		}
 	};
 
-	static MatsuiSearchRunDifferentialResult run_matsui_best_search_with_injection_internal( int round_count, std::uint32_t initial_branch_a_difference, std::uint32_t initial_branch_b_difference, const DifferentialBestSearchConfiguration& input_search_configuration, bool print_output, std::uint64_t single_run_progress_every_seconds, bool progress_print_differences = false, int seeded_upper_bound_weight = INFINITE_WEIGHT, const std::vector<DifferentialTrailStepRecord>* seeded_upper_bound_trail = nullptr, BestWeightCheckpointWriter* checkpoint = nullptr )
+	// Resumable DFS searcher (explicit stack, same traversal order).
+	class DifferentialBestTrailSearcherCursor final
+	{
+	public:
+		DifferentialBestTrailSearcherCursor( DifferentialBestSearchContext& context_in, DifferentialSearchCursor& cursor_in )
+			: search_context( context_in ), cursor( cursor_in )
+		{
+		}
+
+		void search_from_start( std::uint32_t branch_a_input_difference, std::uint32_t branch_b_input_difference )
+		{
+			cursor.stack.clear();
+			search_context.current_differential_trail.clear();
+			DifferentialSearchFrame frame {};
+			frame.stage = DifferentialSearchStage::Enter;
+			frame.trail_size_at_entry = search_context.current_differential_trail.size();
+			frame.state.round_boundary_depth = 0;
+			frame.state.accumulated_weight_so_far = 0;
+			frame.state.branch_a_input_difference = branch_a_input_difference;
+			frame.state.branch_b_input_difference = branch_b_input_difference;
+			cursor.stack.push_back( frame );
+			run();
+		}
+
+		void search_from_cursor()
+		{
+			run();
+		}
+
+	private:
+		DifferentialBestSearchContext& search_context;
+		DifferentialSearchCursor&	   cursor;
+
+		DifferentialSearchFrame& current_frame()
+		{
+			return cursor.stack.back();
+		}
+
+		DifferentialRoundSearchState& current_round_state()
+		{
+			return current_frame().state;
+		}
+
+		void pop_frame()
+		{
+			if ( cursor.stack.empty() )
+				return;
+			const std::size_t target = cursor.stack.back().trail_size_at_entry;
+			if ( search_context.current_differential_trail.size() > target )
+				search_context.current_differential_trail.resize( target );
+			cursor.stack.pop_back();
+		}
+
+		void maybe_poll_checkpoint()
+		{
+			if ( !search_context.binary_checkpoint )
+				return;
+			if ( search_context.binary_checkpoint->pending_best_change() || ( ( search_context.visited_node_count & search_context.progress_node_mask ) == 0 ) )
+				search_context.binary_checkpoint->poll( search_context, cursor );
+		}
+
+		void run()
+		{
+			while ( !cursor.stack.empty() )
+			{
+				DifferentialSearchFrame&	  frame = current_frame();
+				DifferentialRoundSearchState& state = frame.state;
+
+				switch ( frame.stage )
+				{
+				case DifferentialSearchStage::Enter:
+				{
+					if ( should_stop_search( state.round_boundary_depth, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+					if ( handle_round_end_if_needed( state.round_boundary_depth, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+					if ( should_prune_state_memoization( state.round_boundary_depth, state.branch_a_input_difference, state.branch_b_input_difference, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+					if ( !prepare_round_state( state, state.round_boundary_depth, state.branch_a_input_difference, state.branch_b_input_difference, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+
+					frame.enum_first_add.reset( state.branch_b_input_difference, state.first_addition_term_difference, state.optimal_output_branch_b_difference_after_first_addition, state.weight_cap_first_addition );
+					frame.stage = DifferentialSearchStage::FirstAdd;
+					break;
+				}
+				case DifferentialSearchStage::FirstAdd:
+				{
+					std::uint32_t output_branch_b_difference_after_first_addition = 0;
+					int			  weight_first_addition = 0;
+					if ( !frame.enum_first_add.next( search_context, output_branch_b_difference_after_first_addition, weight_first_addition ) )
+					{
+						if ( frame.enum_first_add.stop_due_to_limits )
+							cursor.stack.clear();
+						else
+							pop_frame();
+						break;
+					}
+
+					state.output_branch_b_difference_after_first_addition = output_branch_b_difference_after_first_addition;
+					state.weight_first_addition = weight_first_addition;
+					state.accumulated_weight_after_first_addition = state.accumulated_weight_so_far + weight_first_addition;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_after_first_addition ) )
+						break;
+
+					const std::uint32_t round_constant_for_first_subtraction = NeoAlzetteCore::ROUND_CONSTANTS[ 1 ];
+					const int			weight_cap_first_constant_subtraction =
+						std::min( std::clamp( search_context.configuration.constant_subtraction_weight_cap, 0, 32 ),
+							search_context.best_total_weight - state.accumulated_weight_after_first_addition - state.remaining_round_weight_lower_bound_after_this_round );
+					if ( weight_cap_first_constant_subtraction < 0 )
+						break;
+
+					frame.enum_first_const.reset( state.branch_a_input_difference, round_constant_for_first_subtraction, weight_cap_first_constant_subtraction );
+					frame.stage = DifferentialSearchStage::FirstConst;
+					break;
+				}
+				case DifferentialSearchStage::FirstConst:
+				{
+					std::uint32_t output_branch_a_difference_after_first_constant_subtraction = 0;
+					int			  weight_first_constant_subtraction = 0;
+					if ( !frame.enum_first_const.next( search_context, output_branch_a_difference_after_first_constant_subtraction, weight_first_constant_subtraction ) )
+					{
+						if ( frame.enum_first_const.stop_due_to_limits )
+							cursor.stack.clear();
+						else
+							frame.stage = DifferentialSearchStage::FirstAdd;
+						break;
+					}
+
+					state.output_branch_a_difference_after_first_constant_subtraction = output_branch_a_difference_after_first_constant_subtraction;
+					state.weight_first_constant_subtraction = weight_first_constant_subtraction;
+					state.accumulated_weight_after_first_constant_subtraction = state.accumulated_weight_after_first_addition + weight_first_constant_subtraction;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_after_first_constant_subtraction ) )
+						break;
+
+					state.branch_a_difference_after_first_xor_with_rotated_branch_b =
+						output_branch_a_difference_after_first_constant_subtraction ^ NeoAlzetteCore::rotl<std::uint32_t>( state.output_branch_b_difference_after_first_addition, NeoAlzetteCore::CROSS_XOR_ROT_R0 );
+					state.branch_b_difference_after_first_xor_with_rotated_branch_a =
+						state.output_branch_b_difference_after_first_addition ^ NeoAlzetteCore::rotl<std::uint32_t>( state.branch_a_difference_after_first_xor_with_rotated_branch_b, NeoAlzetteCore::CROSS_XOR_ROT_R1 );
+					state.branch_b_difference_after_linear_layer_one_backward = state.branch_b_difference_after_first_xor_with_rotated_branch_a;
+
+					const InjectionAffineTransition injection_transition_from_branch_b = compute_injection_transition_from_branch_b( state.branch_b_difference_after_first_xor_with_rotated_branch_a );
+					state.weight_injection_from_branch_b = injection_transition_from_branch_b.rank_weight;
+					state.accumulated_weight_before_second_addition = state.accumulated_weight_after_first_constant_subtraction + state.weight_injection_from_branch_b;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_before_second_addition ) )
+						break;
+
+					frame.enum_inj_b.reset( injection_transition_from_branch_b, search_context.configuration.maximum_transition_output_differences );
+					frame.stage = DifferentialSearchStage::InjB;
+					break;
+				}
+				case DifferentialSearchStage::InjB:
+				{
+					std::uint32_t injection_from_branch_b_xor_difference = 0;
+					if ( !frame.enum_inj_b.next( search_context, injection_from_branch_b_xor_difference ) )
+					{
+						if ( frame.enum_inj_b.stop_due_to_limits )
+							cursor.stack.clear();
+						else
+							frame.stage = DifferentialSearchStage::FirstConst;
+						break;
+					}
+
+					state.injection_from_branch_b_xor_difference = injection_from_branch_b_xor_difference;
+					state.branch_a_difference_after_injection_from_branch_b = state.branch_a_difference_after_first_xor_with_rotated_branch_b ^ injection_from_branch_b_xor_difference;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_before_second_addition ) )
+						break;
+
+					state.second_addition_term_difference =
+						NeoAlzetteCore::rotl<std::uint32_t>( state.branch_b_difference_after_linear_layer_one_backward, 31 ) ^
+						NeoAlzetteCore::rotl<std::uint32_t>( state.branch_b_difference_after_linear_layer_one_backward, 17 );
+
+					const auto [ optimal_output_branch_a_difference_after_second_addition, optimal_weight_second_addition ] =
+						find_optimal_gamma_with_weight( state.branch_a_difference_after_injection_from_branch_b, state.second_addition_term_difference, 32 );
+					state.optimal_output_branch_a_difference_after_second_addition = optimal_output_branch_a_difference_after_second_addition;
+					state.optimal_weight_second_addition = optimal_weight_second_addition;
+					if ( state.optimal_weight_second_addition < 0 )
+						break;
+					if ( state.accumulated_weight_before_second_addition + state.optimal_weight_second_addition + state.remaining_round_weight_lower_bound_after_this_round >= search_context.best_total_weight )
+						break;
+
+					int weight_cap_second_addition = search_context.best_total_weight - state.accumulated_weight_before_second_addition - state.remaining_round_weight_lower_bound_after_this_round;
+					weight_cap_second_addition = std::min( weight_cap_second_addition, 31 );
+					weight_cap_second_addition = std::min( weight_cap_second_addition, std::clamp( search_context.configuration.addition_weight_cap, 0, 31 ) );
+					state.weight_cap_second_addition = weight_cap_second_addition;
+					if ( weight_cap_second_addition < 0 || state.optimal_weight_second_addition > weight_cap_second_addition )
+						break;
+
+					frame.enum_second_add.reset( state.branch_a_difference_after_injection_from_branch_b, state.second_addition_term_difference, state.optimal_output_branch_a_difference_after_second_addition, state.weight_cap_second_addition );
+					frame.stage = DifferentialSearchStage::SecondAdd;
+					break;
+				}
+				case DifferentialSearchStage::SecondAdd:
+				{
+					std::uint32_t output_branch_a_difference_after_second_addition = 0;
+					int			  weight_second_addition = 0;
+					if ( !frame.enum_second_add.next( search_context, output_branch_a_difference_after_second_addition, weight_second_addition ) )
+					{
+						if ( frame.enum_second_add.stop_due_to_limits )
+							cursor.stack.clear();
+						else
+							frame.stage = DifferentialSearchStage::InjB;
+						break;
+					}
+
+					state.output_branch_a_difference_after_second_addition = output_branch_a_difference_after_second_addition;
+					state.weight_second_addition = weight_second_addition;
+					state.accumulated_weight_after_second_addition = state.accumulated_weight_before_second_addition + weight_second_addition;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_after_second_addition ) )
+						break;
+
+					const std::uint32_t round_constant_for_second_subtraction = NeoAlzetteCore::ROUND_CONSTANTS[ 6 ];
+					const int			weight_cap_second_constant_subtraction =
+						std::min( std::clamp( search_context.configuration.constant_subtraction_weight_cap, 0, 32 ),
+							search_context.best_total_weight - state.accumulated_weight_after_second_addition - state.remaining_round_weight_lower_bound_after_this_round );
+					if ( weight_cap_second_constant_subtraction < 0 )
+						break;
+
+					frame.enum_second_const.reset( state.branch_b_difference_after_linear_layer_one_backward, round_constant_for_second_subtraction, weight_cap_second_constant_subtraction );
+					frame.stage = DifferentialSearchStage::SecondConst;
+					break;
+				}
+				case DifferentialSearchStage::SecondConst:
+				{
+					std::uint32_t output_branch_b_difference_after_second_constant_subtraction = 0;
+					int			  weight_second_constant_subtraction = 0;
+					if ( !frame.enum_second_const.next( search_context, output_branch_b_difference_after_second_constant_subtraction, weight_second_constant_subtraction ) )
+					{
+						if ( frame.enum_second_const.stop_due_to_limits )
+							cursor.stack.clear();
+						else
+							frame.stage = DifferentialSearchStage::SecondAdd;
+						break;
+					}
+
+					state.output_branch_b_difference_after_second_constant_subtraction = output_branch_b_difference_after_second_constant_subtraction;
+					state.weight_second_constant_subtraction = weight_second_constant_subtraction;
+					state.accumulated_weight_after_second_constant_subtraction = state.accumulated_weight_after_second_addition + weight_second_constant_subtraction;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_after_second_constant_subtraction ) )
+						break;
+
+					state.branch_b_difference_after_second_xor_with_rotated_branch_a =
+						output_branch_b_difference_after_second_constant_subtraction ^ NeoAlzetteCore::rotl<std::uint32_t>( state.output_branch_a_difference_after_second_addition, NeoAlzetteCore::CROSS_XOR_ROT_R0 );
+					state.branch_a_difference_after_second_xor_with_rotated_branch_b =
+						state.output_branch_a_difference_after_second_addition ^ NeoAlzetteCore::rotl<std::uint32_t>( state.branch_b_difference_after_second_xor_with_rotated_branch_a, NeoAlzetteCore::CROSS_XOR_ROT_R1 );
+
+					const InjectionAffineTransition injection_transition_from_branch_a = compute_injection_transition_from_branch_a( state.branch_a_difference_after_second_xor_with_rotated_branch_b );
+					state.weight_injection_from_branch_a = injection_transition_from_branch_a.rank_weight;
+					state.accumulated_weight_at_round_end = state.accumulated_weight_after_second_constant_subtraction + state.weight_injection_from_branch_a;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_at_round_end ) )
+						break;
+
+					frame.enum_inj_a.reset( injection_transition_from_branch_a, search_context.configuration.maximum_transition_output_differences );
+					frame.stage = DifferentialSearchStage::InjA;
+					break;
+				}
+				case DifferentialSearchStage::InjA:
+				{
+					std::uint32_t injection_from_branch_a_xor_difference = 0;
+					if ( !frame.enum_inj_a.next( search_context, injection_from_branch_a_xor_difference ) )
+					{
+						if ( frame.enum_inj_a.stop_due_to_limits )
+							cursor.stack.clear();
+						else
+							frame.stage = DifferentialSearchStage::SecondConst;
+						break;
+					}
+
+					state.injection_from_branch_a_xor_difference = injection_from_branch_a_xor_difference;
+					state.output_branch_b_difference = state.branch_b_difference_after_second_xor_with_rotated_branch_a ^ injection_from_branch_a_xor_difference;
+					state.output_branch_a_difference = state.branch_a_difference_after_second_xor_with_rotated_branch_b;
+
+					if ( should_prune_with_remaining_round_lower_bound( state, state.accumulated_weight_at_round_end ) )
+						break;
+
+					DifferentialTrailStepRecord step = state.base_step;
+					step.output_branch_b_difference_after_first_addition = state.output_branch_b_difference_after_first_addition;
+					step.weight_first_addition = state.weight_first_addition;
+					step.output_branch_a_difference_after_first_constant_subtraction = state.output_branch_a_difference_after_first_constant_subtraction;
+					step.weight_first_constant_subtraction = state.weight_first_constant_subtraction;
+					step.branch_a_difference_after_first_xor_with_rotated_branch_b = state.branch_a_difference_after_first_xor_with_rotated_branch_b;
+					step.branch_b_difference_after_first_xor_with_rotated_branch_a = state.branch_b_difference_after_first_xor_with_rotated_branch_a;
+					step.injection_from_branch_b_xor_difference = state.injection_from_branch_b_xor_difference;
+					step.weight_injection_from_branch_b = state.weight_injection_from_branch_b;
+					step.branch_a_difference_after_injection_from_branch_b = state.branch_a_difference_after_injection_from_branch_b;
+					step.branch_b_difference_after_linear_layer_one_backward = state.branch_b_difference_after_linear_layer_one_backward;
+					step.second_addition_term_difference = state.second_addition_term_difference;
+					step.output_branch_a_difference_after_second_addition = state.output_branch_a_difference_after_second_addition;
+					step.weight_second_addition = state.weight_second_addition;
+					step.output_branch_b_difference_after_second_constant_subtraction = state.output_branch_b_difference_after_second_constant_subtraction;
+					step.weight_second_constant_subtraction = state.weight_second_constant_subtraction;
+					step.branch_b_difference_after_second_xor_with_rotated_branch_a = state.branch_b_difference_after_second_xor_with_rotated_branch_a;
+					step.branch_a_difference_after_second_xor_with_rotated_branch_b = state.branch_a_difference_after_second_xor_with_rotated_branch_b;
+					step.injection_from_branch_a_xor_difference = state.injection_from_branch_a_xor_difference;
+					step.weight_injection_from_branch_a = state.weight_injection_from_branch_a;
+					step.output_branch_a_difference = state.output_branch_a_difference;
+					step.output_branch_b_difference = state.output_branch_b_difference;
+					step.round_weight =
+						state.weight_first_addition + state.weight_first_constant_subtraction + state.weight_injection_from_branch_b +
+						state.weight_second_addition + state.weight_second_constant_subtraction + state.weight_injection_from_branch_a;
+
+					search_context.current_differential_trail.push_back( step );
+
+					DifferentialSearchFrame child {};
+					child.stage = DifferentialSearchStage::Enter;
+					// Store the parent trail size (exclude the step we just pushed) so pop_frame() removes it.
+					child.trail_size_at_entry = search_context.current_differential_trail.size() - 1u;
+					child.state.round_boundary_depth = state.round_boundary_depth + 1;
+					child.state.accumulated_weight_so_far = state.accumulated_weight_at_round_end;
+					child.state.branch_a_input_difference = state.output_branch_a_difference;
+					child.state.branch_b_input_difference = state.output_branch_b_difference;
+					cursor.stack.push_back( child );
+					break;
+				}
+				}
+
+				maybe_poll_checkpoint();
+			}
+		}
+
+		// Stop conditions and global pruning (budget/time/best bound).
+		bool should_stop_search( int round_boundary_depth, int accumulated_weight_so_far )
+		{
+			// Early stop: reached target probability (weight) already.
+			if ( search_context.configuration.target_best_weight >= 0 && search_context.best_total_weight <= search_context.configuration.target_best_weight )
+				return true;
+
+			if ( search_context.stop_due_to_time_limit )
+				return true;
+
+			// Count visited nodes for progress reporting even when maximum_search_nodes is unlimited (0).
+			++search_context.visited_node_count;
+
+			// Governor hook: very low overhead (one clock read every ~262k nodes).
+			if ( ( search_context.visited_node_count & search_context.progress_node_mask ) == 0 )
+			{
+				memory_governor_poll_if_needed( std::chrono::steady_clock::now() );
+			}
+
+			// Time limit check (low overhead): evaluate clock only every ~262k nodes.
+			if ( search_context.configuration.maximum_search_seconds != 0 )
+			{
+				if ( ( search_context.visited_node_count & search_context.progress_node_mask ) == 0 )
+				{
+					const auto now = std::chrono::steady_clock::now();
+					memory_governor_poll_if_needed( now );
+					const double elapsed = std::chrono::duration<double>( now - search_context.time_limit_start_time ).count();
+					if ( elapsed >= double( search_context.configuration.maximum_search_seconds ) )
+					{
+						search_context.stop_due_to_time_limit = true;
+						return true;
+					}
+				}
+			}
+
+			// Node budget check (0 = unlimited). We use '>' because visited_node_count was
+			// already incremented above.
+			if ( search_context.configuration.maximum_search_nodes != 0 && search_context.visited_node_count > search_context.configuration.maximum_search_nodes )
+				return true;
+
+			maybe_print_single_run_progress( search_context, round_boundary_depth );
+			if ( accumulated_weight_so_far > search_context.best_total_weight )
+				return true;
+
+			if ( should_prune_remaining_round_lower_bound( round_boundary_depth, accumulated_weight_so_far ) )
+				return true;
+
+			return false;
+		}
+
+		bool should_prune_remaining_round_lower_bound( int round_boundary_depth, int accumulated_weight_so_far ) const
+		{
+			if ( search_context.best_total_weight < INFINITE_WEIGHT && search_context.configuration.enable_remaining_round_lower_bound )
+			{
+				const int rounds_left = search_context.configuration.round_count - round_boundary_depth;
+				if ( rounds_left >= 0 )
+				{
+					const auto& remaining_round_min_weight_table = search_context.configuration.remaining_round_min_weight;
+					const std::size_t table_index = std::size_t( rounds_left );
+					if ( table_index < remaining_round_min_weight_table.size() )
+					{
+						const int weight_lower_bound = remaining_round_min_weight_table[ table_index ];
+						if ( accumulated_weight_so_far + weight_lower_bound >= search_context.best_total_weight )
+							return true;
+					}
+				}
+			}
+			return false;
+		}
+
+		bool handle_round_end_if_needed( int round_boundary_depth, int accumulated_weight_so_far )
+		{
+			if ( round_boundary_depth != search_context.configuration.round_count )
+				return false;
+
+			if ( accumulated_weight_so_far < search_context.best_total_weight || search_context.best_differential_trail.empty() )
+			{
+				const int old = search_context.best_total_weight;
+				search_context.best_total_weight = accumulated_weight_so_far;
+				search_context.best_differential_trail = search_context.current_differential_trail;
+				if ( search_context.checkpoint && accumulated_weight_so_far != old )
+					search_context.checkpoint->maybe_write( search_context, "improved" );
+				if ( search_context.binary_checkpoint && accumulated_weight_so_far != old )
+					search_context.binary_checkpoint->mark_best_changed();
+			}
+			return true;
+		}
+
+		bool should_prune_state_memoization( int round_boundary_depth, std::uint32_t branch_a_input_difference, std::uint32_t branch_b_input_difference, int accumulated_weight_so_far )
+		{
+			if ( !search_context.configuration.enable_state_memoization )
+				return false;
+
+			const std::size_t rc = std::size_t( std::max( 1, search_context.configuration.round_count ) );
+			std::size_t		  hint = ( rc == 0 ) ? 0 : ( search_context.configuration.maximum_search_nodes / rc );
+			hint = std::clamp<std::size_t>( hint, 4096u, 1'000'000u );
+
+			const std::uint64_t key = pack_two_word32_differences( branch_a_input_difference, branch_b_input_difference );
+			return search_context.memoization.should_prune_and_update( std::size_t( round_boundary_depth ), key, accumulated_weight_so_far, true, true, hint, 192ull, "memoization.reserve", "memoization.try_emplace" );
+		}
+
+		int compute_remaining_round_weight_lower_bound_after_this_round( int round_boundary_depth ) const
+		{
+			if ( !search_context.configuration.enable_remaining_round_lower_bound )
+				return 0;
+			const int rounds_left_after = search_context.configuration.round_count - ( round_boundary_depth + 1 );
+			if ( rounds_left_after < 0 )
+				return 0;
+			const auto& remaining_round_min_weight_table = search_context.configuration.remaining_round_min_weight;
+			const std::size_t idx = std::size_t( rounds_left_after );
+			if ( idx >= remaining_round_min_weight_table.size() )
+				return 0;
+			return std::max( 0, remaining_round_min_weight_table[ idx ] );
+		}
+
+		bool should_prune_with_remaining_round_lower_bound( const DifferentialRoundSearchState& state, int accumulated_weight ) const
+		{
+			return accumulated_weight + state.remaining_round_weight_lower_bound_after_this_round >= search_context.best_total_weight;
+		}
+
+		bool prepare_round_state( DifferentialRoundSearchState& state, int round_boundary_depth, std::uint32_t branch_a_input_difference, std::uint32_t branch_b_input_difference, int accumulated_weight_so_far )
+		{
+			state.round_boundary_depth = round_boundary_depth;
+			state.accumulated_weight_so_far = accumulated_weight_so_far;
+			state.branch_a_input_difference = branch_a_input_difference;
+			state.branch_b_input_difference = branch_b_input_difference;
+			state.remaining_round_weight_lower_bound_after_this_round = compute_remaining_round_weight_lower_bound_after_this_round( round_boundary_depth );
+
+			state.base_step = DifferentialTrailStepRecord {};
+			state.base_step.round_index = round_boundary_depth + 1;
+			state.base_step.input_branch_a_difference = branch_a_input_difference;
+			state.base_step.input_branch_b_difference = branch_b_input_difference;
+
+			state.first_addition_term_difference = NeoAlzetteCore::rotl<std::uint32_t>( branch_a_input_difference, 31 ) ^ NeoAlzetteCore::rotl<std::uint32_t>( branch_a_input_difference, 17 );
+			state.base_step.first_addition_term_difference = state.first_addition_term_difference;
+
+			const auto [ optimal_output_branch_b_difference_after_first_addition, optimal_weight_first_addition ] =
+				find_optimal_gamma_with_weight( branch_b_input_difference, state.first_addition_term_difference, 32 );
+			state.optimal_output_branch_b_difference_after_first_addition = optimal_output_branch_b_difference_after_first_addition;
+			state.optimal_weight_first_addition = optimal_weight_first_addition;
+			if ( state.optimal_weight_first_addition < 0 )
+				return false;
+
+			int weight_cap_first_addition = search_context.best_total_weight - accumulated_weight_so_far - state.remaining_round_weight_lower_bound_after_this_round;
+			weight_cap_first_addition = std::min( weight_cap_first_addition, 31 );
+			weight_cap_first_addition = std::min( weight_cap_first_addition, std::clamp( search_context.configuration.addition_weight_cap, 0, 31 ) );
+			state.weight_cap_first_addition = weight_cap_first_addition;
+			if ( weight_cap_first_addition < 0 || state.optimal_weight_first_addition > weight_cap_first_addition )
+				return false;
+
+			return true;
+		}
+	};
+
+	static MatsuiSearchRunDifferentialResult run_matsui_best_search_with_injection_internal( int round_count, std::uint32_t initial_branch_a_difference, std::uint32_t initial_branch_b_difference, const DifferentialBestSearchConfiguration& input_search_configuration, bool print_output, std::uint64_t single_run_progress_every_seconds, bool progress_print_differences = false, int seeded_upper_bound_weight = INFINITE_WEIGHT, const std::vector<DifferentialTrailStepRecord>* seeded_upper_bound_trail = nullptr, BestWeightHistory* checkpoint = nullptr, BinaryCheckpointManager* binary_checkpoint = nullptr )
 	{
 		MatsuiSearchRunDifferentialResult result {};
 		DifferentialBestSearchContext				  search_context {};
@@ -1978,6 +3259,7 @@ namespace TwilightDream::auto_search_differential
 		search_context.start_difference_b = initial_branch_b_difference;
 		search_context.run_start_time = std::chrono::steady_clock::now();
 		search_context.checkpoint = checkpoint;
+		search_context.binary_checkpoint = binary_checkpoint;
 		search_context.memoization.initialize( ( round_count > 0 ) ? std::size_t( round_count ) : 0u, search_context.configuration.enable_state_memoization, "memoization.init" );
 
 		// Normalize Matsui-style remaining-round lower bound table (weight domain).
@@ -2042,7 +3324,9 @@ namespace TwilightDream::auto_search_differential
 		if ( print_output )
 		{
 			std::cout << "[BestSearch] mode=matsui(injection-affine)\n";
-			std::cout << "  rounds=" << round_count << "  addition_weight_cap=" << search_context.configuration.addition_weight_cap << "  constant_subtraction_weight_cap=" << search_context.configuration.constant_subtraction_weight_cap << "  maximum_constant_subtraction_candidates=" << search_context.configuration.maximum_constant_subtraction_candidates << "  maximum_transition_output_differences=" << search_context.configuration.maximum_transition_output_differences << "  maximum_search_nodes=" << search_context.configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_context.configuration.maximum_search_seconds << "  memo=" << ( search_context.configuration.enable_state_memoization ? "on" : "off" ) << "\n";
+			std::cout << "  rounds=" << round_count << "  addition_weight_cap=" << search_context.configuration.addition_weight_cap << "  constant_subtraction_weight_cap=" << search_context.configuration.constant_subtraction_weight_cap << "  maximum_transition_output_differences=" << search_context.configuration.maximum_transition_output_differences << "  maximum_search_nodes=" << search_context.configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_context.configuration.maximum_search_seconds << "  memo=" << ( search_context.configuration.enable_state_memoization ? "on" : "off" ) << "\n";
+			std::cout << "  weight_shell_cache=" << ( search_context.configuration.enable_wpddt_cache ? "on" : "off" )
+					  << "  weight_shell_max_weight=" << search_context.configuration.wpddt_max_cached_weight << "\n";
 			std::cout << "  greedy_upper_bound_weight=" << ( search_context.best_total_weight >= INFINITE_WEIGHT ? -1 : search_context.best_total_weight ) << "\n";
 			if ( seeded_upper_bound_weight >= 0 && seeded_upper_bound_weight < INFINITE_WEIGHT )
 			{
@@ -2072,7 +3356,8 @@ namespace TwilightDream::auto_search_differential
 			search_context.time_limit_start_time = search_context.run_start_time;
 		}
 
-		DifferentialBestTrailSearcher searcher( search_context );
+		DifferentialSearchCursor cursor {};
+		DifferentialBestTrailSearcherCursor searcher( search_context, cursor );
 		searcher.search_from_start( initial_branch_a_difference, initial_branch_b_difference );
 
 		result.nodes_visited = search_context.visited_node_count;
@@ -2154,6 +3439,612 @@ namespace TwilightDream::auto_search_differential
 		return result;
 	}
 
+	// ============================================================================
+	// Binary checkpoint serialization (differential)
+	// ============================================================================
+
+	static inline std::string default_binary_checkpoint_path( int round_count, std::uint32_t da, std::uint32_t db )
+	{
+		std::ostringstream oss;
+		oss << "auto_checkpoint_R" << round_count << "_DiffA" << std::hex << std::setw( 8 ) << std::setfill( '0' ) << da << "_DiffB" << std::hex << std::setw( 8 ) << std::setfill( '0' ) << db << std::dec << ".ckpt";
+		return oss.str();
+	}
+
+	static inline void write_config( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const DifferentialBestSearchConfiguration& c )
+	{
+		w.write_i32( c.round_count );
+		w.write_i32( c.addition_weight_cap );
+		w.write_i32( c.constant_subtraction_weight_cap );
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_transition_output_differences ) );
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_search_nodes ) );
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_search_seconds ) );
+		w.write_u8( c.enable_state_memoization ? 1u : 0u );
+		w.write_u8( c.enable_remaining_round_lower_bound ? 1u : 0u );
+		w.write_i32( c.target_best_weight );
+		w.write_u64( static_cast<std::uint64_t>( c.remaining_round_min_weight.size() ) );
+		for ( const int v : c.remaining_round_min_weight )
+			w.write_i32( v );
+		// Extension block (required).
+		static constexpr std::uint32_t kDiffConfigExtTag = 0x44434658u; // 'XCFD'
+		w.write_u32( kDiffConfigExtTag );
+		w.write_u8( c.enable_wpddt_cache ? 1u : 0u );
+		w.write_i32( c.wpddt_max_cached_weight );
+	}
+
+	static inline bool read_config( TwilightDream::auto_search_checkpoint::BinaryReader& r, DifferentialBestSearchConfiguration& c )
+	{
+		std::int32_t round_count = 0;
+		std::int32_t add_cap = 0;
+		std::int32_t sub_cap = 0;
+		std::uint64_t max_trans = 0;
+		std::uint64_t max_nodes = 0;
+		std::uint64_t max_seconds = 0;
+		std::uint8_t memo = 0;
+		std::uint8_t rem = 0;
+		std::int32_t target = 0;
+		std::uint64_t rem_size = 0;
+		if ( !r.read_i32( round_count ) ) return false;
+		if ( !r.read_i32( add_cap ) ) return false;
+		if ( !r.read_i32( sub_cap ) ) return false;
+		if ( !r.read_u64( max_trans ) ) return false;
+		if ( !r.read_u64( max_nodes ) ) return false;
+		if ( !r.read_u64( max_seconds ) ) return false;
+		if ( !r.read_u8( memo ) ) return false;
+		if ( !r.read_u8( rem ) ) return false;
+		if ( !r.read_i32( target ) ) return false;
+		if ( !r.read_u64( rem_size ) ) return false;
+
+		c.round_count = round_count;
+		c.addition_weight_cap = add_cap;
+		c.constant_subtraction_weight_cap = sub_cap;
+		c.maximum_transition_output_differences = static_cast<std::size_t>( max_trans );
+		c.maximum_search_nodes = static_cast<std::size_t>( max_nodes );
+		c.maximum_search_seconds = static_cast<std::uint64_t>( max_seconds );
+		c.enable_state_memoization = ( memo != 0 );
+		c.enable_remaining_round_lower_bound = ( rem != 0 );
+		c.target_best_weight = target;
+		c.remaining_round_min_weight.clear();
+		c.remaining_round_min_weight.resize( static_cast<std::size_t>( rem_size ) );
+		for ( std::size_t i = 0; i < c.remaining_round_min_weight.size(); ++i )
+		{
+			std::int32_t v = 0;
+			if ( !r.read_i32( v ) ) return false;
+			c.remaining_round_min_weight[ i ] = v;
+		}
+		// Extension block (required).
+		{
+			std::uint32_t tag = 0;
+			if ( !r.read_u32( tag ) ) return false;
+			if ( tag != 0x44434658u ) return false;
+			std::uint8_t wpddt = 0;
+			std::int32_t wpddt_w = -1;
+			if ( !r.read_u8( wpddt ) ) return false;
+			if ( !r.read_i32( wpddt_w ) ) return false;
+			c.enable_wpddt_cache = ( wpddt != 0 );
+			c.wpddt_max_cached_weight = wpddt_w;
+		}
+		return true;
+	}
+
+	static inline void write_trail_step( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const DifferentialTrailStepRecord& s )
+	{
+		w.write_i32( s.round_index );
+		w.write_u32( s.input_branch_a_difference );
+		w.write_u32( s.input_branch_b_difference );
+		w.write_u32( s.first_addition_term_difference );
+		w.write_u32( s.output_branch_b_difference_after_first_addition );
+		w.write_i32( s.weight_first_addition );
+		w.write_u32( s.output_branch_a_difference_after_first_constant_subtraction );
+		w.write_i32( s.weight_first_constant_subtraction );
+		w.write_u32( s.branch_a_difference_after_first_xor_with_rotated_branch_b );
+		w.write_u32( s.branch_b_difference_after_first_xor_with_rotated_branch_a );
+		w.write_u32( s.injection_from_branch_b_xor_difference );
+		w.write_i32( s.weight_injection_from_branch_b );
+		w.write_u32( s.branch_a_difference_after_injection_from_branch_b );
+		w.write_u32( s.branch_b_difference_after_linear_layer_one_backward );
+		w.write_u32( s.second_addition_term_difference );
+		w.write_u32( s.output_branch_a_difference_after_second_addition );
+		w.write_i32( s.weight_second_addition );
+		w.write_u32( s.output_branch_b_difference_after_second_constant_subtraction );
+		w.write_i32( s.weight_second_constant_subtraction );
+		w.write_u32( s.branch_b_difference_after_second_xor_with_rotated_branch_a );
+		w.write_u32( s.branch_a_difference_after_second_xor_with_rotated_branch_b );
+		w.write_u32( s.injection_from_branch_a_xor_difference );
+		w.write_i32( s.weight_injection_from_branch_a );
+		w.write_u32( s.output_branch_a_difference );
+		w.write_u32( s.output_branch_b_difference );
+		w.write_i32( s.round_weight );
+	}
+
+	static inline bool read_trail_step( TwilightDream::auto_search_checkpoint::BinaryReader& r, DifferentialTrailStepRecord& s )
+	{
+		if ( !r.read_i32( s.round_index ) ) return false;
+		if ( !r.read_u32( s.input_branch_a_difference ) ) return false;
+		if ( !r.read_u32( s.input_branch_b_difference ) ) return false;
+		if ( !r.read_u32( s.first_addition_term_difference ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_difference_after_first_addition ) ) return false;
+		if ( !r.read_i32( s.weight_first_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_difference_after_first_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_first_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.branch_a_difference_after_first_xor_with_rotated_branch_b ) ) return false;
+		if ( !r.read_u32( s.branch_b_difference_after_first_xor_with_rotated_branch_a ) ) return false;
+		if ( !r.read_u32( s.injection_from_branch_b_xor_difference ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_b ) ) return false;
+		if ( !r.read_u32( s.branch_a_difference_after_injection_from_branch_b ) ) return false;
+		if ( !r.read_u32( s.branch_b_difference_after_linear_layer_one_backward ) ) return false;
+		if ( !r.read_u32( s.second_addition_term_difference ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_difference_after_second_addition ) ) return false;
+		if ( !r.read_i32( s.weight_second_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_difference_after_second_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_second_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.branch_b_difference_after_second_xor_with_rotated_branch_a ) ) return false;
+		if ( !r.read_u32( s.branch_a_difference_after_second_xor_with_rotated_branch_b ) ) return false;
+		if ( !r.read_u32( s.injection_from_branch_a_xor_difference ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_a ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_difference ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_difference ) ) return false;
+		if ( !r.read_i32( s.round_weight ) ) return false;
+		return true;
+	}
+
+	static inline void write_round_state( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const DifferentialRoundSearchState& s )
+	{
+		w.write_i32( s.round_boundary_depth );
+		w.write_i32( s.accumulated_weight_so_far );
+		w.write_i32( s.remaining_round_weight_lower_bound_after_this_round );
+		w.write_u32( s.branch_a_input_difference );
+		w.write_u32( s.branch_b_input_difference );
+		write_trail_step( w, s.base_step );
+		w.write_u32( s.first_addition_term_difference );
+		w.write_u32( s.optimal_output_branch_b_difference_after_first_addition );
+		w.write_i32( s.optimal_weight_first_addition );
+		w.write_i32( s.weight_cap_first_addition );
+		w.write_u32( s.output_branch_b_difference_after_first_addition );
+		w.write_i32( s.weight_first_addition );
+		w.write_i32( s.accumulated_weight_after_first_addition );
+		w.write_u32( s.output_branch_a_difference_after_first_constant_subtraction );
+		w.write_i32( s.weight_first_constant_subtraction );
+		w.write_i32( s.accumulated_weight_after_first_constant_subtraction );
+		w.write_u32( s.branch_a_difference_after_first_xor_with_rotated_branch_b );
+		w.write_u32( s.branch_b_difference_after_first_xor_with_rotated_branch_a );
+		w.write_u32( s.branch_b_difference_after_linear_layer_one_backward );
+		w.write_i32( s.weight_injection_from_branch_b );
+		w.write_i32( s.accumulated_weight_before_second_addition );
+		w.write_u32( s.injection_from_branch_b_xor_difference );
+		w.write_u32( s.branch_a_difference_after_injection_from_branch_b );
+		w.write_u32( s.second_addition_term_difference );
+		w.write_u32( s.optimal_output_branch_a_difference_after_second_addition );
+		w.write_i32( s.optimal_weight_second_addition );
+		w.write_i32( s.weight_cap_second_addition );
+		w.write_u32( s.output_branch_a_difference_after_second_addition );
+		w.write_i32( s.weight_second_addition );
+		w.write_i32( s.accumulated_weight_after_second_addition );
+		w.write_u32( s.output_branch_b_difference_after_second_constant_subtraction );
+		w.write_i32( s.weight_second_constant_subtraction );
+		w.write_i32( s.accumulated_weight_after_second_constant_subtraction );
+		w.write_u32( s.branch_b_difference_after_second_xor_with_rotated_branch_a );
+		w.write_u32( s.branch_a_difference_after_second_xor_with_rotated_branch_b );
+		w.write_i32( s.weight_injection_from_branch_a );
+		w.write_i32( s.accumulated_weight_at_round_end );
+		w.write_u32( s.injection_from_branch_a_xor_difference );
+		w.write_u32( s.output_branch_a_difference );
+		w.write_u32( s.output_branch_b_difference );
+	}
+
+	static inline bool read_round_state( TwilightDream::auto_search_checkpoint::BinaryReader& r, DifferentialRoundSearchState& s )
+	{
+		if ( !r.read_i32( s.round_boundary_depth ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_so_far ) ) return false;
+		if ( !r.read_i32( s.remaining_round_weight_lower_bound_after_this_round ) ) return false;
+		if ( !r.read_u32( s.branch_a_input_difference ) ) return false;
+		if ( !r.read_u32( s.branch_b_input_difference ) ) return false;
+		if ( !read_trail_step( r, s.base_step ) ) return false;
+		if ( !r.read_u32( s.first_addition_term_difference ) ) return false;
+		if ( !r.read_u32( s.optimal_output_branch_b_difference_after_first_addition ) ) return false;
+		if ( !r.read_i32( s.optimal_weight_first_addition ) ) return false;
+		if ( !r.read_i32( s.weight_cap_first_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_difference_after_first_addition ) ) return false;
+		if ( !r.read_i32( s.weight_first_addition ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_after_first_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_difference_after_first_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_first_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_after_first_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.branch_a_difference_after_first_xor_with_rotated_branch_b ) ) return false;
+		if ( !r.read_u32( s.branch_b_difference_after_first_xor_with_rotated_branch_a ) ) return false;
+		if ( !r.read_u32( s.branch_b_difference_after_linear_layer_one_backward ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_b ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_before_second_addition ) ) return false;
+		if ( !r.read_u32( s.injection_from_branch_b_xor_difference ) ) return false;
+		if ( !r.read_u32( s.branch_a_difference_after_injection_from_branch_b ) ) return false;
+		if ( !r.read_u32( s.second_addition_term_difference ) ) return false;
+		if ( !r.read_u32( s.optimal_output_branch_a_difference_after_second_addition ) ) return false;
+		if ( !r.read_i32( s.optimal_weight_second_addition ) ) return false;
+		if ( !r.read_i32( s.weight_cap_second_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_difference_after_second_addition ) ) return false;
+		if ( !r.read_i32( s.weight_second_addition ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_after_second_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_difference_after_second_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_second_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_after_second_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.branch_b_difference_after_second_xor_with_rotated_branch_a ) ) return false;
+		if ( !r.read_u32( s.branch_a_difference_after_second_xor_with_rotated_branch_b ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_a ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_at_round_end ) ) return false;
+		if ( !r.read_u32( s.injection_from_branch_a_xor_difference ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_difference ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_difference ) ) return false;
+		return true;
+	}
+
+	static inline void write_injection_transition( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const InjectionAffineTransition& t )
+	{
+		w.write_u32( t.offset );
+		for ( std::size_t i = 0; i < t.basis_vectors.size(); ++i )
+			w.write_u32( t.basis_vectors[ i ] );
+		w.write_i32( t.rank_weight );
+	}
+
+	static inline bool read_injection_transition( TwilightDream::auto_search_checkpoint::BinaryReader& r, InjectionAffineTransition& t )
+	{
+		if ( !r.read_u32( t.offset ) ) return false;
+		for ( std::size_t i = 0; i < t.basis_vectors.size(); ++i )
+		{
+			if ( !r.read_u32( t.basis_vectors[ i ] ) ) return false;
+		}
+		if ( !r.read_i32( t.rank_weight ) ) return false;
+		return true;
+	}
+
+	static inline void write_mod_add_enum( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const ModularAdditionEnumerator& e )
+	{
+		w.write_u8( e.initialized ? 1u : 0u );
+		w.write_u8( e.stop_due_to_limits ? 1u : 0u );
+		w.write_u32( e.alpha );
+		w.write_u32( e.beta );
+		w.write_u32( e.output_hint );
+		w.write_i32( e.weight_cap );
+		w.write_i32( e.stack_step );
+		for ( const auto& f : e.stack )
+		{
+			w.write_i32( f.bit_position );
+			w.write_u32( f.prefix );
+			w.write_u32( f.prefer );
+			w.write_u8( f.state );
+		}
+		// Extension block (required).
+		static constexpr std::uint32_t kModAddEnumExtTag = 0x584D4144u; // 'DAMX'
+		w.write_u32( kModAddEnumExtTag );
+		w.write_u8( e.dfs_active ? 1u : 0u );
+		w.write_u8( e.using_cached_shell ? 1u : 0u );
+		w.write_i32( e.target_weight );
+		w.write_i32( e.word_bits );
+		w.write_u64( static_cast<std::uint64_t>( e.shell_index ) );
+	}
+
+	static inline bool read_mod_add_enum( TwilightDream::auto_search_checkpoint::BinaryReader& r, ModularAdditionEnumerator& e )
+	{
+		std::uint8_t init = 0;
+		std::uint8_t stop = 0;
+		if ( !r.read_u8( init ) ) return false;
+		if ( !r.read_u8( stop ) ) return false;
+		if ( !r.read_u32( e.alpha ) ) return false;
+		if ( !r.read_u32( e.beta ) ) return false;
+		if ( !r.read_u32( e.output_hint ) ) return false;
+		if ( !r.read_i32( e.weight_cap ) ) return false;
+		if ( !r.read_i32( e.stack_step ) ) return false;
+		for ( auto& f : e.stack )
+		{
+			if ( !r.read_i32( f.bit_position ) ) return false;
+			if ( !r.read_u32( f.prefix ) ) return false;
+			if ( !r.read_u32( f.prefer ) ) return false;
+			if ( !r.read_u8( f.state ) ) return false;
+		}
+		e.initialized = ( init != 0u );
+		e.stop_due_to_limits = ( stop != 0u );
+		// Extension block (required).
+		{
+			std::uint32_t tag = 0;
+			if ( !r.read_u32( tag ) ) return false;
+			if ( tag != 0x584D4144u ) return false;
+			std::uint8_t dfs = 0;
+			std::uint8_t cached = 0;
+			std::int32_t target = 0;
+			std::int32_t bits = 32;
+			std::uint64_t index = 0;
+			if ( !r.read_u8( dfs ) ) return false;
+			if ( !r.read_u8( cached ) ) return false;
+			if ( !r.read_i32( target ) ) return false;
+			if ( target < 0 )
+				return false;
+			if ( !r.read_i32( bits ) ) return false;
+			if ( !r.read_u64( index ) ) return false;
+			e.dfs_active = ( dfs != 0u );
+			e.using_cached_shell = ( cached != 0u );
+			e.target_weight = target;
+			e.word_bits = std::clamp( bits, 1, 32 );
+			e.shell_index = static_cast<std::size_t>( index );
+		}
+		e.shell_cache.clear();
+		return true;
+	}
+
+	static inline void write_subconst_enum( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const SubConstEnumerator& e )
+	{
+		w.write_u8( e.initialized ? 1u : 0u );
+		w.write_u8( e.stop_due_to_limits ? 1u : 0u );
+		w.write_u32( e.input_difference );
+		w.write_u32( e.subtractive_constant );
+		w.write_u32( e.additive_constant );
+		w.write_u32( e.output_hint );
+		w.write_i32( e.cap_bitvector );
+		w.write_i32( e.cap_dynamic_planning );
+		w.write_i32( e.stack_step );
+		for ( const auto& f : e.stack )
+		{
+			w.write_i32( f.bit_position );
+			w.write_u32( f.prefix );
+			for ( std::uint64_t v : f.prefix_counts )
+				w.write_u64( v );
+			w.write_u32( f.preferred_bit );
+			w.write_u8( f.state );
+		}
+	}
+
+	static inline bool read_subconst_enum( TwilightDream::auto_search_checkpoint::BinaryReader& r, SubConstEnumerator& e )
+	{
+		std::uint8_t init = 0;
+		std::uint8_t stop = 0;
+		if ( !r.read_u8( init ) ) return false;
+		if ( !r.read_u8( stop ) ) return false;
+		if ( !r.read_u32( e.input_difference ) ) return false;
+		if ( !r.read_u32( e.subtractive_constant ) ) return false;
+		if ( !r.read_u32( e.additive_constant ) ) return false;
+		if ( !r.read_u32( e.output_hint ) ) return false;
+		if ( !r.read_i32( e.cap_bitvector ) ) return false;
+		if ( !r.read_i32( e.cap_dynamic_planning ) ) return false;
+		if ( !r.read_i32( e.stack_step ) ) return false;
+		for ( auto& f : e.stack )
+		{
+			if ( !r.read_i32( f.bit_position ) ) return false;
+			if ( !r.read_u32( f.prefix ) ) return false;
+			for ( std::uint64_t& v : f.prefix_counts )
+			{
+				if ( !r.read_u64( v ) ) return false;
+			}
+			if ( !r.read_u32( f.preferred_bit ) ) return false;
+			if ( !r.read_u8( f.state ) ) return false;
+		}
+		e.initialized = ( init != 0u );
+		e.stop_due_to_limits = ( stop != 0u );
+		return true;
+	}
+
+	static inline void write_affine_enum( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const AffineSubspaceEnumerator& e )
+	{
+		w.write_u8( e.initialized ? 1u : 0u );
+		w.write_u8( e.stop_due_to_limits ? 1u : 0u );
+		write_injection_transition( w, e.transition );
+		w.write_u64( static_cast<std::uint64_t>( e.maximum_output_difference_count ) );
+		w.write_u64( static_cast<std::uint64_t>( e.produced_output_difference_count ) );
+		w.write_i32( e.stack_step );
+		for ( const auto& f : e.stack )
+		{
+			w.write_i32( f.basis_index );
+			w.write_u32( f.current_difference );
+			w.write_u8( f.state );
+		}
+	}
+
+	static inline bool read_affine_enum( TwilightDream::auto_search_checkpoint::BinaryReader& r, AffineSubspaceEnumerator& e )
+	{
+		std::uint8_t init = 0;
+		std::uint8_t stop = 0;
+		if ( !r.read_u8( init ) ) return false;
+		if ( !r.read_u8( stop ) ) return false;
+		if ( !read_injection_transition( r, e.transition ) ) return false;
+		std::uint64_t max_out = 0;
+		std::uint64_t prod = 0;
+		if ( !r.read_u64( max_out ) ) return false;
+		if ( !r.read_u64( prod ) ) return false;
+		e.maximum_output_difference_count = static_cast<std::size_t>( max_out );
+		e.produced_output_difference_count = static_cast<std::size_t>( prod );
+		if ( !r.read_i32( e.stack_step ) ) return false;
+		for ( auto& f : e.stack )
+		{
+			if ( !r.read_i32( f.basis_index ) ) return false;
+			if ( !r.read_u32( f.current_difference ) ) return false;
+			if ( !r.read_u8( f.state ) ) return false;
+		}
+		e.initialized = ( init != 0u );
+		e.stop_due_to_limits = ( stop != 0u );
+		return true;
+	}
+
+	static inline void write_search_frame( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const DifferentialSearchFrame& f )
+	{
+		w.write_u8( static_cast<std::uint8_t>( f.stage ) );
+		w.write_u64( static_cast<std::uint64_t>( f.trail_size_at_entry ) );
+		write_round_state( w, f.state );
+		write_mod_add_enum( w, f.enum_first_add );
+		write_subconst_enum( w, f.enum_first_const );
+		write_affine_enum( w, f.enum_inj_b );
+		write_mod_add_enum( w, f.enum_second_add );
+		write_subconst_enum( w, f.enum_second_const );
+		write_affine_enum( w, f.enum_inj_a );
+	}
+
+	static inline bool read_search_frame( TwilightDream::auto_search_checkpoint::BinaryReader& r, DifferentialSearchFrame& f )
+	{
+		std::uint8_t stage = 0;
+		std::uint64_t trail_size = 0;
+		if ( !r.read_u8( stage ) ) return false;
+		if ( !r.read_u64( trail_size ) ) return false;
+		f.stage = static_cast<DifferentialSearchStage>( stage );
+		f.trail_size_at_entry = static_cast<std::size_t>( trail_size );
+		if ( !read_round_state( r, f.state ) ) return false;
+		if ( !read_mod_add_enum( r, f.enum_first_add ) ) return false;
+		if ( !read_subconst_enum( r, f.enum_first_const ) ) return false;
+		if ( !read_affine_enum( r, f.enum_inj_b ) ) return false;
+		if ( !read_mod_add_enum( r, f.enum_second_add ) ) return false;
+		if ( !read_subconst_enum( r, f.enum_second_const ) ) return false;
+		if ( !read_affine_enum( r, f.enum_inj_a ) ) return false;
+		return true;
+	}
+
+	static inline void write_cursor( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const DifferentialSearchCursor& cursor )
+	{
+		w.write_u64( static_cast<std::uint64_t>( cursor.stack.size() ) );
+		for ( const auto& f : cursor.stack )
+			write_search_frame( w, f );
+	}
+
+	static inline bool read_cursor( TwilightDream::auto_search_checkpoint::BinaryReader& r, DifferentialSearchCursor& cursor )
+	{
+		std::uint64_t count = 0;
+		if ( !r.read_u64( count ) ) return false;
+		cursor.stack.clear();
+		cursor.stack.resize( static_cast<std::size_t>( count ) );
+		for ( auto& f : cursor.stack )
+		{
+			if ( !read_search_frame( r, f ) ) return false;
+		}
+		return true;
+	}
+
+	static inline void write_trail_vector( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const std::vector<DifferentialTrailStepRecord>& v )
+	{
+		w.write_u64( static_cast<std::uint64_t>( v.size() ) );
+		for ( const auto& s : v )
+			write_trail_step( w, s );
+	}
+
+	static inline bool read_trail_vector( TwilightDream::auto_search_checkpoint::BinaryReader& r, std::vector<DifferentialTrailStepRecord>& v )
+	{
+		std::uint64_t count = 0;
+		if ( !r.read_u64( count ) ) return false;
+		v.clear();
+		v.resize( static_cast<std::size_t>( count ) );
+		for ( auto& s : v )
+		{
+			if ( !read_trail_step( r, s ) ) return false;
+		}
+		return true;
+	}
+
+	struct DifferentialCheckpointLoadResult
+	{
+		DifferentialBestSearchConfiguration configuration {};
+		std::uint32_t start_difference_a = 0;
+		std::uint32_t start_difference_b = 0;
+		std::uint64_t visited_node_count = 0;
+		int best_total_weight = INFINITE_WEIGHT;
+		std::vector<DifferentialTrailStepRecord> best_trail;
+		std::vector<DifferentialTrailStepRecord> current_trail;
+		DifferentialSearchCursor cursor;
+		std::uint64_t elapsed_usec = 0;
+	};
+
+	static inline bool write_differential_checkpoint( const std::string& path, const DifferentialBestSearchContext& context, const DifferentialSearchCursor& cursor, std::uint64_t elapsed_usec )
+	{
+		return TwilightDream::auto_search_checkpoint::write_atomic( path, [ & ]( TwilightDream::auto_search_checkpoint::BinaryWriter& w ) {
+			if ( !TwilightDream::auto_search_checkpoint::write_header( w, TwilightDream::auto_search_checkpoint::SearchKind::Differential ) )
+				return false;
+			w.write_u64( elapsed_usec );
+			write_config( w, context.configuration );
+			w.write_u32( context.start_difference_a );
+			w.write_u32( context.start_difference_b );
+			w.write_u64( context.visited_node_count );
+			w.write_i32( context.best_total_weight );
+			write_trail_vector( w, context.best_differential_trail );
+			write_trail_vector( w, context.current_differential_trail );
+			write_cursor( w, cursor );
+			context.memoization.serialize( w );
+			return w.ok();
+		} );
+	}
+
+	static inline bool read_differential_checkpoint( const std::string& path, DifferentialCheckpointLoadResult& out, TwilightDream::runtime_component::BestWeightMemoizationByDepth<std::uint64_t, int>& memo )
+	{
+		TwilightDream::auto_search_checkpoint::BinaryReader r( path );
+		if ( !r.ok() )
+			return false;
+		TwilightDream::auto_search_checkpoint::SearchKind kind {};
+		if ( !TwilightDream::auto_search_checkpoint::read_header( r, kind ) )
+			return false;
+		if ( kind != TwilightDream::auto_search_checkpoint::SearchKind::Differential )
+			return false;
+		if ( !r.read_u64( out.elapsed_usec ) )
+			return false;
+		if ( !read_config( r, out.configuration ) )
+			return false;
+		if ( !r.read_u32( out.start_difference_a ) )
+			return false;
+		if ( !r.read_u32( out.start_difference_b ) )
+			return false;
+		if ( !r.read_u64( out.visited_node_count ) )
+			return false;
+		if ( !r.read_i32( out.best_total_weight ) )
+			return false;
+		if ( !read_trail_vector( r, out.best_trail ) )
+			return false;
+		if ( !read_trail_vector( r, out.current_trail ) )
+			return false;
+		if ( !read_cursor( r, out.cursor ) )
+			return false;
+		if ( !memo.deserialize( r ) )
+			return false;
+		return true;
+	}
+
+	inline void BinaryCheckpointManager::poll( const DifferentialBestSearchContext& context, const DifferentialSearchCursor& cursor )
+	{
+		if ( !enabled() )
+			return;
+		const auto now = std::chrono::steady_clock::now();
+		const bool due_time = ( every_seconds != 0 ) && ( last_write_time.time_since_epoch().count() == 0 || std::chrono::duration<double>( now - last_write_time ).count() >= double( every_seconds ) );
+		if ( !pending_best && !due_time )
+			return;
+		if ( write_now( context, cursor, pending_best ? "best_weight_change" : "periodic_timer" ) )
+		{
+			pending_best = false;
+			last_write_time = now;
+		}
+	}
+
+	inline bool BinaryCheckpointManager::write_now( const DifferentialBestSearchContext& context, const DifferentialSearchCursor& cursor, const char* reason )
+	{
+		const auto now = std::chrono::steady_clock::now();
+		const std::uint64_t elapsed_usec = ( context.run_start_time.time_since_epoch().count() == 0 ) ? 0ull : static_cast<std::uint64_t>( std::chrono::duration_cast<std::chrono::microseconds>( now - context.run_start_time ).count() );
+		const bool ok = write_differential_checkpoint( path, context, cursor, elapsed_usec );
+
+		{
+			std::scoped_lock lk( TwilightDream::runtime_component::cout_mutex() );
+			const auto old_flags = std::cout.flags();
+			const auto old_prec = std::cout.precision();
+			const auto old_fill = std::cout.fill();
+
+			const double elapsed_seconds = static_cast<double>( elapsed_usec ) / 1e6;
+			const int best_weight_out = ( context.best_total_weight >= INFINITE_WEIGHT ) ? -1 : context.best_total_weight;
+
+			TwilightDream::runtime_component::print_progress_prefix( std::cout );
+			std::cout << "[Checkpoint] search_kind=differential"
+					  << "  binary_checkpoint_write_result=" << ( ok ? "success" : "failure" )
+					  << "  checkpoint_reason=" << ( reason ? reason : "unspecified" )
+					  << "  checkpoint_path=" << path
+					  << "  visited_node_count=" << context.visited_node_count
+					  << "  best_total_weight=" << best_weight_out
+					  << "  elapsed_seconds=" << std::fixed << std::setprecision( 2 ) << elapsed_seconds
+					  << "  cursor_stack_depth=" << cursor.stack.size() << "\n";
+
+			std::cout.flags( old_flags );
+			std::cout.precision( old_prec );
+			std::cout.fill( old_fill );
+		}
+
+		return ok;
+	}
+
 }  // namespace TwilightDream::auto_search_differential
 
 #endif
+

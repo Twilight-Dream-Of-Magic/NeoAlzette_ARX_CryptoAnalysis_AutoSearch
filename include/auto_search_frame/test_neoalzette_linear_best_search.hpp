@@ -28,6 +28,7 @@
 #include "neoalzette/neoalzette_core.hpp"
 #include "neoalzette/neoalzette_injection_constexpr.hpp"
 #include "common/runtime_component.hpp"
+#include "auto_search_frame/search_checkpoint.hpp"
 #include "arx_analysis_operators/linear_correlation_addconst.hpp"
 #include "arx_analysis_operators/linear_correlation_add_logn.hpp"
 #include "arx_analysis_operators/modular_addition_ccz.hpp"
@@ -44,6 +45,21 @@ namespace TwilightDream::auto_search_linear
 	// This matches the differential best-search style (integer weights), avoids float drift,
 	// and preserves a safe lower-bound interpretation: |corr| >= 2^{-weight_int}.
 	constexpr int INFINITE_WEIGHT = 1'000'000;
+	static std::atomic<bool> g_disable_linear_tls_caches { false };
+
+	// Search semantics:
+	// - Strict: accelerator caches/ordering allowed, but enumeration is exhaustive and exact operators define truth.
+	// - Fast: heuristic caps/early exits are allowed; results are not guaranteed exhaustive.
+	enum class SearchMode : std::uint8_t
+	{
+		Fast = 0,
+		Strict = 1
+	};
+
+	static inline const char* search_mode_to_string( SearchMode m ) noexcept
+	{
+		return ( m == SearchMode::Strict ) ? "strict" : "fast";
+	}
 
 	// ============================================================================
 	// Shared runtime components (moved to `common/runtime_component.*`)
@@ -94,35 +110,7 @@ namespace TwilightDream::auto_search_linear
 	// ============================================================================
 
 	/** Transpose transformations for linear cryptanalysis **/
-
-	// L1 transpose transformation - 用于线性密码分析的掩码传播
-	static inline std::uint32_t l1_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotl 改成 rotr
-		// L1(x) = x ^ rotl(x, 2) ^ rotl(x, 10) ^ rotl(x, 18) ^ rotl(x, 24)
-		// L1^T(x) = x ^ rotr(x, 2) ^ rotr(x, 10) ^ rotr(x, 18) ^ rotr(x, 24)
-		return x ^ NeoAlzetteCore::rotr( x, 2 ) ^ NeoAlzetteCore::rotr( x, 10 ) ^ NeoAlzetteCore::rotr( x, 18 ) ^ NeoAlzetteCore::rotr( x, 24 );
-	}
-
-	static inline std::uint32_t l1_backward_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotr 改成 rotl
-		return x ^ NeoAlzetteCore::rotl( x, 2 ) ^ NeoAlzetteCore::rotl( x, 8 ) ^ NeoAlzetteCore::rotl( x, 10 ) ^ NeoAlzetteCore::rotl( x, 14 ) ^ NeoAlzetteCore::rotl( x, 16 ) ^ NeoAlzetteCore::rotl( x, 18 ) ^ NeoAlzetteCore::rotl( x, 20 ) ^ NeoAlzetteCore::rotl( x, 24 ) ^ NeoAlzetteCore::rotl( x, 28 ) ^ NeoAlzetteCore::rotl( x, 30 );
-	}
-	// L2 transpose transformation - 用于线性密码分析的掩码传播
-	static inline std::uint32_t l2_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotl 改成 rotr
-		// L2(x) = x ^ rotl(x, 8) ^ rotl(x, 14) ^ rotl(x, 22) ^ rotl(x, 30)
-		// L2^T(x) = x ^ rotr(x, 8) ^ rotr(x, 14) ^ rotr(x, 22) ^ rotr(x, 30)
-		return x ^ NeoAlzetteCore::rotr( x, 8 ) ^ NeoAlzetteCore::rotr( x, 14 ) ^ NeoAlzetteCore::rotr( x, 22 ) ^ NeoAlzetteCore::rotr( x, 30 );
-	}
-
-	static inline std::uint32_t l2_backward_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotr 改成 rotl
-		return x ^ NeoAlzetteCore::rotl( x, 2 ) ^ NeoAlzetteCore::rotl( x, 4 ) ^ NeoAlzetteCore::rotl( x, 8 ) ^ NeoAlzetteCore::rotl( x, 12 ) ^ NeoAlzetteCore::rotl( x, 14 ) ^ NeoAlzetteCore::rotl( x, 16 ) ^ NeoAlzetteCore::rotl( x, 18 ) ^ NeoAlzetteCore::rotl( x, 22 ) ^ NeoAlzetteCore::rotl( x, 24 ) ^ NeoAlzetteCore::rotl( x, 30 );
-	}
+	// Transpose：把所有 rotl 改成 rotr
 
 	// ============================================================================
 	// Injection model for linear correlations (quadratic -> rank/2 weight)
@@ -172,6 +160,14 @@ namespace TwilightDream::auto_search_linear
 	static constexpr std::array<std::uint32_t, 32> injected_f_basis_branch_b = make_injection_f_basis_branch_b();
 	static constexpr std::array<std::uint32_t, 32> injected_f_basis_branch_a = make_injection_f_basis_branch_a();
 
+	// Formula sanity: precomputed f(0) and f(e_i) must match direct neoalzette_constexpr (same as differential search).
+	static_assert( injected_f0_branch_b == TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( 0u ), "f(0) branch_b: precomputed vs direct" );
+	static_assert( injected_f0_branch_a == TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( 0u ), "f(0) branch_a: precomputed vs direct" );
+	static_assert( injected_f_basis_branch_b[ 0 ] == TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( 1u ), "f(e_0) branch_b: precomputed vs direct" );
+	static_assert( injected_f_basis_branch_a[ 0 ] == TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( 1u ), "f(e_0) branch_a: precomputed vs direct" );
+	static_assert( injected_f_basis_branch_b[ 31 ] == TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( 1u << 31 ), "f(e_31) branch_b: precomputed vs direct" );
+	static_assert( injected_f_basis_branch_a[ 31 ] == TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( 1u << 31 ), "f(e_31) branch_a: precomputed vs direct" );
+
 	// --------------------------------------------------------------------------
 	// Exact quadratic weight for g_u(x)=<u,f(x)> via bilinear rank
 	//
@@ -183,62 +179,27 @@ namespace TwilightDream::auto_search_linear
 	// We build S(u) from these q_{i,j}(u) and compute rank(S(u)) over GF(2).
 	// --------------------------------------------------------------------------
 
-	static constexpr std::size_t injection_pair_count_32 = ( 32u * 31u ) / 2u;	// 496
-
-	static consteval std::array<std::uint32_t, injection_pair_count_32> make_injection_quadratic_second_diffs_branch_b()
-	{
-		std::array<std::uint32_t, injection_pair_count_32> deltas {};
-		std::size_t										   delta_index = 0;
-		for ( int i = 0; i < 31; ++i )
-		{
-			const std::uint32_t ei = ( 1u << i );
-			const std::uint32_t fi = injected_f_basis_branch_b[ std::size_t( i ) ];
-			for ( int j = i + 1; j < 32; ++j )
-			{
-				const std::uint32_t ej = ( 1u << j );
-				const std::uint32_t fj = injected_f_basis_branch_b[ std::size_t( j ) ];
-				const std::uint32_t fij = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( ei ^ ej );
-				deltas[ delta_index++ ] = injected_f0_branch_b ^ fi ^ fj ^ fij;	// Δ2_{i,j} f
-			}
-		}
-		return deltas;
-	}
-
-	static consteval std::array<std::uint32_t, injection_pair_count_32> make_injection_quadratic_second_diffs_branch_a()
-	{
-		std::array<std::uint32_t, injection_pair_count_32> deltas {};
-		std::size_t										   delta_index = 0;
-		for ( int i = 0; i < 31; ++i )
-		{
-			const std::uint32_t ei = ( 1u << i );
-			const std::uint32_t fi = injected_f_basis_branch_a[ std::size_t( i ) ];
-			for ( int j = i + 1; j < 32; ++j )
-			{
-				const std::uint32_t ej = ( 1u << j );
-				const std::uint32_t fj = injected_f_basis_branch_a[ std::size_t( j ) ];
-				const std::uint32_t fij = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( ei ^ ej );
-				deltas[ delta_index++ ] = injected_f0_branch_a ^ fi ^ fj ^ fij;	// Δ2_{i,j} f
-			}
-		}
-		return deltas;
-	}
-
-	static constexpr std::array<std::uint32_t, injection_pair_count_32> injected_quad_d2_branch_b = make_injection_quadratic_second_diffs_branch_b();
-	static constexpr std::array<std::uint32_t, injection_pair_count_32> injected_quad_d2_branch_a = make_injection_quadratic_second_diffs_branch_a();
-
+	// Fused: compute Δ2_{i,j} f on the fly and fill rows_by_outbit; no separate stored deltas array.
+	//
+	// Formula check (must match comment above):
+	//   e_i = 1<<i, e_j = 1<<j
+	//   Δ2_{i,j} f = f(0) ⊕ f(e_i) ⊕ f(e_j) ⊕ f(e_i ⊕ e_j)
+	//   fi = f(e_i), fj = f(e_j), fij = f(e_i⊕e_j) => delta = f0 ⊕ fi ⊕ fj ⊕ fij ✓
+	//   q_{i,j}(u) = parity(u & Δ2_{i,j} f); for u=1<<k => q_{i,j} = (delta>>k)&1; fill S(u) at (i,j),(j,i) ✓
 	static consteval std::array<std::array<std::uint32_t, 32>, 32> make_injection_quadratic_rows_by_outbit_branch_b()
 	{
-		// rows_by_outbit[k][i] = row i (bitset) of the bilinear matrix for the single-bit mask u=(1<<k).
 		std::array<std::array<std::uint32_t, 32>, 32> rows_by_outbit {};
-		std::size_t									  idx = 0;
 		for ( int i = 0; i < 31; ++i )
 		{
+			const std::uint32_t fi = injected_f_basis_branch_b[ std::size_t( i ) ];   // f(e_i), e_i = 1<<i
 			for ( int j = i + 1; j < 32; ++j )
 			{
-				const std::uint32_t delta = injected_quad_d2_branch_b[ idx++ ];
+				const std::uint32_t fj = injected_f_basis_branch_b[ std::size_t( j ) ];   // f(e_j)
+				const std::uint32_t fij = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_b( ( 1u << i ) ^ ( 1u << j ) );   // f(e_i ⊕ e_j)
+				const std::uint32_t delta = injected_f0_branch_b ^ fi ^ fj ^ fij;   // Δ2_{i,j} f = f(0)⊕f(e_i)⊕f(e_j)⊕f(e_i⊕e_j)
 				for ( int k = 0; k < 32; ++k )
 				{
-					if ( ( ( delta >> k ) & 1u ) != 0u )
+					if ( ( ( delta >> k ) & 1u ) != 0u )   // q_{i,j}(u) for u=1<<k
 					{
 						rows_by_outbit[ std::size_t( k ) ][ std::size_t( i ) ] |= ( 1u << j );
 						rows_by_outbit[ std::size_t( k ) ][ std::size_t( j ) ] |= ( 1u << i );
@@ -252,12 +213,14 @@ namespace TwilightDream::auto_search_linear
 	static consteval std::array<std::array<std::uint32_t, 32>, 32> make_injection_quadratic_rows_by_outbit_branch_a()
 	{
 		std::array<std::array<std::uint32_t, 32>, 32> rows_by_outbit {};
-		std::size_t									  idx = 0;
 		for ( int i = 0; i < 31; ++i )
 		{
+			const std::uint32_t fi = injected_f_basis_branch_a[ std::size_t( i ) ];
 			for ( int j = i + 1; j < 32; ++j )
 			{
-				const std::uint32_t delta = injected_quad_d2_branch_a[ idx++ ];
+				const std::uint32_t fj = injected_f_basis_branch_a[ std::size_t( j ) ];
+				const std::uint32_t fij = TwilightDream::neoalzette_constexpr::injected_xor_term_from_branch_a( ( 1u << i ) ^ ( 1u << j ) );
+				const std::uint32_t delta = injected_f0_branch_a ^ fi ^ fj ^ fij;
 				for ( int k = 0; k < 32; ++k )
 				{
 					if ( ( ( delta >> k ) & 1u ) != 0u )
@@ -442,7 +405,7 @@ namespace TwilightDream::auto_search_linear
 	}
 
 	// ============================================================================
-	// Candidate generation (small, heuristic, deterministic)
+	// Candidate generation (exact, deterministic)
 	// ============================================================================
 
 	struct AddCandidate
@@ -499,14 +462,23 @@ namespace TwilightDream::auto_search_linear
 	 * - If z_i == 1, the inequalities impose no restriction on (v_i, w_i) (4 choices).
 	 *
 	 * This function enumerates candidate pairs (v,w) in nondecreasing weight |z| and returns up to
-	 * max_candidates results (0 means "no cap"). Only the absolute correlation is used here; the
+	 * max_candidates results (0 means "no cap"). If out_hit_cap is non-null, it is set to true when
+	 * enumeration stops early due to max_candidates. Only the absolute correlation is used here; the
 	 * sign term from Proposition 1 is irrelevant for weight-based best-trail search.
 	 */
-	static inline std::vector<AddCandidate> generate_add_candidates_for_fixed_u( std::uint32_t output_mask_u, int weight_cap, std::size_t max_candidates )
+	static inline std::vector<AddCandidate> generate_add_candidates_for_fixed_u(
+		std::uint32_t output_mask_u,
+		int weight_cap,
+		std::size_t max_candidates = 0,
+		bool* out_hit_cap = nullptr )
 	{
 		std::vector<AddCandidate> candidates;
-		const std::size_t		  candidate_limit = ( max_candidates == 0 ) ? std::numeric_limits<std::size_t>::max() : max_candidates;
-		candidates.reserve( std::min<std::size_t>( 256, candidate_limit ) );
+		if ( out_hit_cap )
+			*out_hit_cap = false;
+		if ( max_candidates != 0 )
+			candidates.reserve( std::min<std::size_t>( 256u, max_candidates ) );
+		else
+			candidates.reserve( 256 );
 
 		// Clamp to the meaningful range for 32-bit (z_31 is forced to 0).
 		if ( weight_cap < 0 )
@@ -530,15 +502,20 @@ namespace TwilightDream::auto_search_linear
 		const int		   z30 = u31;  // with v_31=w_31=u_31: z_30 = u_31 ⊕ v_31 ⊕ w_31 = u_31
 		std::vector<Frame> stack;
 		stack.reserve( 256 );
+		bool stop_due_to_cap = false;
 
 		// Enumerate in nondecreasing weight (paper-style objective is to minimize |z|).
-		for ( int target_weight = 0; target_weight <= weight_cap && candidates.size() < candidate_limit; ++target_weight )
+		for ( int target_weight = 0; target_weight <= weight_cap; ++target_weight )
 		{
+			if ( stop_due_to_cap )
+				return candidates;
 			stack.clear();
 			stack.push_back( Frame { 30, input_mask_x_prefix, input_mask_y_prefix, z30, 0 } );
 
-			while ( !stack.empty() && candidates.size() < candidate_limit )
+			while ( !stack.empty() )
 			{
+				if ( stop_due_to_cap )
+					return candidates;
 				const Frame st = stack.back();
 				stack.pop_back();
 
@@ -564,6 +541,13 @@ namespace TwilightDream::auto_search_linear
 						if ( z_weight == target_weight )
 						{
 							candidates.push_back( AddCandidate { next_input_mask_x, next_input_mask_y, z_weight } );
+							if ( max_candidates != 0 && candidates.size() >= max_candidates )
+							{
+								if ( out_hit_cap )
+									*out_hit_cap = true;
+								stop_due_to_cap = true;
+								return;
+							}
 						}
 						return;
 					}
@@ -593,39 +577,63 @@ namespace TwilightDream::auto_search_linear
 	}
 
 	// ============================================================================
-	// "Highway-style" acceleration for var-var addition (paper-inspired Splitting‑Lookup‑Recombination)
+	// Split-Lookup-Recombine (SLR) enumerator for var-var addition (z-weight shells).
 	//
-	// What the paper does (Algorithm 2 + SLR):
-	// - build a large cLAT indexed by one fixed input mask v and a 1-bit "connection status",
-	//   then enumerate (u,w) in increasing weight.
+	// Mathematical basis:
+	//   Schulte-Geers explicit correlation constraints for modular addition
+	//   (ACNS 2016, Proposition 1 / Eq.(1)), where weight = |z|.
 	//
-	// What we do here (adapted to our reverse search that FIXES the output mask u):
-	// - build a tiny per-byte lookup (8-bit blocks) indexed by (u_byte, connection_bit_in),
-	//   then recombine blocks (MSB->LSB) to enumerate feasible (v,w) candidates in increasing weight.
+	// Engineering idea (inspired by cLAT):
+	//   cLAT = correlation linear approximation table. The cLAT paper uses
+	//   split/lookup/recombine to enumerate candidates by weight efficiently.
+	//   We borrow that engineering trick but adapt it to our reverse search
+	//   that fixes the output mask u and uses small 8-bit blocks.
 	//
-	// This is "Highway-like" (split + lookup + recombination + pruning by lower bounds),
-	// but it is NOT the full 1.2GB cLAT from the paper.
+	// What we do here:
+	// - build a tiny per-byte lookup indexed by (u_byte, connection_bit_in)
+	// - recombine blocks (MSB->LSB) to enumerate feasible (v,w) in nondecreasing |z|
+	//
+	// This is NOT a full cLAT; it's a compact split-8 enumerator specialized for z-shells.
 	// ============================================================================
 
-	#ifndef AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_HIGHWAY_SPLIT8
-	#define AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_HIGHWAY_SPLIT8 1
+	#ifndef AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_SPLIT8_SLR
+	#define AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_SPLIT8_SLR 1
 	#endif
 
-	class AddVarVarCandidateHighway32
+	class AddVarVarSplit8Enumerator32
 	{
 	public:
-		static inline const std::vector<AddCandidate>& get_candidates_for_output_mask_u( std::uint32_t output_mask_u, int weight_cap_requested, std::size_t max_candidates_requested )
+		static inline const std::vector<AddCandidate>& get_candidates_for_output_mask_u(
+			std::uint32_t output_mask_u,
+			int weight_cap_requested,
+			SearchMode search_mode,
+			bool enable_addition_z_shell,
+			std::size_t addition_z_shell_max_candidates )
 		{
-			// Only cache the common bounded case. Unbounded enumeration (max_candidates==0) can explode.
-			const bool enable_cache = ( max_candidates_requested != 0 ) && ( max_candidates_requested <= kMaxCachedCandidates );
-
 			static thread_local CandidateCache cache;
 
-			if ( !enable_cache )
+			if ( search_mode == SearchMode::Strict )
 			{
 				cache.scratch_index = ( cache.scratch_index + 1u ) & 3u;
 				auto& scratch = cache.scratch_ring[ std::size_t( cache.scratch_index ) ];
-				scratch = generate_add_candidates_for_fixed_u( output_mask_u, weight_cap_requested, max_candidates_requested );
+				if ( enable_addition_z_shell && !memory_governor_in_pressure() )
+				{
+					bool hit_cap = false;
+					scratch = generate_add_candidates_for_fixed_u( output_mask_u, weight_cap_requested, addition_z_shell_max_candidates, &hit_cap );
+					if ( !hit_cap )
+						return scratch;
+				}
+				// Fallback: split-8 SLR generator (fast, compact).
+				scratch = generate_add_candidates_split8_slr( output_mask_u, weight_cap_requested );
+				return scratch;
+			}
+
+			if ( g_disable_linear_tls_caches.load( std::memory_order_relaxed ) )
+			{
+				cache.by_output_mask_u.clear();
+				cache.scratch_index = ( cache.scratch_index + 1u ) & 3u;
+				auto& scratch = cache.scratch_ring[ std::size_t( cache.scratch_index ) ];
+				scratch = generate_add_candidates_for_fixed_u( output_mask_u, weight_cap_requested );
 				return scratch;
 			}
 
@@ -636,23 +644,31 @@ namespace TwilightDream::auto_search_linear
 				cache.by_output_mask_u.clear();
 
 			std::vector<AddCandidate> generated;
-			#if AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_HIGHWAY_SPLIT8
-			generated = generate_candidates_split8_highway( output_mask_u, 31, kMaxCachedCandidates );
+			#if AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_SPLIT8_SLR
+			generated = generate_add_candidates_split8_slr( output_mask_u, 31 );
 			#else
-			generated = generate_add_candidates_for_fixed_u( output_mask_u, 31, kMaxCachedCandidates );
+			generated = generate_add_candidates_for_fixed_u( output_mask_u, 31 );
 			#endif
 
-			auto [ ins_it, _ ] = cache.by_output_mask_u.emplace( output_mask_u, std::move( generated ) );
-			return ins_it->second;
+			if ( generated.size() <= kMaxCachedCandidates )
+			{
+				auto [ ins_it, _ ] = cache.by_output_mask_u.emplace( output_mask_u, std::move( generated ) );
+				return ins_it->second;
+			}
+
+			cache.scratch_index = ( cache.scratch_index + 1u ) & 3u;
+			auto& scratch = cache.scratch_ring[ std::size_t( cache.scratch_index ) ];
+			scratch = std::move( generated );
+			return scratch;
 		}
 
 	private:
-		static constexpr bool kEnableSplit8Highway = ( AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_HIGHWAY_SPLIT8 != 0 );
-		static constexpr std::size_t kMaxCachedCandidates = 4096;
+		static constexpr bool kEnableSplit8Slr = ( AUTO_SEARCH_LINEAR_ENABLE_VARVAR_ADD_SPLIT8_SLR != 0 );
+		static constexpr std::size_t kMaxCachedCandidates = 4096;  // cache only when candidate set is small
 		static constexpr std::size_t kMaxCandidateCacheEntries = 256;
 		static constexpr std::size_t kMaxBlockOptionCacheEntries = 512;
 
-		struct BlockOption8
+		struct Split8BlockOption
 		{
 			// Local (8-bit) input masks for: s = x ⊞ y, with fixed 8-bit output mask u_byte.
 			std::uint8_t input_mask_x_byte = 0;
@@ -670,10 +686,87 @@ namespace TwilightDream::auto_search_linear
 			std::uint32_t												 scratch_index = 0;
 		};
 
-		static inline const std::vector<BlockOption8>& get_block_options_for_u_byte( std::uint8_t u_byte, int connection_bit_in, bool exclude_top_z31_weight )
+		static inline const std::vector<Split8BlockOption>& get_split8_block_options_for_u_byte( std::uint8_t u_byte, int connection_bit_in, bool exclude_top_z31_weight )
 		{
 			const std::uint16_t cache_key = std::uint16_t( std::uint16_t( u_byte ) << 2 ) | std::uint16_t( ( connection_bit_in & 1 ) << 1 ) | std::uint16_t( exclude_top_z31_weight ? 1 : 0 );
-			static thread_local std::unordered_map<std::uint16_t, std::vector<BlockOption8>> cache;
+			static thread_local std::unordered_map<std::uint16_t, std::vector<Split8BlockOption>> cache;
+			static thread_local std::vector<Split8BlockOption> scratch;
+
+			if ( g_disable_linear_tls_caches.load( std::memory_order_relaxed ) )
+			{
+				scratch.clear();
+				scratch.reserve( 2048 );
+
+				struct DfsState
+				{
+					int			 bit_index = 7;	 // 7..0 (MSB->LSB within the byte)
+					int			 z_bit = 0;
+					std::uint8_t input_mask_x = 0;
+					std::uint8_t input_mask_y = 0;
+					int			 weight_sum = 0;
+				};
+
+				static thread_local std::vector<DfsState> stack;
+				stack.clear();
+				stack.reserve( 1u << 16 );  // worst-case 4^8 states
+				stack.push_back( DfsState { 7, ( connection_bit_in & 1 ), 0u, 0u, 0 } );
+
+				while ( !stack.empty() )
+				{
+					const DfsState st = stack.back();
+					stack.pop_back();
+
+					if ( st.bit_index < 0 )
+					{
+						scratch.push_back( Split8BlockOption { st.input_mask_x, st.input_mask_y, std::uint8_t( st.z_bit & 1 ), std::uint8_t( st.weight_sum ) } );
+						continue;
+					}
+
+					const int bit_index = st.bit_index;
+					const int z = st.z_bit & 1;
+					const int u_i = int( ( u_byte >> bit_index ) & 1u );
+
+					// Do NOT count z31 in the global weight (z31 is fixed to 0).
+					const int weight_add = ( exclude_top_z31_weight && bit_index == 7 ) ? 0 : z;
+					const int next_weight_sum = st.weight_sum + weight_add;
+
+					auto push_next = [ & ]( int v_i, int w_i ) {
+						DfsState nx = st;
+						nx.bit_index = bit_index - 1;
+						nx.input_mask_x = std::uint8_t( nx.input_mask_x | ( std::uint8_t( ( v_i & 1 ) << bit_index ) ) );
+						nx.input_mask_y = std::uint8_t( nx.input_mask_y | ( std::uint8_t( ( w_i & 1 ) << bit_index ) ) );
+						// recursion: z_{i-1} = z_i ^ u_i ^ v_i ^ w_i
+						nx.z_bit = z ^ u_i ^ ( v_i & 1 ) ^ ( w_i & 1 );
+						nx.weight_sum = next_weight_sum;
+						stack.push_back( nx );
+					};
+
+					if ( z == 0 )
+					{
+						// Forced (Schulte-Geers constraints): if z_i==0 then v_i=w_i=u_i.
+						push_next( u_i, u_i );
+					}
+					else
+					{
+						push_next( 0, 0 );
+						push_next( 0, 1 );
+						push_next( 1, 0 );
+						push_next( 1, 1 );
+					}
+				}
+
+				std::sort( scratch.begin(), scratch.end(), []( const Split8BlockOption& a, const Split8BlockOption& b ) {
+					if ( a.block_weight != b.block_weight )
+						return a.block_weight < b.block_weight;
+					if ( a.next_connection_bit != b.next_connection_bit )
+						return a.next_connection_bit < b.next_connection_bit;
+					if ( a.input_mask_x_byte != b.input_mask_x_byte )
+						return a.input_mask_x_byte < b.input_mask_x_byte;
+					return a.input_mask_y_byte < b.input_mask_y_byte;
+				} );
+
+				return scratch;
+			}
 
 			if ( auto it = cache.find( cache_key ); it != cache.end() )
 				return it->second;
@@ -681,7 +774,7 @@ namespace TwilightDream::auto_search_linear
 			if ( cache.size() >= kMaxBlockOptionCacheEntries )
 				cache.clear();
 
-			std::vector<BlockOption8> options;
+			std::vector<Split8BlockOption> options;
 			options.reserve( 2048 );
 
 			struct DfsState
@@ -705,7 +798,7 @@ namespace TwilightDream::auto_search_linear
 
 				if ( st.bit_index < 0 )
 				{
-					options.push_back( BlockOption8 { st.input_mask_x, st.input_mask_y, std::uint8_t( st.z_bit & 1 ), std::uint8_t( st.weight_sum ) } );
+					options.push_back( Split8BlockOption { st.input_mask_x, st.input_mask_y, std::uint8_t( st.z_bit & 1 ), std::uint8_t( st.weight_sum ) } );
 					continue;
 				}
 
@@ -742,7 +835,7 @@ namespace TwilightDream::auto_search_linear
 				}
 			}
 
-			std::sort( options.begin(), options.end(), []( const BlockOption8& a, const BlockOption8& b ) {
+			std::sort( options.begin(), options.end(), []( const Split8BlockOption& a, const Split8BlockOption& b ) {
 				if ( a.block_weight != b.block_weight )
 					return a.block_weight < b.block_weight;
 				if ( a.next_connection_bit != b.next_connection_bit )
@@ -756,20 +849,13 @@ namespace TwilightDream::auto_search_linear
 			return ins_it->second;
 		}
 
-		static inline std::vector<AddCandidate> generate_candidates_split8_highway( std::uint32_t output_mask_u, int weight_cap, std::size_t max_candidates )
+		static inline std::vector<AddCandidate> generate_add_candidates_split8_slr( std::uint32_t output_mask_u, int weight_cap )
 		{
 			std::vector<AddCandidate> candidates;
 			if ( weight_cap < 0 )
 				return candidates;
 			weight_cap = std::clamp( weight_cap, 0, 31 );
-			if ( max_candidates == 0 )
-			{
-				// Unbounded enumeration can explode; use the reference 32-bit enumerator.
-				return generate_add_candidates_for_fixed_u( output_mask_u, weight_cap, max_candidates );
-			}
-
-			const std::size_t candidate_limit = max_candidates;
-			candidates.reserve( std::min<std::size_t>( 512, candidate_limit ) );
+			candidates.reserve( 512 );
 
 			const std::uint8_t u_bytes[ 4 ] = { std::uint8_t( output_mask_u >> 24 ), std::uint8_t( output_mask_u >> 16 ), std::uint8_t( output_mask_u >> 8 ), std::uint8_t( output_mask_u ) };
 
@@ -784,7 +870,7 @@ namespace TwilightDream::auto_search_linear
 				{
 					int best = 1'000'000;
 					const bool top_block = ( block_index == 0 );
-					const auto& block_options = get_block_options_for_u_byte( u_bytes[ block_index ], connection_in, top_block );
+					const auto& block_options = get_split8_block_options_for_u_byte( u_bytes[ block_index ], connection_in, top_block );
 					for ( const auto& opt : block_options )
 					{
 						const int tail = ( block_index == 3 ) ? 0 : min_remaining_weight[ block_index + 1 ][ int( opt.next_connection_bit & 1u ) ];
@@ -803,8 +889,6 @@ namespace TwilightDream::auto_search_linear
 										  std::uint32_t input_mask_x_acc,
 										  std::uint32_t input_mask_y_acc,
 										  int		 remaining_weight ) -> void {
-				if ( candidates.size() >= candidate_limit )
-					return;
 				if ( remaining_weight < 0 )
 					return;
 				if ( min_remaining_weight[ block_index ][ connection_in ] > remaining_weight )
@@ -818,7 +902,7 @@ namespace TwilightDream::auto_search_linear
 				}
 
 				const bool top_block = ( block_index == 0 );
-				const auto& block_options = get_block_options_for_u_byte( u_bytes[ block_index ], connection_in, top_block );
+				const auto& block_options = get_split8_block_options_for_u_byte( u_bytes[ block_index ], connection_in, top_block );
 				const int   shift = ( 3 - block_index ) * 8;
 
 				for ( const auto& opt : block_options )
@@ -834,12 +918,10 @@ namespace TwilightDream::auto_search_linear
 					const std::uint32_t x2 = input_mask_x_acc | ( std::uint32_t( opt.input_mask_x_byte ) << shift );
 					const std::uint32_t y2 = input_mask_y_acc | ( std::uint32_t( opt.input_mask_y_byte ) << shift );
 					self( self, target_weight, block_index + 1, next_connection, x2, y2, next_remaining );
-					if ( candidates.size() >= candidate_limit )
-						return;
 				}
 			};
 
-			for ( int target = 0; target <= weight_cap && candidates.size() < candidate_limit; ++target )
+			for ( int target = 0; target <= weight_cap; ++target )
 			{
 				if ( min_remaining_weight[ 0 ][ 0 ] > target )
 					continue;
@@ -854,14 +936,190 @@ namespace TwilightDream::auto_search_linear
 				return a.input_mask_y < b.input_mask_y;
 			} );
 			candidates.erase( std::unique( candidates.begin(), candidates.end(), []( const AddCandidate& a, const AddCandidate& b ) { return a.input_mask_x == b.input_mask_x && a.input_mask_y == b.input_mask_y; } ), candidates.end() );
-			if ( candidates.size() > candidate_limit )
-				candidates.resize( candidate_limit );
 			return candidates;
 		}
 	};
 
+	// ----------------------------------------------------------------------------
+	// Exact sub-const enumeration (strict mode)
+	// ----------------------------------------------------------------------------
+
+	static inline std::uint64_t abs_i64_to_u64( std::int64_t v ) noexcept
+	{
+		return ( v < 0 ) ? std::uint64_t( -v ) : std::uint64_t( v );
+	}
+
+	static inline int floor_log2_u64( std::uint64_t v ) noexcept
+	{
+		return v ? ( static_cast<int>( std::bit_width( v ) ) - 1 ) : -1;
+	}
+
+	static inline std::vector<SubConstCandidate> generate_subconst_candidates_for_fixed_beta_exact( std::uint32_t output_mask_beta, std::uint32_t constant, int weight_cap, int nbits = 32 )
+	{
+		std::vector<SubConstCandidate> candidates;
+		if ( nbits <= 0 )
+			return candidates;
+		if ( nbits > 32 )
+			nbits = 32;
+
+		weight_cap = std::clamp( weight_cap, 0, nbits );
+		const std::uint32_t mask = ( nbits >= 32 ) ? 0xFFFFFFFFu : ( ( 1u << nbits ) - 1u );
+		output_mask_beta &= mask;
+		constant &= mask;
+
+		const std::uint64_t min_abs = ( weight_cap >= nbits ) ? 1ull : ( 1ull << ( nbits - weight_cap ) );
+
+		struct BitMatrix
+		{
+			int m00 = 0;
+			int m01 = 0;
+			int m10 = 0;
+			int m11 = 0;
+			std::uint8_t max_row_sum = 0;
+		};
+
+		std::array<BitMatrix, 32> mats_alpha0 {};
+		std::array<BitMatrix, 32> mats_alpha1 {};
+		std::array<std::uint8_t, 32> max_row_sum_bit {};
+
+		auto build_matrix = [ & ]( int alpha_i, int constant_i, int beta_i ) -> BitMatrix {
+			BitMatrix M {};
+			for ( int cin = 0; cin <= 1; ++cin )
+			{
+				for ( int x = 0; x <= 1; ++x )
+				{
+					const int cout = TwilightDream::arx_operators::carry_out_bit( x, constant_i, cin );
+					const int zi = x ^ constant_i ^ cin;
+					const int exponent = ( alpha_i & x ) ^ ( beta_i & zi );
+					const int s = exponent ? -1 : 1;
+					if ( cin == 0 && cout == 0 )
+						M.m00 += s;
+					else if ( cin == 0 && cout == 1 )
+						M.m01 += s;
+					else if ( cin == 1 && cout == 0 )
+						M.m10 += s;
+					else
+						M.m11 += s;
+				}
+			}
+			const int row0 = std::abs( M.m00 ) + std::abs( M.m01 );
+			const int row1 = std::abs( M.m10 ) + std::abs( M.m11 );
+			M.max_row_sum = static_cast<std::uint8_t>( std::max( row0, row1 ) );
+			return M;
+		};
+
+		for ( int bit = 0; bit < nbits; ++bit )
+		{
+			const int constant_i = int( ( constant >> bit ) & 1u );
+			const int beta_i = int( ( output_mask_beta >> bit ) & 1u );
+			mats_alpha0[ std::size_t( bit ) ] = build_matrix( 0, constant_i, beta_i );
+			mats_alpha1[ std::size_t( bit ) ] = build_matrix( 1, constant_i, beta_i );
+			const std::uint8_t max_row =
+				std::max( mats_alpha0[ std::size_t( bit ) ].max_row_sum, mats_alpha1[ std::size_t( bit ) ].max_row_sum );
+			max_row_sum_bit[ std::size_t( bit ) ] = max_row;
+		}
+
+		std::array<std::uint64_t, 33> max_gain_suffix {};
+		max_gain_suffix[ std::size_t( nbits ) ] = 1ull;
+		for ( int bit = nbits - 1; bit >= 0; --bit )
+		{
+			max_gain_suffix[ std::size_t( bit ) ] =
+				max_gain_suffix[ std::size_t( bit + 1 ) ] * std::uint64_t( max_row_sum_bit[ std::size_t( bit ) ] );
+		}
+
+		std::vector<std::vector<SubConstCandidate>> buckets( std::size_t( weight_cap ) + 1u );
+
+		struct Frame
+		{
+			int			 bit_index = 0;
+			std::uint32_t prefix = 0;
+			std::int64_t	 v0 = 1;
+			std::int64_t	 v1 = 0;
+			std::uint8_t	 state = 0;	// 0=enter, 1=after alpha=0, 2=done
+		};
+
+		std::array<Frame, 64> stack {};
+		int					  stack_step = 0;
+		stack[ stack_step++ ] = Frame {};
+
+		while ( stack_step > 0 )
+		{
+			Frame& frame = stack[ stack_step - 1 ];
+
+			if ( frame.state == 0 )
+			{
+				const std::uint64_t abs_sum = abs_i64_to_u64( frame.v0 ) + abs_i64_to_u64( frame.v1 );
+				const std::uint64_t ub = abs_sum * max_gain_suffix[ std::size_t( frame.bit_index ) ];
+				if ( ub < min_abs )
+				{
+					--stack_step;
+					continue;
+				}
+
+				if ( frame.bit_index >= nbits )
+				{
+					const std::int64_t W = frame.v0 + frame.v1;
+					if ( W != 0 )
+					{
+						const std::uint64_t abs_w = abs_i64_to_u64( W );
+						const int			  msb = floor_log2_u64( abs_w );
+						const int			  weight = std::clamp( nbits - msb, 0, nbits );
+						if ( weight <= weight_cap )
+						{
+							buckets[ std::size_t( weight ) ].push_back( SubConstCandidate { frame.prefix, weight } );
+						}
+					}
+					--stack_step;
+					continue;
+				}
+
+				frame.state = 1;
+				{
+					const auto& M = mats_alpha0[ std::size_t( frame.bit_index ) ];
+					const std::int64_t out0 = frame.v0 * std::int64_t( M.m00 ) + frame.v1 * std::int64_t( M.m10 );
+					const std::int64_t out1 = frame.v0 * std::int64_t( M.m01 ) + frame.v1 * std::int64_t( M.m11 );
+					stack[ stack_step++ ] = Frame { frame.bit_index + 1, frame.prefix, out0, out1, 0 };
+				}
+				continue;
+			}
+
+			if ( frame.state == 1 )
+			{
+				frame.state = 2;
+				{
+					const auto& M = mats_alpha1[ std::size_t( frame.bit_index ) ];
+					const std::int64_t out0 = frame.v0 * std::int64_t( M.m00 ) + frame.v1 * std::int64_t( M.m10 );
+					const std::int64_t out1 = frame.v0 * std::int64_t( M.m01 ) + frame.v1 * std::int64_t( M.m11 );
+					const std::uint32_t next_prefix = frame.prefix | ( 1u << frame.bit_index );
+					stack[ stack_step++ ] = Frame { frame.bit_index + 1, next_prefix, out0, out1, 0 };
+				}
+				continue;
+			}
+
+			--stack_step;
+		}
+
+		std::size_t total_count = 0;
+		for ( auto& b : buckets )
+		{
+			std::sort( b.begin(), b.end(), []( const SubConstCandidate& a, const SubConstCandidate& b ) {
+				return a.input_mask_on_x < b.input_mask_on_x;
+			} );
+			total_count += b.size();
+		}
+
+		candidates.reserve( total_count );
+		for ( int w = 0; w <= weight_cap; ++w )
+		{
+			const auto& b = buckets[ std::size_t( w ) ];
+			candidates.insert( candidates.end(), b.begin(), b.end() );
+		}
+
+		return candidates;
+	}
+
 	/**
-	 * @brief Heuristic enumeration of input masks for a fixed var-const subtraction mask.
+	 * @brief Exact enumeration of input masks for a fixed var-const subtraction mask.
 	 *
 	 * We analyze:
 	 *   y = x ⊟ C   (mod 2^32)
@@ -869,44 +1127,13 @@ namespace TwilightDream::auto_search_linear
 	 *   beta  = output mask on y (given),
 	 *   alpha = input  mask on x (to be enumerated).
 	 *
-	 * Weight is computed by the exact per-bit 2×2 carry transfer operator
-	 * (`linear_x_modulo_minus_const32`). This helper only proposes a small set of plausible alpha
-	 * candidates and keeps the best few (by weight) to limit branching.
+	 * Weight is computed exactly from the integer carry-state transfer model; enumeration is strict
+	 * and ordered by nondecreasing weight. No candidate cap is applied.
 	 */
-	static inline std::vector<SubConstCandidate> generate_subconst_candidates_for_fixed_beta( std::uint32_t output_mask_beta, std::uint32_t constant, int weight_cap, std::size_t max_candidates )
-	{
-		std::vector<SubConstCandidate> candidates;
-		candidates.reserve( std::max<std::size_t>( 8, max_candidates ) );
-		weight_cap = std::clamp( weight_cap, 0, 32 );
-
-		const auto try_add_candidate = [ & ]( std::uint32_t candidate_input_mask_on_x ) {
-			const auto wopt = weight_sub_const_ceil_int( candidate_input_mask_on_x, constant, output_mask_beta );
-			if ( !wopt.has_value() )
-				return;
-			if ( wopt.value() > weight_cap )
-				return;
-			candidates.push_back( SubConstCandidate { candidate_input_mask_on_x, wopt.value() } );
-		};
-
-		// Primary: identity masks
-		try_add_candidate( output_mask_beta );
-		try_add_candidate( 0u );
-		try_add_candidate( 0xFFFFFFFFu );
-
-		// Small neighborhood
-		for ( int bit = 0; bit < 12; ++bit )
-			try_add_candidate( output_mask_beta ^ ( 1u << bit ) );
-
-		std::sort( candidates.begin(), candidates.end(), []( const SubConstCandidate& a, const SubConstCandidate& b ) {
-			if ( a.linear_weight != b.linear_weight )
-				return a.linear_weight < b.linear_weight;
-			return a.input_mask_on_x < b.input_mask_on_x;
-		} );
-		candidates.erase( std::unique( candidates.begin(), candidates.end(), []( const SubConstCandidate& a, const SubConstCandidate& b ) { return a.input_mask_on_x == b.input_mask_on_x; } ), candidates.end() );
-		if ( max_candidates != 0 && candidates.size() > max_candidates )
-			candidates.resize( max_candidates );
-		return candidates;
-	}
+static inline std::vector<SubConstCandidate> generate_subconst_candidates_for_fixed_beta( std::uint32_t output_mask_beta, std::uint32_t constant, int weight_cap )
+{
+	return generate_subconst_candidates_for_fixed_beta_exact( output_mask_beta, constant, weight_cap );
+}
 
 	// ============================================================================
 	// One-round reverse transition enumeration for NeoAlzette (linear trails)
@@ -928,16 +1155,14 @@ namespace TwilightDream::auto_search_linear
 	//   A2 = A1 ⊕ rotl(B1, R0)                                (linear, weight 0)
 	//   B2 = B1 ⊕ rotl(A2, R1)                                (linear, weight 0)
 	//   A3 = A2 ⊕ f_B(B2) ⊕ RC[4]                             (injection, quadratic; weight = rank/2)
-	//   B3 = l1_backward(B2)                                  (linear, weight 0)
 	//
 	//   // Second subround (near round output):
-	//   A4 = A3 ⊞ (rotl(B3,31) ⊕ rotl(B3,17) ⊕ RC[5])        (var-var addition; weight from |z|)
-	//   B4 = B3 ⊟ RC[6]                                       (var-const subtraction; exact weight)
-	//   B5 = B4 ⊕ rotl(A4, R0)                                (linear, weight 0)
-	//   A5 = A4 ⊕ rotl(B5, R1)                                (linear, weight 0)
-	//   B6 = B5 ⊕ f_A(A5) ⊕ RC[9]                             (injection, quadratic; weight = rank/2)
-	//   A6 = l2_backward(A5)                                  (linear, weight 0)
-	//   A_out = A6 ⊕ RC[10],  B_out = B6 ⊕ RC[11]             (XOR with constants; weight 0)
+	//   A4 = A3 ⊞ (rotl(B2,31) ⊕ rotl(B2,17) ⊕ RC[5])        (var-var addition; weight from |z|)
+	//   B3 = B2 ⊟ RC[6]                                       (var-const subtraction; exact weight)
+	//   B4 = B3 ⊕ rotl(A4, R0)                                (linear, weight 0)
+	//   A5 = A4 ⊕ rotl(B4, R1)                                (linear, weight 0)
+	//   B5 = B4 ⊕ f_A(A5) ⊕ RC[9]                             (injection, quadratic; weight = rank/2)
+	//   A_out = A5 ⊕ RC[10],  B_out = B5 ⊕ RC[11]             (XOR with constants; weight 0)
 	//
 	// Notes about constants (engineering reality):
 	// - XOR with a constant does NOT change |correlation|, it only flips the sign. Since this best-search
@@ -1019,13 +1244,14 @@ namespace TwilightDream::auto_search_linear
 
 	struct LinearBestSearchConfiguration
 	{
+		SearchMode   search_mode = SearchMode::Strict;
 		int			  round_count = 1;
 		int			  addition_weight_cap = 31;			   // per modular-addition (var-var) weight cap (0..31). 31 = no extra cap for 32-bit
 		int			  constant_subtraction_weight_cap = 32;  // per sub-const weight cap (0..32). 32 = no extra cap.
-		std::size_t	  maximum_addition_candidates = 4096;  // cap enumerated (v,w) pairs per addition (0 = no cap)
-		std::size_t	  maximum_constant_subtraction_candidates = 8;
-		std::size_t	  maximum_injection_input_masks = 64;  // cap enumerated masks per injection affine subspace (0 = enumerate all; may explode)
-		std::size_t	  maximum_round_predecessors = 256;	   // cap the number of generated predecessor states per round boundary
+		bool		  enable_addition_z_shell = false;	   // enable exact z-shell enumeration for var-var addition
+		std::size_t	  addition_z_shell_max_candidates = 0;	// 0 = unlimited; if exceeded, fallback to split-8 SLR
+		std::size_t	  maximum_injection_input_masks = 0;  // cap enumerated masks per injection affine subspace (0 = enumerate all; may explode)
+		std::size_t	  maximum_round_predecessors = 0;	   // cap the number of generated predecessor states per round boundary
 		std::uint64_t maximum_search_nodes = 1000000;
 		std::uint64_t maximum_search_seconds = 0;		// 0 = unlimited
 		int			  target_best_weight = -1;		// if >=0: stop early once best_weight <= target
@@ -1057,7 +1283,8 @@ namespace TwilightDream::auto_search_linear
 		std::vector<LinearTrailStepRecord> best_linear_trail;  // in reverse order (last round -> first round)
 	};
 
-	struct BestWeightCheckpointWriter;	// forward
+	struct BestWeightHistory;	// forward
+	struct BinaryCheckpointManager;		// forward
 
 	struct LinearBestSearchContext
 	{
@@ -1092,10 +1319,13 @@ namespace TwilightDream::auto_search_linear
 		bool								  stop_due_to_target = false;
 
 		// Optional: checkpoint writer (e.g., auto mode) to persist best-weight changes.
-		BestWeightCheckpointWriter* checkpoint = nullptr;
+		BestWeightHistory* checkpoint = nullptr;
+
+		// Optional: binary checkpoint manager for resumable DFS.
+		BinaryCheckpointManager* binary_checkpoint = nullptr;
 	};
 
-	struct BestWeightCheckpointWriter
+	struct BestWeightHistory
 	{
 		std::ofstream out {};
 		int			  last_written_weight = INFINITE_WEIGHT;
@@ -1123,23 +1353,58 @@ namespace TwilightDream::auto_search_linear
 				return;
 
 			const auto	 now = std::chrono::steady_clock::now();
-			const double elapsed_sec = ( context.run_start_time.time_since_epoch().count() == 0 ) ? 0.0 : std::chrono::duration<double>( now - context.run_start_time ).count();
+			const double elapsed_seconds = ( context.run_start_time.time_since_epoch().count() == 0 ) ? 0.0 : std::chrono::duration<double>( now - context.run_start_time ).count();
+			const auto&	 config = context.configuration;
 
 			out << "=== checkpoint ===\n";
 			out << "timestamp_local=" << format_local_time_now() << "\n";
-			out << "reason=" << ( reason ? reason : "best_changed" ) << "\n";
-			out << "rounds=" << context.configuration.round_count << "\n";
-			out << "start_mask_a=" << hex8( context.start_output_branch_a_mask ) << "\n";
-			out << "start_mask_b=" << hex8( context.start_output_branch_b_mask ) << "\n";
+			out << "checkpoint_reason=" << ( reason ? reason : "best_weight_changed" ) << "\n";
+			out << "round_count=" << config.round_count << "\n";
+			out << "search_mode=" << search_mode_to_string( config.search_mode ) << "\n";
+			out << "start_output_mask_branch_a=" << hex8( context.start_output_branch_a_mask ) << "\n";
+			out << "start_output_mask_branch_b=" << hex8( context.start_output_branch_b_mask ) << "\n";
 			out << "best_weight=" << context.best_weight << "\n";
-			out << "nodes_visited=" << context.visited_node_count << "\n";
-			out << "elapsed_sec=" << std::fixed << std::setprecision( 3 ) << elapsed_sec << "\n";
-			out << "best_input_mask_a=" << hex8( context.best_input_branch_a_mask ) << "\n";
-			out << "best_input_mask_b=" << hex8( context.best_input_branch_b_mask ) << "\n";
-			out << "trail_steps=" << context.best_linear_trail.size() << "\n";
+			out << "visited_node_count=" << context.visited_node_count << "\n";
+			out << "elapsed_seconds=" << std::fixed << std::setprecision( 3 ) << elapsed_seconds << "\n";
+			out << "target_best_weight=" << config.target_best_weight << "\n";
+			out << "addition_weight_cap=" << config.addition_weight_cap << "\n";
+			out << "constant_subtraction_weight_cap=" << config.constant_subtraction_weight_cap << "\n";
+			out << "enable_addition_z_shell=" << ( config.enable_addition_z_shell ? 1 : 0 ) << "\n";
+			out << "addition_z_shell_max_candidates=" << config.addition_z_shell_max_candidates << "\n";
+			out << "maximum_injection_input_masks=" << config.maximum_injection_input_masks << "\n";
+			out << "maximum_round_predecessors=" << config.maximum_round_predecessors << "\n";
+			out << "maximum_search_nodes=" << config.maximum_search_nodes << "\n";
+			out << "maximum_search_seconds=" << config.maximum_search_seconds << "\n";
+			out << "enable_state_memoization=" << ( config.enable_state_memoization ? 1 : 0 ) << "\n";
+			out << "enable_remaining_round_lower_bound=" << ( config.enable_remaining_round_lower_bound ? 1 : 0 ) << "\n";
+			out << "remaining_round_min_weight_count=" << config.remaining_round_min_weight.size() << "\n";
+			if ( !config.remaining_round_min_weight.empty() )
+			{
+				out << "remaining_round_min_weight_values=";
+				for ( std::size_t i = 0; i < config.remaining_round_min_weight.size(); ++i )
+				{
+					if ( i != 0 )
+						out << ",";
+					out << config.remaining_round_min_weight[ i ];
+				}
+				out << "\n";
+			}
+			out << "auto_generate_remaining_round_lower_bound=" << ( config.auto_generate_remaining_round_lower_bound ? 1 : 0 ) << "\n";
+			out << "remaining_round_lower_bound_generation_nodes=" << config.remaining_round_lower_bound_generation_nodes << "\n";
+			out << "remaining_round_lower_bound_generation_seconds=" << config.remaining_round_lower_bound_generation_seconds << "\n";
+			out << "strict_remaining_round_lower_bound=" << ( config.strict_remaining_round_lower_bound ? 1 : 0 ) << "\n";
+			out << "enable_verbose_output=" << ( config.enable_verbose_output ? 1 : 0 ) << "\n";
+			out << "best_input_mask_branch_a=" << hex8( context.best_input_branch_a_mask ) << "\n";
+			out << "best_input_mask_branch_b=" << hex8( context.best_input_branch_b_mask ) << "\n";
+			out << "trail_step_count=" << context.best_linear_trail.size() << "\n";
 			for ( const auto& s : context.best_linear_trail )
 			{
-				out << "R" << s.round_index << " round_w=" << s.round_weight << " out_MaskA=" << hex8( s.output_branch_a_mask ) << " out_MaskB=" << hex8( s.output_branch_b_mask ) << " in_MaskA=" << hex8( s.input_branch_a_mask ) << " in_MaskB=" << hex8( s.input_branch_b_mask ) << "\n";
+				out << "round_index=" << s.round_index
+					<< " round_weight=" << s.round_weight
+					<< " output_mask_branch_a=" << hex8( s.output_branch_a_mask )
+					<< " output_mask_branch_b=" << hex8( s.output_branch_b_mask )
+					<< " input_mask_branch_a=" << hex8( s.input_branch_a_mask )
+					<< " input_mask_branch_b=" << hex8( s.input_branch_b_mask ) << "\n";
 			}
 			out << "\n";
 			out.flush();
@@ -1176,18 +1441,21 @@ namespace TwilightDream::auto_search_linear
 		const auto old_fill = std::cout.fill();
 
 		TwilightDream::runtime_component::print_progress_prefix( std::cout );
-		std::cout << "[Progress] nodes=" << ctx.visited_node_count << "  nodes_per_sec=" << std::fixed << std::setprecision( 2 ) << rate << "  elapsed_sec=" << std::fixed << std::setprecision( 2 ) << elapsed << "  best_weight=" << ( ( ctx.best_weight >= INFINITE_WEIGHT ) ? -1 : ctx.best_weight );
-		std::cout << "  depth=" << depth << "/" << ctx.configuration.round_count;
+		std::cout << "[Progress] visited_node_count=" << ctx.visited_node_count
+				  << "  visited_nodes_per_second=" << std::fixed << std::setprecision( 2 ) << rate
+				  << "  elapsed_seconds=" << std::fixed << std::setprecision( 2 ) << elapsed
+				  << "  best_weight=" << ( ( ctx.best_weight >= INFINITE_WEIGHT ) ? -1 : ctx.best_weight );
+		std::cout << "  current_depth=" << depth << "  total_rounds=" << ctx.configuration.round_count;
 		if ( ctx.progress_print_masks )
 		{
 			std::cout << "  ";
-			print_word32_hex( "start_mask_a=", ctx.start_output_branch_a_mask );
+			print_word32_hex( "start_output_mask_branch_a=", ctx.start_output_branch_a_mask );
 			std::cout << " ";
-			print_word32_hex( "start_mask_b=", ctx.start_output_branch_b_mask );
+			print_word32_hex( "start_output_mask_branch_b=", ctx.start_output_branch_b_mask );
 			std::cout << " ";
-			print_word32_hex( "cur_mask_a=", current_round_output_branch_a_mask );
+			print_word32_hex( "current_output_mask_branch_a=", current_round_output_branch_a_mask );
 			std::cout << " ";
-			print_word32_hex( "cur_mask_b=", current_round_output_branch_b_mask );
+			print_word32_hex( "current_output_mask_branch_b=", current_round_output_branch_b_mask );
 		}
 		std::cout << "\n";
 
@@ -1198,6 +1466,96 @@ namespace TwilightDream::auto_search_linear
 		ctx.progress_last_print_time = now;
 		ctx.progress_last_print_nodes = ctx.visited_node_count;
 	}
+
+	// Per-round shared state for nested enumeration (moved out for checkpointing).
+	struct LinearRoundSearchState
+	{
+		int round_boundary_depth = 0;
+		int accumulated_weight_so_far = 0;
+		int round_index = 0;
+		int round_weight_cap = 0;
+		int remaining_round_weight_lower_bound_after_this_round = 0;
+
+		std::uint32_t round_output_branch_a_mask = 0;
+		std::uint32_t round_output_branch_b_mask = 0;
+
+		std::uint32_t branch_a_mask_before_linear_layer_two_backward = 0;
+		std::uint32_t branch_b_mask_before_injection_from_branch_a = 0;
+
+		InjectionCorrelationTransition injection_from_branch_a_transition {};
+		int							   weight_injection_from_branch_a = 0;
+		int							   remaining_after_inj_a = 0;
+		int							   second_subconst_weight_cap = 0;
+		int							   second_add_weight_cap = 0;
+
+		std::uint32_t chosen_correlated_input_mask_for_injection_from_branch_a = 0;
+
+		std::uint32_t output_branch_a_mask_after_second_addition = 0;
+		std::uint32_t output_branch_b_mask_after_second_constant_subtraction = 0;
+
+		std::vector<SubConstCandidate>	  second_constant_subtraction_candidates_for_branch_b;
+		const std::vector<AddCandidate>* second_addition_candidates_for_branch_a = nullptr;
+
+		std::uint32_t input_branch_a_mask_before_second_addition = 0;
+		std::uint32_t second_addition_term_mask_from_branch_b = 0;
+		int			  weight_second_addition = 0;
+		std::uint32_t branch_b_mask_contribution_from_second_addition_term = 0;
+
+		InjectionCorrelationTransition injection_from_branch_b_transition {};
+		int							   weight_injection_from_branch_b = 0;
+		int							   base_weight_after_inj_b = 0;
+
+		std::uint32_t chosen_correlated_input_mask_for_injection_from_branch_b = 0;
+
+		std::uint32_t input_branch_b_mask_before_second_constant_subtraction = 0;
+		int			  weight_second_constant_subtraction = 0;
+		std::uint32_t branch_b_mask_after_linear_layer_one_backward = 0;
+		std::uint32_t branch_b_mask_after_first_xor_with_rotated_branch_a_base = 0;
+
+		int base_weight_after_second_subconst = 0;
+		int first_subconst_weight_cap = 0;
+		int first_add_weight_cap = 0;
+
+		std::uint32_t output_branch_a_mask_after_first_constant_subtraction = 0;
+		std::uint32_t output_branch_b_mask_after_first_addition = 0;
+
+		std::vector<LinearTrailStepRecord> round_predecessors;
+	};
+
+	enum class LinearSearchStage : std::uint8_t
+	{
+		Enter = 0,
+		Recurse = 1
+	};
+
+	struct LinearSearchFrame
+	{
+		LinearSearchStage stage = LinearSearchStage::Enter;
+		std::size_t		  trail_size_at_entry = 0;
+		LinearRoundSearchState state {};
+		std::size_t		  predecessor_index = 0;
+	};
+
+	struct LinearSearchCursor
+	{
+		std::vector<LinearSearchFrame> stack;
+	};
+
+	struct BinaryCheckpointManager
+	{
+		std::string path {};
+		std::uint64_t every_seconds = 0;
+		bool pending_best = false;
+		std::chrono::steady_clock::time_point last_write_time {};
+
+		bool enabled() const { return !path.empty(); }
+		bool pending_best_change() const { return pending_best; }
+		void mark_best_changed() { pending_best = true; }
+
+		// Implemented later (needs serialization helpers).
+		void poll( const LinearBestSearchContext& context, const LinearSearchCursor& cursor );
+		bool write_now( const LinearBestSearchContext& context, const LinearSearchCursor& cursor, const char* reason );
+	};
 
 	template <class OnInputMaskFn>
 	static inline void enumerate_affine_subspace_input_masks( LinearBestSearchContext& context, const InjectionCorrelationTransition& transition, std::size_t maximum_input_mask_count, OnInputMaskFn&& on_input_mask )
@@ -1519,7 +1877,8 @@ namespace TwilightDream::auto_search_linear
 			state.round_output_branch_a_mask = current_round_output_branch_a_mask;
 			state.round_output_branch_b_mask = current_round_output_branch_b_mask;
 
-			state.branch_a_mask_before_linear_layer_two_backward = l2_backward_transpose( current_round_output_branch_a_mask );
+			// Linear layer on branch A removed (treat as identity in reverse propagation)
+			state.branch_a_mask_before_linear_layer_two_backward = current_round_output_branch_a_mask;
 			state.branch_b_mask_before_injection_from_branch_a = current_round_output_branch_b_mask;
 
 			state.injection_from_branch_a_transition = compute_injection_transition_from_branch_a( current_round_output_branch_b_mask );
@@ -1630,13 +1989,14 @@ namespace TwilightDream::auto_search_linear
 				generate_subconst_candidates_for_fixed_beta(
 					state.output_branch_b_mask_after_second_constant_subtraction,
 					NeoAlzetteCore::ROUND_CONSTANTS[ 6 ],
-					state.second_subconst_weight_cap,
-					search_configuration.maximum_constant_subtraction_candidates );
+					state.second_subconst_weight_cap );
 			state.second_addition_candidates_for_branch_a =
-				&AddVarVarCandidateHighway32::get_candidates_for_output_mask_u(
+				&AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
 					state.output_branch_a_mask_after_second_addition,
 					state.second_add_weight_cap,
-					search_configuration.maximum_addition_candidates );
+					search_configuration.search_mode,
+					search_configuration.enable_addition_z_shell,
+					search_configuration.addition_z_shell_max_candidates );
 
 			enumerate_second_addition_candidates();
 		}
@@ -1648,16 +2008,12 @@ namespace TwilightDream::auto_search_linear
 			if ( !state.second_addition_candidates_for_branch_a )
 				return;
 
-			std::size_t second_addition_candidate_count = 0;
 			std::uint64_t& inout_node_budget = context.visited_node_count;
 
 			for ( const auto& second_addition_candidate_for_branch_a : *state.second_addition_candidates_for_branch_a )
 			{
 				if ( second_addition_candidate_for_branch_a.linear_weight > state.second_add_weight_cap )
 					break;
-				if ( search_configuration.maximum_addition_candidates != 0 && second_addition_candidate_count >= search_configuration.maximum_addition_candidates )
-					break;
-				++second_addition_candidate_count;
 
 				if ( search_configuration.maximum_search_nodes != 0 && inout_node_budget >= search_configuration.maximum_search_nodes )
 					break;
@@ -1727,7 +2083,8 @@ namespace TwilightDream::auto_search_linear
 				state.input_branch_b_mask_before_second_constant_subtraction = second_constant_subtraction_candidate_for_branch_b.input_mask_on_x;
 				state.branch_b_mask_after_linear_layer_one_backward =
 					state.input_branch_b_mask_before_second_constant_subtraction ^ state.branch_b_mask_contribution_from_second_addition_term;
-				state.branch_b_mask_after_first_xor_with_rotated_branch_a_base = l1_backward_transpose( state.branch_b_mask_after_linear_layer_one_backward );
+				// Linear layer on branch B removed (treat as identity in reverse propagation)
+				state.branch_b_mask_after_first_xor_with_rotated_branch_a_base = state.branch_b_mask_after_linear_layer_one_backward;
 
 				state.base_weight_after_second_subconst = state.base_weight_after_inj_b + state.weight_second_constant_subtraction;
 				if ( state.base_weight_after_second_subconst >= state.round_weight_cap )
@@ -1763,13 +2120,14 @@ namespace TwilightDream::auto_search_linear
 				generate_subconst_candidates_for_fixed_beta(
 					state.output_branch_a_mask_after_first_constant_subtraction,
 					NeoAlzetteCore::ROUND_CONSTANTS[ 1 ],
-					state.first_subconst_weight_cap,
-					search_configuration.maximum_constant_subtraction_candidates );
+					state.first_subconst_weight_cap );
 			const auto& first_addition_candidates_for_branch_b =
-				AddVarVarCandidateHighway32::get_candidates_for_output_mask_u(
+				AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
 					state.output_branch_b_mask_after_first_addition,
 					state.first_add_weight_cap,
-					search_configuration.maximum_addition_candidates );
+					search_configuration.search_mode,
+					search_configuration.enable_addition_z_shell,
+					search_configuration.addition_z_shell_max_candidates );
 
 			std::uint64_t& inout_node_budget = context.visited_node_count;
 
@@ -1784,14 +2142,10 @@ namespace TwilightDream::auto_search_linear
 				if ( base_weight_after_first_subconst >= state.round_weight_cap )
 					break;  // candidates are sorted by weight
 
-				std::size_t first_addition_candidate_count = 0;
 				for ( const auto& first_addition_candidate_for_branch_b : first_addition_candidates_for_branch_b )
 				{
 					if ( first_addition_candidate_for_branch_b.linear_weight > state.first_add_weight_cap )
 						break;
-					if ( search_configuration.maximum_addition_candidates != 0 && first_addition_candidate_count >= search_configuration.maximum_addition_candidates )
-						break;
-					++first_addition_candidate_count;
 
 					if ( search_configuration.maximum_search_nodes != 0 && inout_node_budget >= search_configuration.maximum_search_nodes )
 						break;
@@ -1875,6 +2229,7 @@ namespace TwilightDream::auto_search_linear
 		for ( int k = 1; k <= round_count; ++k )
 		{
 			LinearBestSearchConfiguration config = base_configuration;
+			config.search_mode = SearchMode::Strict;
 			config.round_count = k;
 			config.enable_remaining_round_lower_bound = false;
 			config.remaining_round_min_weight.clear();
@@ -1882,8 +2237,6 @@ namespace TwilightDream::auto_search_linear
 			config.target_best_weight = -1;
 			// Make the lower-bound search as complete as possible by removing heuristic caps.
 			config.maximum_round_predecessors = 0;
-			config.maximum_addition_candidates = 0;
-			config.maximum_constant_subtraction_candidates = 0;
 			config.maximum_injection_input_masks = 0;
 			config.maximum_search_nodes = 0;
 			config.maximum_search_seconds = 0;
@@ -1915,7 +2268,564 @@ namespace TwilightDream::auto_search_linear
 		return table;
 	}
 
-	static inline MatsuiSearchRunLinearResult run_linear_best_search( std::uint32_t output_branch_a_mask, std::uint32_t output_branch_b_mask, const LinearBestSearchConfiguration& search_configuration, bool print_output = false, std::uint64_t single_run_progress_every_seconds = 0, bool progress_print_masks = false, int seeded_upper_bound_weight = INFINITE_WEIGHT, const std::vector<LinearTrailStepRecord>* seeded_upper_bound_trail = nullptr, BestWeightCheckpointWriter* checkpoint = nullptr )
+	// Resumable DFS searcher (explicit stack, same traversal order).
+	class LinearBestTrailSearcherCursor final
+	{
+	public:
+		LinearBestTrailSearcherCursor( LinearBestSearchContext& context_in, LinearSearchCursor& cursor_in )
+			: context( context_in ), search_configuration( context_in.configuration ), cursor( cursor_in )
+		{
+		}
+
+		void search_from_start( std::uint32_t output_branch_a_mask, std::uint32_t output_branch_b_mask )
+		{
+			cursor.stack.clear();
+			context.current_linear_trail.clear();
+			LinearSearchFrame frame {};
+			frame.stage = LinearSearchStage::Enter;
+			frame.trail_size_at_entry = context.current_linear_trail.size();
+			frame.state.round_boundary_depth = 0;
+			frame.state.accumulated_weight_so_far = 0;
+			frame.state.round_output_branch_a_mask = output_branch_a_mask;
+			frame.state.round_output_branch_b_mask = output_branch_b_mask;
+			cursor.stack.push_back( frame );
+			run();
+		}
+
+		void search_from_cursor()
+		{
+			run();
+		}
+
+	private:
+		LinearBestSearchContext&			   context;
+		const LinearBestSearchConfiguration& search_configuration;
+		LinearSearchCursor&				   cursor;
+
+		LinearSearchFrame& current_frame()
+		{
+			return cursor.stack.back();
+		}
+
+		LinearRoundSearchState& current_round_state()
+		{
+			return current_frame().state;
+		}
+
+		void pop_frame()
+		{
+			if ( cursor.stack.empty() )
+				return;
+			const std::size_t target = cursor.stack.back().trail_size_at_entry;
+			if ( context.current_linear_trail.size() > target )
+				context.current_linear_trail.resize( target );
+			cursor.stack.pop_back();
+		}
+
+		void maybe_poll_checkpoint()
+		{
+			if ( !context.binary_checkpoint )
+				return;
+			if ( context.binary_checkpoint->pending_best_change() || ( ( context.visited_node_count & context.progress_node_mask ) == 0 ) )
+				context.binary_checkpoint->poll( context, cursor );
+		}
+
+		void run()
+		{
+			while ( !cursor.stack.empty() )
+			{
+				LinearSearchFrame&	   frame = current_frame();
+				LinearRoundSearchState& state = frame.state;
+
+				switch ( frame.stage )
+				{
+				case LinearSearchStage::Enter:
+				{
+					if ( should_stop_search( state.round_boundary_depth, state.round_output_branch_a_mask, state.round_output_branch_b_mask, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+					if ( handle_round_end_if_needed( state.round_boundary_depth, state.round_output_branch_a_mask, state.round_output_branch_b_mask, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+					if ( should_prune_state_memoization( state.round_boundary_depth, state.round_output_branch_a_mask, state.round_output_branch_b_mask, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+
+					if ( !prepare_round_state( state.round_boundary_depth, state.round_output_branch_a_mask, state.round_output_branch_b_mask, state.accumulated_weight_so_far ) )
+					{
+						pop_frame();
+						break;
+					}
+
+					enumerate_round_predecessors();
+					frame.predecessor_index = 0;
+					frame.stage = LinearSearchStage::Recurse;
+					break;
+				}
+				case LinearSearchStage::Recurse:
+				{
+					if ( context.stop_due_to_time_limit || context.stop_due_to_target )
+					{
+						cursor.stack.clear();
+						break;
+					}
+					if ( frame.predecessor_index >= state.round_predecessors.size() )
+					{
+						pop_frame();
+						break;
+					}
+
+					const auto& step = state.round_predecessors[ frame.predecessor_index++ ];
+					if ( state.accumulated_weight_so_far + step.round_weight >= context.best_weight )
+						break;
+
+					context.current_linear_trail.push_back( step );
+					LinearSearchFrame child {};
+					child.stage = LinearSearchStage::Enter;
+					// Store the parent trail size (exclude the step we just pushed) so pop_frame() removes it.
+					child.trail_size_at_entry = context.current_linear_trail.size() - 1u;
+					child.state.round_boundary_depth = state.round_boundary_depth + 1;
+					child.state.accumulated_weight_so_far = state.accumulated_weight_so_far + step.round_weight;
+					child.state.round_output_branch_a_mask = step.input_branch_a_mask;
+					child.state.round_output_branch_b_mask = step.input_branch_b_mask;
+					cursor.stack.push_back( child );
+					break;
+				}
+				}
+
+				maybe_poll_checkpoint();
+			}
+		}
+
+		// Global stop conditions, node/time budget, and trivial weight pruning.
+		bool should_stop_search( int depth, std::uint32_t current_round_output_branch_a_mask, std::uint32_t current_round_output_branch_b_mask, int accumulated_weight )
+		{
+			if ( context.stop_due_to_time_limit || context.stop_due_to_target )
+				return true;
+
+			if ( search_configuration.maximum_search_nodes != 0 && context.visited_node_count >= search_configuration.maximum_search_nodes )
+				return true;
+
+			++context.visited_node_count;
+
+			// Governor hook: very low overhead (one clock read every ~262k nodes).
+			if ( ( context.visited_node_count & context.progress_node_mask ) == 0 )
+			{
+				memory_governor_poll_if_needed( std::chrono::steady_clock::now() );
+			}
+
+			// Time limit check (low overhead): evaluate clock only every ~262k nodes.
+			if ( search_configuration.maximum_search_seconds != 0 )
+			{
+				if ( ( context.visited_node_count & context.progress_node_mask ) == 0 )
+				{
+					const auto now = std::chrono::steady_clock::now();
+					memory_governor_poll_if_needed( now );
+					const double elapsed = std::chrono::duration<double>( now - context.time_limit_start_time ).count();
+					if ( elapsed >= double( search_configuration.maximum_search_seconds ) )
+					{
+						context.stop_due_to_time_limit = true;
+						return true;
+					}
+				}
+			}
+
+			maybe_print_single_run_progress( context, depth, current_round_output_branch_a_mask, current_round_output_branch_b_mask );
+
+			if ( accumulated_weight >= context.best_weight )
+				return true;
+
+			if ( should_prune_remaining_round_lower_bound( depth, accumulated_weight ) )
+				return true;
+
+			return false;
+		}
+
+		bool should_prune_remaining_round_lower_bound( int depth, int accumulated_weight ) const
+		{
+			if ( context.best_weight >= INFINITE_WEIGHT )
+				return false;
+			if ( !search_configuration.enable_remaining_round_lower_bound )
+				return false;
+
+			const int rounds_left = search_configuration.round_count - depth;
+			if ( rounds_left < 0 )
+				return false;
+			const auto& remaining_round_min_weight_table = search_configuration.remaining_round_min_weight;
+			const std::size_t table_index = std::size_t( rounds_left );
+			if ( table_index >= remaining_round_min_weight_table.size() )
+				return false;
+			const int weight_lower_bound = remaining_round_min_weight_table[ table_index ];
+			return accumulated_weight + weight_lower_bound >= context.best_weight;
+		}
+
+		bool handle_round_end_if_needed( int depth, std::uint32_t current_round_output_branch_a_mask, std::uint32_t current_round_output_branch_b_mask, int accumulated_weight )
+		{
+			if ( depth != search_configuration.round_count )
+				return false;
+
+			context.best_weight = accumulated_weight;
+			context.best_linear_trail = context.current_linear_trail;
+			context.best_input_branch_a_mask = current_round_output_branch_a_mask;
+			context.best_input_branch_b_mask = current_round_output_branch_b_mask;
+			if ( context.checkpoint )
+				context.checkpoint->maybe_write( context, "improved" );
+			if ( context.binary_checkpoint )
+				context.binary_checkpoint->mark_best_changed();
+			if ( search_configuration.target_best_weight >= 0 && context.best_weight <= search_configuration.target_best_weight )
+				context.stop_due_to_target = true;
+			return true;
+		}
+
+		bool should_prune_state_memoization( int depth, std::uint32_t current_round_output_branch_a_mask, std::uint32_t current_round_output_branch_b_mask, int accumulated_weight )
+		{
+			if ( !search_configuration.enable_state_memoization )
+				return false;
+
+			const std::size_t rc = std::size_t( std::max( 1, search_configuration.round_count ) );
+			std::size_t		  hint = ( rc == 0 ) ? 0 : std::size_t( search_configuration.maximum_search_nodes / rc );
+			hint = std::clamp<std::size_t>( hint, 4096u, 1'000'000u );
+
+			const std::uint64_t key = ( std::uint64_t( current_round_output_branch_a_mask ) << 32 ) | std::uint64_t( current_round_output_branch_b_mask );
+			return context.memoization.should_prune_and_update( std::size_t( depth ), key, accumulated_weight, true, true, hint, 192ull, "linear_memo.reserve", "linear_memo.try_emplace" );
+		}
+
+		bool prepare_round_state( int depth, std::uint32_t current_round_output_branch_a_mask, std::uint32_t current_round_output_branch_b_mask, int accumulated_weight )
+		{
+			auto& state = current_round_state();
+			state.round_boundary_depth = depth;
+			state.accumulated_weight_so_far = accumulated_weight;
+			state.round_index = search_configuration.round_count - depth;
+			state.remaining_round_weight_lower_bound_after_this_round = compute_remaining_round_weight_lower_bound_after_this_round( depth );
+			const int base_cap = ( context.best_weight >= INFINITE_WEIGHT ) ? INFINITE_WEIGHT : ( context.best_weight - accumulated_weight );
+			state.round_weight_cap = ( base_cap >= INFINITE_WEIGHT ) ? INFINITE_WEIGHT : ( base_cap - state.remaining_round_weight_lower_bound_after_this_round );
+			if ( state.round_weight_cap <= 0 )
+				return false;
+
+			state.round_output_branch_a_mask = current_round_output_branch_a_mask;
+			state.round_output_branch_b_mask = current_round_output_branch_b_mask;
+
+			state.branch_a_mask_before_linear_layer_two_backward = current_round_output_branch_a_mask;
+			state.branch_b_mask_before_injection_from_branch_a = current_round_output_branch_b_mask;
+
+			state.injection_from_branch_a_transition = compute_injection_transition_from_branch_a( current_round_output_branch_b_mask );
+			state.weight_injection_from_branch_a = state.injection_from_branch_a_transition.weight;
+			if ( state.weight_injection_from_branch_a >= state.round_weight_cap )
+				return false;
+
+			state.remaining_after_inj_a = state.round_weight_cap - state.weight_injection_from_branch_a;
+			if ( state.remaining_after_inj_a <= 0 )
+				return false;
+
+			state.second_subconst_weight_cap = std::min( search_configuration.constant_subtraction_weight_cap, state.remaining_after_inj_a - 1 );
+			state.second_add_weight_cap = std::min( search_configuration.addition_weight_cap, state.remaining_after_inj_a - 1 );
+			if ( state.second_add_weight_cap < 0 )
+				return false;
+
+			state.second_addition_candidates_for_branch_a = nullptr;
+			reset_round_predecessor_buffer();
+
+			return true;
+		}
+
+		int compute_remaining_round_weight_lower_bound_after_this_round( int depth ) const
+		{
+			if ( !search_configuration.enable_remaining_round_lower_bound )
+				return 0;
+			const int rounds_left_after = search_configuration.round_count - ( depth + 1 );
+			if ( rounds_left_after < 0 )
+				return 0;
+			const auto& remaining_round_min_weight_table = search_configuration.remaining_round_min_weight;
+			const std::size_t idx = std::size_t( rounds_left_after );
+			if ( idx >= remaining_round_min_weight_table.size() )
+				return 0;
+			return std::max( 0, remaining_round_min_weight_table[ idx ] );
+		}
+
+		void reset_round_predecessor_buffer()
+		{
+			auto& state = current_round_state();
+			state.round_predecessors.clear();
+			state.round_predecessors.reserve( std::min<std::size_t>( search_configuration.maximum_round_predecessors ? search_configuration.maximum_round_predecessors : 256, 4096 ) );
+		}
+
+		void trim_round_predecessors( bool force )
+		{
+			if ( search_configuration.maximum_round_predecessors == 0 )
+				return;
+
+			auto& state = current_round_state();
+			const std::size_t cap = search_configuration.maximum_round_predecessors;
+			if ( cap == 0 )
+				return;
+			const std::size_t threshold = std::min<std::size_t>( cap * 8u, 16'384u );
+			if ( !force && state.round_predecessors.size() <= threshold )
+				return;
+
+			std::sort( state.round_predecessors.begin(), state.round_predecessors.end(), []( const LinearTrailStepRecord& a, const LinearTrailStepRecord& b ) {
+				if ( a.round_weight != b.round_weight )
+					return a.round_weight < b.round_weight;
+				if ( a.input_branch_a_mask != b.input_branch_a_mask )
+					return a.input_branch_a_mask < b.input_branch_a_mask;
+				return a.input_branch_b_mask < b.input_branch_b_mask;
+			} );
+			state.round_predecessors.erase( std::unique( state.round_predecessors.begin(), state.round_predecessors.end(), []( const LinearTrailStepRecord& a, const LinearTrailStepRecord& b ) {
+				return a.input_branch_a_mask == b.input_branch_a_mask && a.input_branch_b_mask == b.input_branch_b_mask;
+			} ), state.round_predecessors.end() );
+			if ( state.round_predecessors.size() > cap )
+				state.round_predecessors.resize( cap );
+		}
+
+		void enumerate_round_predecessors()
+		{
+			enumerate_injection_from_branch_a_masks();
+			trim_round_predecessors( true );
+		}
+
+		void enumerate_injection_from_branch_a_masks()
+		{
+			auto& state = current_round_state();
+			enumerate_affine_subspace_input_masks(
+				context,
+				state.injection_from_branch_a_transition,
+				search_configuration.maximum_injection_input_masks,
+				[ this ]( std::uint32_t m ) { handle_injection_from_branch_a_mask( m ); } );
+		}
+
+		void handle_injection_from_branch_a_mask( std::uint32_t chosen_correlated_input_mask_for_injection_from_branch_a )
+		{
+			auto& state = current_round_state();
+			state.chosen_correlated_input_mask_for_injection_from_branch_a = chosen_correlated_input_mask_for_injection_from_branch_a;
+
+			const std::uint32_t branch_a_mask_before_linear_layer_two_backward_with_injection_choice =
+				state.branch_a_mask_before_linear_layer_two_backward ^ chosen_correlated_input_mask_for_injection_from_branch_a;
+			const std::uint32_t branch_b_mask_before_injection_from_branch_a_for_this_choice = state.branch_b_mask_before_injection_from_branch_a;
+
+			state.output_branch_a_mask_after_second_addition = branch_a_mask_before_linear_layer_two_backward_with_injection_choice;
+			const std::uint32_t branch_b_mask_after_second_xor_with_rotated_branch_a =
+				branch_b_mask_before_injection_from_branch_a_for_this_choice ^ NeoAlzetteCore::rotr( branch_a_mask_before_linear_layer_two_backward_with_injection_choice, NeoAlzetteCore::CROSS_XOR_ROT_R1 );
+			state.output_branch_b_mask_after_second_constant_subtraction = branch_b_mask_after_second_xor_with_rotated_branch_a;
+			state.output_branch_a_mask_after_second_addition ^=
+				NeoAlzetteCore::rotr( branch_b_mask_after_second_xor_with_rotated_branch_a, NeoAlzetteCore::CROSS_XOR_ROT_R0 );
+
+			state.second_constant_subtraction_candidates_for_branch_b =
+				generate_subconst_candidates_for_fixed_beta(
+					state.output_branch_b_mask_after_second_constant_subtraction,
+					NeoAlzetteCore::ROUND_CONSTANTS[ 6 ],
+					state.second_subconst_weight_cap );
+			state.second_addition_candidates_for_branch_a =
+				&AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
+					state.output_branch_a_mask_after_second_addition,
+					state.second_add_weight_cap,
+					search_configuration.search_mode,
+					search_configuration.enable_addition_z_shell,
+					search_configuration.addition_z_shell_max_candidates );
+
+			enumerate_second_addition_candidates();
+		}
+
+		void enumerate_second_addition_candidates()
+		{
+			auto& state = current_round_state();
+			if ( !state.second_addition_candidates_for_branch_a )
+				return;
+
+			std::uint64_t& inout_node_budget = context.visited_node_count;
+
+			for ( const auto& second_addition_candidate_for_branch_a : *state.second_addition_candidates_for_branch_a )
+			{
+				if ( second_addition_candidate_for_branch_a.linear_weight > state.second_add_weight_cap )
+					break;
+
+				if ( search_configuration.maximum_search_nodes != 0 && inout_node_budget >= search_configuration.maximum_search_nodes )
+					break;
+				++inout_node_budget;
+
+				state.weight_second_addition = second_addition_candidate_for_branch_a.linear_weight;
+				if ( state.weight_injection_from_branch_a + state.weight_second_addition >= state.round_weight_cap )
+					break;
+
+				state.input_branch_a_mask_before_second_addition = second_addition_candidate_for_branch_a.input_mask_x;
+				state.second_addition_term_mask_from_branch_b = second_addition_candidate_for_branch_a.input_mask_y;
+
+				handle_second_addition_candidate();
+			}
+		}
+
+		void handle_second_addition_candidate()
+		{
+			auto& state = current_round_state();
+			state.branch_b_mask_contribution_from_second_addition_term =
+				NeoAlzetteCore::rotr( state.second_addition_term_mask_from_branch_b, 31 ) ^ NeoAlzetteCore::rotr( state.second_addition_term_mask_from_branch_b, 17 );
+
+			state.injection_from_branch_b_transition = compute_injection_transition_from_branch_b( state.input_branch_a_mask_before_second_addition );
+			state.weight_injection_from_branch_b = state.injection_from_branch_b_transition.weight;
+			state.base_weight_after_inj_b = state.weight_injection_from_branch_a + state.weight_second_addition + state.weight_injection_from_branch_b;
+			if ( state.base_weight_after_inj_b >= state.round_weight_cap )
+				return;
+
+			enumerate_injection_from_branch_b_masks();
+		}
+
+		void enumerate_injection_from_branch_b_masks()
+		{
+			auto& state = current_round_state();
+			enumerate_affine_subspace_input_masks(
+				context,
+				state.injection_from_branch_b_transition,
+				search_configuration.maximum_injection_input_masks,
+				[ this ]( std::uint32_t m ) { handle_injection_from_branch_b_mask( m ); } );
+		}
+
+		void handle_injection_from_branch_b_mask( std::uint32_t chosen_correlated_input_mask_for_injection_from_branch_b )
+		{
+			auto& state = current_round_state();
+			state.chosen_correlated_input_mask_for_injection_from_branch_b = chosen_correlated_input_mask_for_injection_from_branch_b;
+			enumerate_second_constant_subtraction_candidates();
+		}
+
+		void enumerate_second_constant_subtraction_candidates()
+		{
+			auto& state = current_round_state();
+			std::uint64_t& inout_node_budget = context.visited_node_count;
+
+			for ( const auto& second_constant_subtraction_candidate_for_branch_b : state.second_constant_subtraction_candidates_for_branch_b )
+			{
+				if ( search_configuration.maximum_search_nodes != 0 && inout_node_budget >= search_configuration.maximum_search_nodes )
+					break;
+				++inout_node_budget;
+
+				state.weight_second_constant_subtraction = second_constant_subtraction_candidate_for_branch_b.linear_weight;
+				if ( state.base_weight_after_inj_b + state.weight_second_constant_subtraction >= state.round_weight_cap )
+					break;
+
+				state.input_branch_b_mask_before_second_constant_subtraction = second_constant_subtraction_candidate_for_branch_b.input_mask_on_x;
+				state.branch_b_mask_after_linear_layer_one_backward =
+					state.input_branch_b_mask_before_second_constant_subtraction ^ state.branch_b_mask_contribution_from_second_addition_term;
+				state.branch_b_mask_after_first_xor_with_rotated_branch_a_base = state.branch_b_mask_after_linear_layer_one_backward;
+
+				state.base_weight_after_second_subconst = state.base_weight_after_inj_b + state.weight_second_constant_subtraction;
+				if ( state.base_weight_after_second_subconst >= state.round_weight_cap )
+					continue;
+
+				const int remaining_after_second_subconst = state.round_weight_cap - state.base_weight_after_second_subconst;
+				if ( remaining_after_second_subconst <= 0 )
+					continue;
+				state.first_subconst_weight_cap = std::min( search_configuration.constant_subtraction_weight_cap, remaining_after_second_subconst - 1 );
+				state.first_add_weight_cap = std::min( search_configuration.addition_weight_cap, remaining_after_second_subconst - 1 );
+				if ( state.first_add_weight_cap < 0 )
+					continue;
+
+				const std::uint32_t output_branch_a_mask_after_injection_from_branch_b = state.input_branch_a_mask_before_second_addition;
+				const std::uint32_t branch_a_mask_after_first_xor_with_rotated_branch_b = output_branch_a_mask_after_injection_from_branch_b;
+				const std::uint32_t branch_b_mask_after_first_xor_with_rotated_branch_a =
+					state.branch_b_mask_after_first_xor_with_rotated_branch_a_base ^ state.chosen_correlated_input_mask_for_injection_from_branch_b;
+
+				state.output_branch_a_mask_after_first_constant_subtraction =
+					branch_a_mask_after_first_xor_with_rotated_branch_b ^ NeoAlzetteCore::rotr( branch_b_mask_after_first_xor_with_rotated_branch_a, NeoAlzetteCore::CROSS_XOR_ROT_R1 );
+				state.output_branch_b_mask_after_first_addition =
+					branch_b_mask_after_first_xor_with_rotated_branch_a ^ NeoAlzetteCore::rotr( state.output_branch_a_mask_after_first_constant_subtraction, NeoAlzetteCore::CROSS_XOR_ROT_R0 );
+
+				enumerate_first_subround_candidates();
+			}
+		}
+
+		void enumerate_first_subround_candidates()
+		{
+			auto& state = current_round_state();
+			const auto first_constant_subtraction_candidates_for_branch_a =
+				generate_subconst_candidates_for_fixed_beta(
+					state.output_branch_a_mask_after_first_constant_subtraction,
+					NeoAlzetteCore::ROUND_CONSTANTS[ 1 ],
+					state.first_subconst_weight_cap );
+			const auto& first_addition_candidates_for_branch_b =
+				AddVarVarSplit8Enumerator32::get_candidates_for_output_mask_u(
+					state.output_branch_b_mask_after_first_addition,
+					state.first_add_weight_cap,
+					search_configuration.search_mode,
+					search_configuration.enable_addition_z_shell,
+					search_configuration.addition_z_shell_max_candidates );
+
+			std::uint64_t& inout_node_budget = context.visited_node_count;
+
+			for ( const auto& first_constant_subtraction_candidate_for_branch_a : first_constant_subtraction_candidates_for_branch_a )
+			{
+				if ( search_configuration.maximum_search_nodes != 0 && inout_node_budget >= search_configuration.maximum_search_nodes )
+					break;
+				++inout_node_budget;
+
+				const std::uint32_t input_branch_a_mask_before_first_constant_subtraction = first_constant_subtraction_candidate_for_branch_a.input_mask_on_x;
+				const int			base_weight_after_first_subconst = state.base_weight_after_second_subconst + first_constant_subtraction_candidate_for_branch_a.linear_weight;
+				if ( base_weight_after_first_subconst >= state.round_weight_cap )
+					break;
+
+				for ( const auto& first_addition_candidate_for_branch_b : first_addition_candidates_for_branch_b )
+				{
+					if ( first_addition_candidate_for_branch_b.linear_weight > state.first_add_weight_cap )
+						break;
+
+					if ( search_configuration.maximum_search_nodes != 0 && inout_node_budget >= search_configuration.maximum_search_nodes )
+						break;
+					++inout_node_budget;
+
+					const std::uint32_t input_branch_b_mask_before_first_addition = first_addition_candidate_for_branch_b.input_mask_x;
+					const std::uint32_t first_addition_term_mask_from_branch_a = first_addition_candidate_for_branch_b.input_mask_y;
+
+					const std::uint32_t branch_a_mask_contribution_from_first_addition_term =
+						NeoAlzetteCore::rotr( first_addition_term_mask_from_branch_a, 31 ) ^ NeoAlzetteCore::rotr( first_addition_term_mask_from_branch_a, 17 );
+					const std::uint32_t input_branch_a_mask_at_round_input =
+						input_branch_a_mask_before_first_constant_subtraction ^ branch_a_mask_contribution_from_first_addition_term;
+
+					const int total_w = base_weight_after_first_subconst + first_addition_candidate_for_branch_b.linear_weight;
+					if ( total_w >= state.round_weight_cap )
+						break;
+
+					LinearTrailStepRecord step {};
+					step.round_index = state.round_index;
+					step.output_branch_a_mask = state.round_output_branch_a_mask;
+					step.output_branch_b_mask = state.round_output_branch_b_mask;
+					step.input_branch_a_mask = input_branch_a_mask_at_round_input;
+					step.input_branch_b_mask = input_branch_b_mask_before_first_addition;
+
+					step.output_branch_b_mask_after_second_constant_subtraction = state.output_branch_b_mask_after_second_constant_subtraction;
+					step.input_branch_b_mask_before_second_constant_subtraction = state.input_branch_b_mask_before_second_constant_subtraction;
+					step.weight_second_constant_subtraction = state.weight_second_constant_subtraction;
+
+					step.output_branch_a_mask_after_second_addition = state.output_branch_a_mask_after_second_addition;
+					step.input_branch_a_mask_before_second_addition = state.input_branch_a_mask_before_second_addition;
+					step.second_addition_term_mask_from_branch_b = state.second_addition_term_mask_from_branch_b;
+					step.weight_second_addition = state.weight_second_addition;
+
+					step.weight_injection_from_branch_a = state.weight_injection_from_branch_a;
+					step.weight_injection_from_branch_b = state.weight_injection_from_branch_b;
+					step.chosen_correlated_input_mask_for_injection_from_branch_a = state.chosen_correlated_input_mask_for_injection_from_branch_a;
+					step.chosen_correlated_input_mask_for_injection_from_branch_b = state.chosen_correlated_input_mask_for_injection_from_branch_b;
+
+					step.output_branch_a_mask_after_first_constant_subtraction = state.output_branch_a_mask_after_first_constant_subtraction;
+					step.input_branch_a_mask_before_first_constant_subtraction = input_branch_a_mask_before_first_constant_subtraction;
+					step.weight_first_constant_subtraction = first_constant_subtraction_candidate_for_branch_a.linear_weight;
+
+					step.output_branch_b_mask_after_first_addition = state.output_branch_b_mask_after_first_addition;
+					step.input_branch_b_mask_before_first_addition = input_branch_b_mask_before_first_addition;
+					step.first_addition_term_mask_from_branch_a = first_addition_term_mask_from_branch_a;
+					step.weight_first_addition = first_addition_candidate_for_branch_b.linear_weight;
+
+					step.round_weight = total_w;
+
+					state.round_predecessors.push_back( step );
+					trim_round_predecessors( false );
+				}
+			}
+		}
+	};
+
+	static inline MatsuiSearchRunLinearResult run_linear_best_search( std::uint32_t output_branch_a_mask, std::uint32_t output_branch_b_mask, const LinearBestSearchConfiguration& search_configuration, bool print_output = false, std::uint64_t single_run_progress_every_seconds = 0, bool progress_print_masks = false, int seeded_upper_bound_weight = INFINITE_WEIGHT, const std::vector<LinearTrailStepRecord>* seeded_upper_bound_trail = nullptr, BestWeightHistory* checkpoint = nullptr, BinaryCheckpointManager* binary_checkpoint = nullptr )
 	{
 		MatsuiSearchRunLinearResult result {};
 		if ( search_configuration.round_count <= 0 )
@@ -1926,6 +2836,7 @@ namespace TwilightDream::auto_search_linear
 		context.start_output_branch_a_mask = output_branch_a_mask;
 		context.start_output_branch_b_mask = output_branch_b_mask;
 		context.checkpoint = checkpoint;
+		context.binary_checkpoint = binary_checkpoint;
 
 		int&								best = context.best_weight;
 		std::uint32_t&						best_input_branch_a_mask = context.best_input_branch_a_mask;
@@ -2030,8 +2941,10 @@ namespace TwilightDream::auto_search_linear
 		if ( print_output )
 		{
 			std::cout << "[BestSearch] mode=matsui(injection-affine)(reverse)\n";
-			std::cout << "  rounds=" << search_configuration.round_count << "  maximum_search_nodes=" << search_configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_configuration.maximum_search_seconds << "  memo=" << ( search_configuration.enable_state_memoization ? "on" : "off" ) << "\n";
-			std::cout << "  max_add_candidates=" << search_configuration.maximum_addition_candidates << "  max_subconst_candidates=" << search_configuration.maximum_constant_subtraction_candidates << "  max_injection_input_masks=" << search_configuration.maximum_injection_input_masks << "  max_round_predecessors=" << search_configuration.maximum_round_predecessors << "\n";
+			std::cout << "  rounds=" << search_configuration.round_count << "  search_mode=" << search_mode_to_string( search_configuration.search_mode )
+					  << "  maximum_search_nodes=" << search_configuration.maximum_search_nodes << "  maximum_search_seconds=" << search_configuration.maximum_search_seconds
+					  << "  memo=" << ( search_configuration.enable_state_memoization ? "on" : "off" ) << "\n";
+			std::cout << "  max_injection_input_masks=" << search_configuration.maximum_injection_input_masks << "  max_round_predecessors=" << search_configuration.maximum_round_predecessors << "\n";
 			if ( remaining_round_lower_bound_disabled_due_to_strict )
 			{
 				std::cout << "  remaining_round_lower_bound=off  reason=strict_mode_non_exhaustive_generation\n";
@@ -2071,7 +2984,8 @@ namespace TwilightDream::auto_search_linear
 			}
 		}
 
-		LinearBestTrailSearcher searcher( context );
+		LinearSearchCursor cursor {};
+		LinearBestTrailSearcherCursor searcher( context, cursor );
 		searcher.search_from_start( output_branch_a_mask, output_branch_b_mask );
 
 		result.nodes_visited = context.visited_node_count;
@@ -2087,6 +3001,530 @@ namespace TwilightDream::auto_search_linear
 			result.best_input_branch_b_mask = best_input_branch_b_mask;
 		}
 		return result;
+	}
+
+	// ============================================================================
+	// Binary checkpoint serialization (linear)
+	// ============================================================================
+
+	static inline std::string default_binary_checkpoint_path( int round_count, std::uint32_t mask_a, std::uint32_t mask_b )
+	{
+		std::ostringstream oss;
+		oss << "auto_checkpoint_linear_R" << round_count << "_MaskA" << std::hex << std::setw( 8 ) << std::setfill( '0' ) << mask_a << "_MaskB" << std::hex << std::setw( 8 ) << std::setfill( '0' ) << mask_b << std::dec << ".ckpt";
+		return oss.str();
+	}
+
+	static inline void write_config( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const LinearBestSearchConfiguration& c )
+	{
+		w.write_i32( c.round_count );
+		w.write_i32( c.addition_weight_cap );
+		w.write_i32( c.constant_subtraction_weight_cap );
+		// Reserved slots kept for checkpoint compatibility.
+		w.write_u64( 0 );  // historical maximum_addition_candidates
+		w.write_u64( 0 );  // historical max_subconst_candidates
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_injection_input_masks ) );
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_round_predecessors ) );
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_search_nodes ) );
+		w.write_u64( static_cast<std::uint64_t>( c.maximum_search_seconds ) );
+		w.write_i32( c.target_best_weight );
+		w.write_u8( c.enable_state_memoization ? 1u : 0u );
+		w.write_u8( c.enable_remaining_round_lower_bound ? 1u : 0u );
+		w.write_u64( static_cast<std::uint64_t>( c.remaining_round_min_weight.size() ) );
+		for ( const int v : c.remaining_round_min_weight )
+			w.write_i32( v );
+		w.write_u8( c.auto_generate_remaining_round_lower_bound ? 1u : 0u );
+		w.write_u64( static_cast<std::uint64_t>( c.remaining_round_lower_bound_generation_nodes ) );
+		w.write_u64( static_cast<std::uint64_t>( c.remaining_round_lower_bound_generation_seconds ) );
+		w.write_u8( c.strict_remaining_round_lower_bound ? 1u : 0u );
+		w.write_u8( c.enable_verbose_output ? 1u : 0u );
+		// Extension block (required).
+		static constexpr std::uint32_t kLinearConfigExtTagV2 = 0x4C464359u; // 'YCFL'
+		w.write_u32( kLinearConfigExtTagV2 );
+		w.write_u8( static_cast<std::uint8_t>( c.search_mode ) );
+		w.write_u8( c.enable_addition_z_shell ? 1u : 0u );
+		w.write_u64( static_cast<std::uint64_t>( c.addition_z_shell_max_candidates ) );
+	}
+
+	static inline bool read_config( TwilightDream::auto_search_checkpoint::BinaryReader& r, LinearBestSearchConfiguration& c )
+	{
+		std::int32_t round_count = 0;
+		std::int32_t add_cap = 0;
+		std::int32_t sub_cap = 0;
+		std::uint64_t max_add = 0;
+		std::uint64_t max_sub = 0;
+		std::uint64_t max_inj = 0;
+		std::uint64_t max_pred = 0;
+		std::uint64_t max_nodes = 0;
+		std::uint64_t max_seconds = 0;
+		std::int32_t target = 0;
+		std::uint8_t memo = 0;
+		std::uint8_t rem = 0;
+		std::uint64_t rem_size = 0;
+		std::uint8_t auto_rem = 0;
+		std::uint64_t rem_nodes = 0;
+		std::uint64_t rem_secs = 0;
+		std::uint8_t strict_rem = 0;
+		std::uint8_t verbose = 0;
+		if ( !r.read_i32( round_count ) ) return false;
+		if ( !r.read_i32( add_cap ) ) return false;
+		if ( !r.read_i32( sub_cap ) ) return false;
+		if ( !r.read_u64( max_add ) ) return false;
+		if ( !r.read_u64( max_sub ) ) return false;
+		if ( !r.read_u64( max_inj ) ) return false;
+		if ( !r.read_u64( max_pred ) ) return false;
+		if ( !r.read_u64( max_nodes ) ) return false;
+		if ( !r.read_u64( max_seconds ) ) return false;
+		if ( !r.read_i32( target ) ) return false;
+		if ( !r.read_u8( memo ) ) return false;
+		if ( !r.read_u8( rem ) ) return false;
+		if ( !r.read_u64( rem_size ) ) return false;
+		if ( !r.read_u8( auto_rem ) ) return false;
+		if ( !r.read_u64( rem_nodes ) ) return false;
+		if ( !r.read_u64( rem_secs ) ) return false;
+		if ( !r.read_u8( strict_rem ) ) return false;
+		if ( !r.read_u8( verbose ) ) return false;
+
+		(void)max_add; // reserved slot (historical maximum_addition_candidates)
+		(void)max_sub; // reserved slot (historical max_subconst_candidates)
+		c.round_count = round_count;
+		c.addition_weight_cap = add_cap;
+		c.constant_subtraction_weight_cap = sub_cap;
+		c.maximum_injection_input_masks = static_cast<std::size_t>( max_inj );
+		c.maximum_round_predecessors = static_cast<std::size_t>( max_pred );
+		c.maximum_search_nodes = static_cast<std::uint64_t>( max_nodes );
+		c.maximum_search_seconds = static_cast<std::uint64_t>( max_seconds );
+		c.target_best_weight = target;
+		c.enable_state_memoization = ( memo != 0 );
+		c.enable_remaining_round_lower_bound = ( rem != 0 );
+		c.remaining_round_min_weight.clear();
+		c.remaining_round_min_weight.resize( static_cast<std::size_t>( rem_size ) );
+		for ( std::size_t i = 0; i < c.remaining_round_min_weight.size(); ++i )
+		{
+			std::int32_t v = 0;
+			if ( !r.read_i32( v ) ) return false;
+			c.remaining_round_min_weight[ i ] = v;
+		}
+		c.auto_generate_remaining_round_lower_bound = ( auto_rem != 0 );
+		c.remaining_round_lower_bound_generation_nodes = rem_nodes;
+		c.remaining_round_lower_bound_generation_seconds = rem_secs;
+		c.strict_remaining_round_lower_bound = ( strict_rem != 0 );
+		c.enable_verbose_output = ( verbose != 0 );
+		// Extension block (required).
+		{
+			std::uint32_t tag = 0;
+			if ( !r.read_u32( tag ) ) return false;
+			if ( tag == 0x4C464358u )
+			{
+				std::uint8_t mode = 0;
+				if ( !r.read_u8( mode ) ) return false;
+				if ( mode > static_cast<std::uint8_t>( SearchMode::Strict ) )
+					return false;
+				c.search_mode = static_cast<SearchMode>( mode );
+				c.enable_addition_z_shell = false;
+				c.addition_z_shell_max_candidates = 0;
+			}
+			else if ( tag == 0x4C464359u )
+			{
+				std::uint8_t mode = 0;
+				std::uint8_t zshell = 0;
+				std::uint64_t zshell_max = 0;
+				if ( !r.read_u8( mode ) ) return false;
+				if ( !r.read_u8( zshell ) ) return false;
+				if ( !r.read_u64( zshell_max ) ) return false;
+				if ( mode > static_cast<std::uint8_t>( SearchMode::Strict ) )
+					return false;
+				c.search_mode = static_cast<SearchMode>( mode );
+				c.enable_addition_z_shell = ( zshell != 0 );
+				c.addition_z_shell_max_candidates = static_cast<std::size_t>( zshell_max );
+			}
+			else
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	static inline void write_trail_step( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const LinearTrailStepRecord& s )
+	{
+		w.write_i32( s.round_index );
+		w.write_u32( s.output_branch_a_mask );
+		w.write_u32( s.output_branch_b_mask );
+		w.write_u32( s.input_branch_a_mask );
+		w.write_u32( s.input_branch_b_mask );
+		w.write_u32( s.output_branch_b_mask_after_second_constant_subtraction );
+		w.write_u32( s.input_branch_b_mask_before_second_constant_subtraction );
+		w.write_i32( s.weight_second_constant_subtraction );
+		w.write_u32( s.output_branch_a_mask_after_second_addition );
+		w.write_u32( s.input_branch_a_mask_before_second_addition );
+		w.write_u32( s.second_addition_term_mask_from_branch_b );
+		w.write_i32( s.weight_second_addition );
+		w.write_i32( s.weight_injection_from_branch_a );
+		w.write_i32( s.weight_injection_from_branch_b );
+		w.write_u32( s.chosen_correlated_input_mask_for_injection_from_branch_a );
+		w.write_u32( s.chosen_correlated_input_mask_for_injection_from_branch_b );
+		w.write_u32( s.output_branch_a_mask_after_first_constant_subtraction );
+		w.write_u32( s.input_branch_a_mask_before_first_constant_subtraction );
+		w.write_i32( s.weight_first_constant_subtraction );
+		w.write_u32( s.output_branch_b_mask_after_first_addition );
+		w.write_u32( s.input_branch_b_mask_before_first_addition );
+		w.write_u32( s.first_addition_term_mask_from_branch_a );
+		w.write_i32( s.weight_first_addition );
+		w.write_i32( s.round_weight );
+	}
+
+	static inline bool read_trail_step( TwilightDream::auto_search_checkpoint::BinaryReader& r, LinearTrailStepRecord& s )
+	{
+		if ( !r.read_i32( s.round_index ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_mask ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_mask ) ) return false;
+		if ( !r.read_u32( s.input_branch_a_mask ) ) return false;
+		if ( !r.read_u32( s.input_branch_b_mask ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_mask_after_second_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.input_branch_b_mask_before_second_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_second_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_mask_after_second_addition ) ) return false;
+		if ( !r.read_u32( s.input_branch_a_mask_before_second_addition ) ) return false;
+		if ( !r.read_u32( s.second_addition_term_mask_from_branch_b ) ) return false;
+		if ( !r.read_i32( s.weight_second_addition ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_a ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_b ) ) return false;
+		if ( !r.read_u32( s.chosen_correlated_input_mask_for_injection_from_branch_a ) ) return false;
+		if ( !r.read_u32( s.chosen_correlated_input_mask_for_injection_from_branch_b ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_mask_after_first_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.input_branch_a_mask_before_first_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_first_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_mask_after_first_addition ) ) return false;
+		if ( !r.read_u32( s.input_branch_b_mask_before_first_addition ) ) return false;
+		if ( !r.read_u32( s.first_addition_term_mask_from_branch_a ) ) return false;
+		if ( !r.read_i32( s.weight_first_addition ) ) return false;
+		if ( !r.read_i32( s.round_weight ) ) return false;
+		return true;
+	}
+
+	static inline void write_subconst_candidate( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const SubConstCandidate& c )
+	{
+		w.write_u32( c.input_mask_on_x );
+		w.write_i32( c.linear_weight );
+	}
+
+	static inline bool read_subconst_candidate( TwilightDream::auto_search_checkpoint::BinaryReader& r, SubConstCandidate& c )
+	{
+		if ( !r.read_u32( c.input_mask_on_x ) ) return false;
+		if ( !r.read_i32( c.linear_weight ) ) return false;
+		return true;
+	}
+
+	static inline void write_injection_transition( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const InjectionCorrelationTransition& t )
+	{
+		w.write_u32( t.offset_mask );
+		for ( std::size_t i = 0; i < t.basis_vectors.size(); ++i )
+			w.write_u32( t.basis_vectors[ i ] );
+		w.write_i32( t.rank );
+		w.write_i32( t.weight );
+	}
+
+	static inline bool read_injection_transition( TwilightDream::auto_search_checkpoint::BinaryReader& r, InjectionCorrelationTransition& t )
+	{
+		if ( !r.read_u32( t.offset_mask ) ) return false;
+		for ( std::size_t i = 0; i < t.basis_vectors.size(); ++i )
+		{
+			if ( !r.read_u32( t.basis_vectors[ i ] ) ) return false;
+		}
+		if ( !r.read_i32( t.rank ) ) return false;
+		if ( !r.read_i32( t.weight ) ) return false;
+		return true;
+	}
+
+	static inline void write_round_state( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const LinearRoundSearchState& s )
+	{
+		w.write_i32( s.round_boundary_depth );
+		w.write_i32( s.accumulated_weight_so_far );
+		w.write_i32( s.round_index );
+		w.write_i32( s.round_weight_cap );
+		w.write_i32( s.remaining_round_weight_lower_bound_after_this_round );
+		w.write_u32( s.round_output_branch_a_mask );
+		w.write_u32( s.round_output_branch_b_mask );
+		w.write_u32( s.branch_a_mask_before_linear_layer_two_backward );
+		w.write_u32( s.branch_b_mask_before_injection_from_branch_a );
+		write_injection_transition( w, s.injection_from_branch_a_transition );
+		w.write_i32( s.weight_injection_from_branch_a );
+		w.write_i32( s.remaining_after_inj_a );
+		w.write_i32( s.second_subconst_weight_cap );
+		w.write_i32( s.second_add_weight_cap );
+		w.write_u32( s.chosen_correlated_input_mask_for_injection_from_branch_a );
+		w.write_u32( s.output_branch_a_mask_after_second_addition );
+		w.write_u32( s.output_branch_b_mask_after_second_constant_subtraction );
+
+		w.write_u64( static_cast<std::uint64_t>( s.second_constant_subtraction_candidates_for_branch_b.size() ) );
+		for ( const auto& c : s.second_constant_subtraction_candidates_for_branch_b )
+			write_subconst_candidate( w, c );
+
+		w.write_u32( s.input_branch_a_mask_before_second_addition );
+		w.write_u32( s.second_addition_term_mask_from_branch_b );
+		w.write_i32( s.weight_second_addition );
+		w.write_u32( s.branch_b_mask_contribution_from_second_addition_term );
+		write_injection_transition( w, s.injection_from_branch_b_transition );
+		w.write_i32( s.weight_injection_from_branch_b );
+		w.write_i32( s.base_weight_after_inj_b );
+		w.write_u32( s.chosen_correlated_input_mask_for_injection_from_branch_b );
+		w.write_u32( s.input_branch_b_mask_before_second_constant_subtraction );
+		w.write_i32( s.weight_second_constant_subtraction );
+		w.write_u32( s.branch_b_mask_after_linear_layer_one_backward );
+		w.write_u32( s.branch_b_mask_after_first_xor_with_rotated_branch_a_base );
+		w.write_i32( s.base_weight_after_second_subconst );
+		w.write_i32( s.first_subconst_weight_cap );
+		w.write_i32( s.first_add_weight_cap );
+		w.write_u32( s.output_branch_a_mask_after_first_constant_subtraction );
+		w.write_u32( s.output_branch_b_mask_after_first_addition );
+
+		w.write_u64( static_cast<std::uint64_t>( s.round_predecessors.size() ) );
+		for ( const auto& step : s.round_predecessors )
+			write_trail_step( w, step );
+	}
+
+	static inline bool read_round_state( TwilightDream::auto_search_checkpoint::BinaryReader& r, LinearRoundSearchState& s )
+	{
+		if ( !r.read_i32( s.round_boundary_depth ) ) return false;
+		if ( !r.read_i32( s.accumulated_weight_so_far ) ) return false;
+		if ( !r.read_i32( s.round_index ) ) return false;
+		if ( !r.read_i32( s.round_weight_cap ) ) return false;
+		if ( !r.read_i32( s.remaining_round_weight_lower_bound_after_this_round ) ) return false;
+		if ( !r.read_u32( s.round_output_branch_a_mask ) ) return false;
+		if ( !r.read_u32( s.round_output_branch_b_mask ) ) return false;
+		if ( !r.read_u32( s.branch_a_mask_before_linear_layer_two_backward ) ) return false;
+		if ( !r.read_u32( s.branch_b_mask_before_injection_from_branch_a ) ) return false;
+		if ( !read_injection_transition( r, s.injection_from_branch_a_transition ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_a ) ) return false;
+		if ( !r.read_i32( s.remaining_after_inj_a ) ) return false;
+		if ( !r.read_i32( s.second_subconst_weight_cap ) ) return false;
+		if ( !r.read_i32( s.second_add_weight_cap ) ) return false;
+		if ( !r.read_u32( s.chosen_correlated_input_mask_for_injection_from_branch_a ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_mask_after_second_addition ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_mask_after_second_constant_subtraction ) ) return false;
+
+		std::uint64_t subconst_count = 0;
+		if ( !r.read_u64( subconst_count ) ) return false;
+		s.second_constant_subtraction_candidates_for_branch_b.clear();
+		s.second_constant_subtraction_candidates_for_branch_b.resize( static_cast<std::size_t>( subconst_count ) );
+		for ( auto& c : s.second_constant_subtraction_candidates_for_branch_b )
+		{
+			if ( !read_subconst_candidate( r, c ) ) return false;
+		}
+
+		if ( !r.read_u32( s.input_branch_a_mask_before_second_addition ) ) return false;
+		if ( !r.read_u32( s.second_addition_term_mask_from_branch_b ) ) return false;
+		if ( !r.read_i32( s.weight_second_addition ) ) return false;
+		if ( !r.read_u32( s.branch_b_mask_contribution_from_second_addition_term ) ) return false;
+		if ( !read_injection_transition( r, s.injection_from_branch_b_transition ) ) return false;
+		if ( !r.read_i32( s.weight_injection_from_branch_b ) ) return false;
+		if ( !r.read_i32( s.base_weight_after_inj_b ) ) return false;
+		if ( !r.read_u32( s.chosen_correlated_input_mask_for_injection_from_branch_b ) ) return false;
+		if ( !r.read_u32( s.input_branch_b_mask_before_second_constant_subtraction ) ) return false;
+		if ( !r.read_i32( s.weight_second_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.branch_b_mask_after_linear_layer_one_backward ) ) return false;
+		if ( !r.read_u32( s.branch_b_mask_after_first_xor_with_rotated_branch_a_base ) ) return false;
+		if ( !r.read_i32( s.base_weight_after_second_subconst ) ) return false;
+		if ( !r.read_i32( s.first_subconst_weight_cap ) ) return false;
+		if ( !r.read_i32( s.first_add_weight_cap ) ) return false;
+		if ( !r.read_u32( s.output_branch_a_mask_after_first_constant_subtraction ) ) return false;
+		if ( !r.read_u32( s.output_branch_b_mask_after_first_addition ) ) return false;
+
+		std::uint64_t pred_count = 0;
+		if ( !r.read_u64( pred_count ) ) return false;
+		s.round_predecessors.clear();
+		s.round_predecessors.resize( static_cast<std::size_t>( pred_count ) );
+		for ( auto& step : s.round_predecessors )
+		{
+			if ( !read_trail_step( r, step ) ) return false;
+		}
+
+		s.second_addition_candidates_for_branch_a = nullptr;
+		return true;
+	}
+
+	static inline void write_search_frame( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const LinearSearchFrame& f )
+	{
+		w.write_u8( static_cast<std::uint8_t>( f.stage ) );
+		w.write_u64( static_cast<std::uint64_t>( f.trail_size_at_entry ) );
+		w.write_u64( static_cast<std::uint64_t>( f.predecessor_index ) );
+		write_round_state( w, f.state );
+	}
+
+	static inline bool read_search_frame( TwilightDream::auto_search_checkpoint::BinaryReader& r, LinearSearchFrame& f )
+	{
+		std::uint8_t stage = 0;
+		std::uint64_t trail_size = 0;
+		std::uint64_t pred_index = 0;
+		if ( !r.read_u8( stage ) ) return false;
+		if ( !r.read_u64( trail_size ) ) return false;
+		if ( !r.read_u64( pred_index ) ) return false;
+		f.stage = static_cast<LinearSearchStage>( stage );
+		f.trail_size_at_entry = static_cast<std::size_t>( trail_size );
+		f.predecessor_index = static_cast<std::size_t>( pred_index );
+		if ( !read_round_state( r, f.state ) ) return false;
+		return true;
+	}
+
+	static inline void write_cursor( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const LinearSearchCursor& cursor )
+	{
+		w.write_u64( static_cast<std::uint64_t>( cursor.stack.size() ) );
+		for ( const auto& f : cursor.stack )
+			write_search_frame( w, f );
+	}
+
+	static inline bool read_cursor( TwilightDream::auto_search_checkpoint::BinaryReader& r, LinearSearchCursor& cursor )
+	{
+		std::uint64_t count = 0;
+		if ( !r.read_u64( count ) ) return false;
+		cursor.stack.clear();
+		cursor.stack.resize( static_cast<std::size_t>( count ) );
+		for ( auto& f : cursor.stack )
+		{
+			if ( !read_search_frame( r, f ) ) return false;
+		}
+		return true;
+	}
+
+	static inline void write_trail_vector( TwilightDream::auto_search_checkpoint::BinaryWriter& w, const std::vector<LinearTrailStepRecord>& v )
+	{
+		w.write_u64( static_cast<std::uint64_t>( v.size() ) );
+		for ( const auto& s : v )
+			write_trail_step( w, s );
+	}
+
+	static inline bool read_trail_vector( TwilightDream::auto_search_checkpoint::BinaryReader& r, std::vector<LinearTrailStepRecord>& v )
+	{
+		std::uint64_t count = 0;
+		if ( !r.read_u64( count ) ) return false;
+		v.clear();
+		v.resize( static_cast<std::size_t>( count ) );
+		for ( auto& s : v )
+		{
+			if ( !read_trail_step( r, s ) ) return false;
+		}
+		return true;
+	}
+
+	struct LinearCheckpointLoadResult
+	{
+		LinearBestSearchConfiguration configuration {};
+		std::uint32_t start_mask_a = 0;
+		std::uint32_t start_mask_b = 0;
+		std::uint64_t visited_node_count = 0;
+		int best_weight = INFINITE_WEIGHT;
+		std::uint32_t best_input_mask_a = 0;
+		std::uint32_t best_input_mask_b = 0;
+		std::vector<LinearTrailStepRecord> best_trail;
+		std::vector<LinearTrailStepRecord> current_trail;
+		LinearSearchCursor cursor;
+		std::uint64_t elapsed_usec = 0;
+	};
+
+	static inline bool write_linear_checkpoint( const std::string& path, const LinearBestSearchContext& context, const LinearSearchCursor& cursor, std::uint64_t elapsed_usec )
+	{
+		return TwilightDream::auto_search_checkpoint::write_atomic( path, [ & ]( TwilightDream::auto_search_checkpoint::BinaryWriter& w ) {
+			if ( !TwilightDream::auto_search_checkpoint::write_header( w, TwilightDream::auto_search_checkpoint::SearchKind::Linear ) )
+				return false;
+			w.write_u64( elapsed_usec );
+			write_config( w, context.configuration );
+			w.write_u32( context.start_output_branch_a_mask );
+			w.write_u32( context.start_output_branch_b_mask );
+			w.write_u64( context.visited_node_count );
+			w.write_i32( context.best_weight );
+			w.write_u32( context.best_input_branch_a_mask );
+			w.write_u32( context.best_input_branch_b_mask );
+			write_trail_vector( w, context.best_linear_trail );
+			write_trail_vector( w, context.current_linear_trail );
+			write_cursor( w, cursor );
+			context.memoization.serialize( w );
+			return w.ok();
+		} );
+	}
+
+	static inline bool read_linear_checkpoint( const std::string& path, LinearCheckpointLoadResult& out, TwilightDream::runtime_component::BestWeightMemoizationByDepth<std::uint64_t, int>& memo )
+	{
+		TwilightDream::auto_search_checkpoint::BinaryReader r( path );
+		if ( !r.ok() )
+			return false;
+		TwilightDream::auto_search_checkpoint::SearchKind kind {};
+		if ( !TwilightDream::auto_search_checkpoint::read_header( r, kind ) )
+			return false;
+		if ( kind != TwilightDream::auto_search_checkpoint::SearchKind::Linear )
+			return false;
+		if ( !r.read_u64( out.elapsed_usec ) )
+			return false;
+		if ( !read_config( r, out.configuration ) )
+			return false;
+		if ( !r.read_u32( out.start_mask_a ) )
+			return false;
+		if ( !r.read_u32( out.start_mask_b ) )
+			return false;
+		if ( !r.read_u64( out.visited_node_count ) )
+			return false;
+		if ( !r.read_i32( out.best_weight ) )
+			return false;
+		if ( !r.read_u32( out.best_input_mask_a ) )
+			return false;
+		if ( !r.read_u32( out.best_input_mask_b ) )
+			return false;
+		if ( !read_trail_vector( r, out.best_trail ) )
+			return false;
+		if ( !read_trail_vector( r, out.current_trail ) )
+			return false;
+		if ( !read_cursor( r, out.cursor ) )
+			return false;
+		if ( !memo.deserialize( r ) )
+			return false;
+		return true;
+	}
+
+	inline void BinaryCheckpointManager::poll( const LinearBestSearchContext& context, const LinearSearchCursor& cursor )
+	{
+		if ( !enabled() )
+			return;
+		const auto now = std::chrono::steady_clock::now();
+		const bool due_time = ( every_seconds != 0 ) && ( last_write_time.time_since_epoch().count() == 0 || std::chrono::duration<double>( now - last_write_time ).count() >= double( every_seconds ) );
+		if ( !pending_best && !due_time )
+			return;
+		if ( write_now( context, cursor, pending_best ? "best_weight_change" : "periodic_timer" ) )
+		{
+			pending_best = false;
+			last_write_time = now;
+		}
+	}
+
+	inline bool BinaryCheckpointManager::write_now( const LinearBestSearchContext& context, const LinearSearchCursor& cursor, const char* reason )
+	{
+		const auto now = std::chrono::steady_clock::now();
+		const std::uint64_t elapsed_usec = ( context.run_start_time.time_since_epoch().count() == 0 ) ? 0ull : static_cast<std::uint64_t>( std::chrono::duration_cast<std::chrono::microseconds>( now - context.run_start_time ).count() );
+		const bool ok = write_linear_checkpoint( path, context, cursor, elapsed_usec );
+
+		{
+			std::scoped_lock lk( TwilightDream::runtime_component::cout_mutex() );
+			const auto old_flags = std::cout.flags();
+			const auto old_prec = std::cout.precision();
+			const auto old_fill = std::cout.fill();
+
+			const double elapsed_seconds = static_cast<double>( elapsed_usec ) / 1e6;
+			const int best_weight_out = ( context.best_weight >= INFINITE_WEIGHT ) ? -1 : context.best_weight;
+
+			TwilightDream::runtime_component::print_progress_prefix( std::cout );
+			std::cout << "[Checkpoint] search_kind=linear"
+					  << "  binary_checkpoint_write_result=" << ( ok ? "success" : "failure" )
+					  << "  checkpoint_reason=" << ( reason ? reason : "unspecified" )
+					  << "  checkpoint_path=" << path
+					  << "  visited_node_count=" << context.visited_node_count
+					  << "  best_weight=" << best_weight_out
+					  << "  elapsed_seconds=" << std::fixed << std::setprecision( 2 ) << elapsed_seconds
+					  << "  cursor_stack_depth=" << cursor.stack.size() << "\n";
+
+			std::cout.flags( old_flags );
+			std::cout.precision( old_prec );
+			std::cout.fill( old_fill );
+		}
+
+		return ok;
 	}
 
 }  // namespace TwilightDream::auto_search_linear

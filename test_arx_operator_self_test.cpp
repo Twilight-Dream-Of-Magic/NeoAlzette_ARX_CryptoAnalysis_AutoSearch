@@ -16,8 +16,11 @@
 #include "arx_analysis_operators/differential_xdp_add.hpp"
 #include "arx_analysis_operators/differential_optimal_gamma.hpp"
 #include "arx_analysis_operators/differential_addconst.hpp"
+#include "auto_search_frame/test_neoalzette_differential_best_search.hpp"
 #include "arx_analysis_operators/linear_correlation_addconst.hpp"
+#include "arx_analysis_operators/linear_correlation_addconst_flat.hpp"
 #include "arx_analysis_operators/linear_correlation_add_logn.hpp"
+#include "auto_search_frame/test_neoalzette_linear_best_search.hpp"
 
 using TwilightDream::arx_operators::xdp_add_lm2001_n;
 using TwilightDream::arx_operators::find_optimal_gamma;
@@ -169,6 +172,67 @@ static int run_cpm_logn_sanity_n8_exhaustive() {
     }
 
     std::cout << "ARX Linear Analysis: [cpm(logn)] PASS (n=8 exhaustive)\n";
+    return 0;
+}
+
+static int run_subconst_exact_enum_sanity_n8() {
+    using TwilightDream::auto_search_linear::generate_subconst_candidates_for_fixed_beta;
+    using TwilightDream::arx_operators::linear_x_modulo_minus_const32;
+
+    constexpr int n = 8;
+    constexpr std::uint32_t mask = (1u << n) - 1u;
+    const std::uint32_t beta = 0x5Au & mask;
+    const std::uint32_t constant = 0x3Cu & mask;
+    const int weight_cap = n;
+
+    const auto candidates = generate_subconst_candidates_for_fixed_beta(beta, constant, weight_cap);
+    std::unordered_map<std::uint32_t, int> got;
+    got.reserve(candidates.size());
+    int last_weight = -1;
+    for (const auto& c : candidates) {
+        if (c.linear_weight < last_weight) {
+            std::cout << "ARX Linear Analysis: [subconst-exact] FAIL: non-monotone weights\n";
+            return 1;
+        }
+        last_weight = c.linear_weight;
+        got[c.input_mask_on_x] = c.linear_weight;
+    }
+
+    auto weight_from_corr = [&](double corr) -> int {
+        const double a = std::fabs(corr);
+        if (!(a > 0.0) || !std::isfinite(a)) return -1;
+        const double scale = std::ldexp(1.0, n); // 2^n
+        const std::uint64_t abs_w = static_cast<std::uint64_t>(std::llround(a * scale));
+        if (abs_w == 0) return -1;
+        const int msb = floor_log2_uint64(abs_w);
+        return n - msb;
+    };
+
+    for (std::uint32_t alpha = 0; alpha <= mask; ++alpha) {
+        const auto lc = linear_x_modulo_minus_const32(alpha, constant, beta, n);
+        const int w = weight_from_corr(lc.correlation);
+        if (w < 0 || w > weight_cap) {
+            if (got.find(alpha) != got.end()) {
+                std::cout << "ARX Linear Analysis: [subconst-exact] FAIL: unexpected candidate alpha=0x"
+                          << std::hex << alpha << std::dec << "\n";
+                return 1;
+            }
+            continue;
+        }
+        const auto it = got.find(alpha);
+        if (it == got.end()) {
+            std::cout << "ARX Linear Analysis: [subconst-exact] FAIL: missing alpha=0x"
+                      << std::hex << alpha << std::dec << " w=" << w << "\n";
+            return 1;
+        }
+        if (it->second != w) {
+            std::cout << "ARX Linear Analysis: [subconst-exact] FAIL: weight mismatch alpha=0x"
+                      << std::hex << alpha << std::dec << " got=" << it->second << " ref=" << w << "\n";
+            return 1;
+        }
+    }
+
+    std::cout << "ARX Linear Analysis: [subconst-exact] PASS (n=8 exhaustive)\n";
     return 0;
 }
 
@@ -990,6 +1054,13 @@ int run_arx_operator_self_test() {
     }
 
     {
+        if (run_subconst_exact_enum_sanity_n8() != 0) {
+            std::cout << "ARX Linear Analysis: [subconst-exact] FAIL\n";
+            return 23;
+        }
+    }
+
+    {
         constexpr int n = 4;
         constexpr std::uint32_t mask = (1u << n) - 1u;
 
@@ -1037,6 +1108,74 @@ int run_arx_operator_self_test() {
                         return 16;
                     }
 
+                    const double flat_add =
+                        TwilightDream::arx_operators::linear_correlation_add_const_exact_flat(alpha, constant, beta, n);
+                    if (flat_add != brute_add) {
+                        std::cout << "ARX Linear Analysis: [AddConstLinearFlat] FAIL (add) n=" << n
+                                  << " alpha=0x" << std::hex << alpha
+                                  << " constant=0x" << constant
+                                  << " beta=0x" << beta
+                                  << std::dec
+                                  << " brute=" << std::setprecision(17) << brute_add
+                                  << " flat=" << flat_add
+                                  << "\n";
+                        return 23;
+                    }
+
+                    // Windowed estimator: must satisfy certified bound (Theorem 5.3 style).
+                    for (int L = 0; L <= n; ++L) {
+                        const auto rep = TwilightDream::arx_operators::linear_correlation_add_const_flat_bin_report(
+                            alpha, constant, beta, n, L);
+                        const double chat = rep.corr_hat.as_double();
+                        const double diff = std::fabs(chat - brute_add);
+                        const double delta = (double)rep.delta_bound;
+                        if (diff > delta + 1e-12) {
+                            std::cout << "ARX Linear Analysis: [AddConstLinearFlatBinBound] FAIL n=" << n
+                                      << " L=" << L
+                                      << " alpha=0x" << std::hex << alpha
+                                      << " constant=0x" << constant
+                                      << " beta=0x" << beta
+                                      << std::dec
+                                      << " brute=" << std::setprecision(17) << brute_add
+                                      << " chat=" << chat
+                                      << " diff=" << diff
+                                      << " delta=" << delta
+                                      << "\n";
+                            return 25;
+                        }
+                    }
+
+                    // Binary-Lift + window: uses beta_res, enforces L>=2; must satisfy bound too.
+                    for (int L = 0; L <= n; ++L) {
+                        const auto liftm = TwilightDream::arx_operators::binary_lift_addconst_masks(
+                            alpha, beta, constant, n);
+                        const std::uint32_t alpha_res =
+                            (std::uint32_t)((liftm.t_res ^ liftm.beta_res) & (std::uint64_t)mask);
+                        const std::uint32_t beta_res =
+                            (std::uint32_t)(liftm.beta_res & (std::uint64_t)mask);
+                        const double brute_lifted = brute_force_corr_add_const_n(alpha_res, constant, beta_res, n);
+
+                        const auto lifted = TwilightDream::arx_operators::corr_add_const_binary_lifted_report(
+                            alpha, beta, constant, n, L);
+                        const double chat = lifted.residual.corr_hat.as_double();
+                        const double diff = std::fabs(chat - brute_lifted);
+                        const double delta = (double)lifted.residual.delta_bound;
+                        if (diff > delta + 1e-12) {
+                            std::cout << "ARX Linear Analysis: [AddConstLinearLiftedBound] FAIL n=" << n
+                                      << " L=" << L
+                                      << " alpha=0x" << std::hex << alpha
+                                      << " constant=0x" << constant
+                                      << " beta=0x" << beta
+                                      << std::dec
+                                      << " brute_lifted=" << std::setprecision(17) << brute_lifted
+                                      << " chat=" << chat
+                                      << " diff=" << diff
+                                      << " delta=" << delta
+                                      << "\n";
+                            return 26;
+                        }
+                    }
+
                     const double brute_sub = brute_force_corr_sub_const_n(alpha, constant, beta, n);
                     const auto lc_sub =
                         TwilightDream::arx_operators::linear_x_modulo_minus_const32(alpha, constant, beta, n);
@@ -1051,10 +1190,29 @@ int run_arx_operator_self_test() {
                                   << "\n";
                         return 17;
                     }
+
+                    // Flat evaluator uses addition by two's complement.
+                    const std::uint32_t neg_constant = ((~constant) + 1u) & mask;
+                    const double flat_sub =
+                        TwilightDream::arx_operators::linear_correlation_add_const_exact_flat(alpha, neg_constant, beta, n);
+                    if (flat_sub != brute_sub) {
+                        std::cout << "ARX Linear Analysis: [AddConstLinearFlat] FAIL (sub) n=" << n
+                                  << " alpha=0x" << std::hex << alpha
+                                  << " constant=0x" << constant
+                                  << " beta=0x" << beta
+                                  << std::dec
+                                  << " brute=" << std::setprecision(17) << brute_sub
+                                  << " flat=" << flat_sub
+                                  << "\n";
+                        return 24;
+                    }
                 }
             }
         }
         std::cout << "ARX Linear Analysis: [AddConstLinear] PASS (n=4 exhaustive)\n";
+        std::cout << "ARX Linear Analysis: [AddConstLinearFlat] PASS (n=4 exhaustive)\n";
+        std::cout << "ARX Linear Analysis: [AddConstLinearFlatBinBound] PASS (n=4 exhaustive)\n";
+        std::cout << "ARX Linear Analysis: [AddConstLinearLiftedBound] PASS (n=4 exhaustive)\n";
     }
 
     {

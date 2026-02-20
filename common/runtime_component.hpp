@@ -17,6 +17,7 @@
 #include <source_location>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -143,6 +144,9 @@ namespace TwilightDream::runtime_component
 	{
 		std::uint64_t total_physical_bytes = 0;
 		std::uint64_t available_physical_bytes = 0;
+		std::uint64_t process_rss_bytes = 0;	   // VmRSS / working set (best-effort)
+		std::uint64_t committed_as_bytes = 0;	   // Linux: Committed_AS; Windows: CommitTotal
+		std::uint64_t commit_limit_bytes = 0;	   // Linux: CommitLimit; Windows: CommitLimit
 	};
 
 	// Best-effort query; returns {0,0} if unsupported.
@@ -150,6 +154,108 @@ namespace TwilightDream::runtime_component
 
 	// Default poll function for `memory_governor_set_poll_fn()`.
 	void governor_poll_system_memory_once();
+
+	// Print a compact status line with VmRSS / MemAvailable / Committed_AS (best-effort).
+	void print_system_memory_status_line( std::ostream& os, const SystemMemoryInfo& info, const char* prefix = nullptr );
+
+	// ============================================================================
+	// Workstation-greedy memory budgeting (must-live vs rebuildable pools)
+	// ============================================================================
+
+	struct MemoryBudget
+	{
+		std::uint64_t available_physical_bytes = 0;
+		std::uint64_t headroom_bytes = 0;
+		std::uint64_t total_budget_bytes = 0;
+		std::uint64_t must_live_budget_bytes = 0;
+		std::uint64_t rebuildable_budget_bytes = 0;
+	};
+
+	// Split `available - headroom` into MUST-LIVE and REBUILDABLE budgets.
+	MemoryBudget compute_workstation_greedy_budget( const SystemMemoryInfo& info, std::uint64_t headroom_bytes, double must_live_fraction = 0.35 );
+
+	class BudgetedMemoryPool
+	{
+	public:
+		explicit BudgetedMemoryPool( const char* label );
+		BudgetedMemoryPool( const BudgetedMemoryPool& ) = delete;
+		BudgetedMemoryPool& operator=( const BudgetedMemoryPool& ) = delete;
+
+		void		  set_budget_bytes( std::uint64_t bytes );
+		std::uint64_t budget_bytes() const;
+		std::uint64_t allocated_bytes() const;
+		const char*	  label() const;
+
+		// Returns nullptr on failure or budget exceeded.
+		void* allocate( std::uint64_t bytes, bool touch_pages );
+		void  release_all();
+
+	private:
+		struct Block
+		{
+			void*		  p = nullptr;
+			std::uint64_t size = 0;
+		};
+
+		const char*			  label_ = nullptr;
+		mutable std::mutex	  mutex_ {};
+		std::vector<Block>	  blocks_ {};
+		std::uint64_t		  budget_bytes_ = 0;	 // 0 = unlimited
+		std::uint64_t		  allocated_bytes_ = 0;
+	};
+
+	BudgetedMemoryPool& must_live_pool();
+	BudgetedMemoryPool& rebuildable_pool();
+	void			   configure_memory_pools( const MemoryBudget& budget );
+	void			   release_rebuildable_pool();
+
+	void* alloc_must_live( std::uint64_t bytes, bool touch_pages = false );
+	void* alloc_rebuildable( std::uint64_t bytes, bool touch_pages = true );
+
+	// Optional hook called right before `release_rebuildable_pool()` frees memory.
+	// Use this to drop/clear any metadata that may point into the rebuildable pool.
+	using RebuildableCleanupCallback = void ( * )();
+	void rebuildable_set_cleanup_fn( RebuildableCleanupCallback fn );
+
+	// Memory pressure hooks: checkpoint -> release rebuildable -> degrade must-live (optional).
+	using MemoryPressureCallback = void ( * )();
+	void memory_pressure_set_checkpoint_fn( MemoryPressureCallback fn );
+	void memory_pressure_set_must_live_degrade_fn( MemoryPressureCallback fn );
+	void on_memory_pressure();
+
+	// ============================================================================
+	// Table budget helpers (cLAT / pDDT)
+	// ============================================================================
+
+	// cLAT memory estimate from paper: 2^{3(m-8)} * 1.2 GB (approx).
+	std::uint64_t clat_estimated_bytes_for_m( unsigned m );
+	unsigned	  clat_select_m_for_budget( std::uint64_t budget_bytes, unsigned min_m = 8, unsigned max_m = 16 );
+
+	// Generic threshold chooser: `estimate_bytes(threshold)` must be monotonic decreasing w.r.t. threshold.
+	template <class Estimator>
+	inline double pddt_select_threshold_for_budget( Estimator&& estimate_bytes, double min_threshold, double max_threshold, std::uint64_t budget_bytes, int iterations = 32 )
+	{
+		if ( budget_bytes == 0 )
+			return max_threshold;
+		double lo = min_threshold;
+		double hi = max_threshold;
+		double best = max_threshold;
+		for ( int i = 0; i < iterations; ++i )
+		{
+			const double mid = ( lo + hi ) * 0.5;
+			const std::uint64_t est = static_cast<std::uint64_t>( estimate_bytes( mid ) );
+			if ( est > budget_bytes )
+			{
+				lo = mid;  // threshold too low (table too big)
+			}
+			else
+			{
+				best = mid;
+				hi = mid;  // can lower threshold
+			}
+		}
+		return best;
+	}
 
 	inline double bytes_to_gibibytes( std::uint64_t bytes )
 	{
@@ -164,10 +270,10 @@ namespace TwilightDream::runtime_component
 		const std::uint64_t mebibyte_in_bytes = 1024ull * 1024ull;
 		const std::uint64_t gibibyte_in_bytes = 1024ull * 1024ull * 1024ull;
 
-		// Default rule: keep max(2 GiB, min(4 GiB, available/10)).
-		// Rationale: time-first modes can be extremely memory-hungry; 512 MiB headroom is too risky on Windows.
-		std::uint64_t headroom_bytes = std::min<std::uint64_t>( 4ull * gibibyte_in_bytes, available_physical_bytes / 10ull );
-		headroom_bytes = std::max<std::uint64_t>( headroom_bytes, 2ull * gibibyte_in_bytes );
+		// Default rule (workstation-greedy): keep ~6-8 GiB headroom.
+		// Rationale: time-first modes can be extremely memory-hungry; keep OS responsive while enabling large tables/caches.
+		std::uint64_t headroom_bytes = std::min<std::uint64_t>( 8ull * gibibyte_in_bytes, available_physical_bytes / 8ull );
+		headroom_bytes = std::max<std::uint64_t>( headroom_bytes, 6ull * gibibyte_in_bytes );
 
 		// Optional override (still clamped to a small hard minimum to avoid "0 headroom => OS thrash").
 		if ( memory_headroom_mib_was_provided )
@@ -514,6 +620,88 @@ namespace TwilightDream::runtime_component
 			return enabled_ && !disabled_due_to_oom_;
 		}
 
+		template <class Writer>
+		bool serialize( Writer& w ) const
+		{
+			static_assert( std::is_integral_v<Key> && std::is_integral_v<Weight>, "Memoization serialization requires integral key/weight." );
+			const bool on = enabled();
+			w.write_u8( on ? 1u : 0u );
+			w.write_u64( static_cast<std::uint64_t>( maps_.size() ) );
+			if ( !on )
+				return w.ok();
+
+			for ( const auto& mp : maps_ )
+			{
+				w.write_u64( static_cast<std::uint64_t>( mp.size() ) );
+				for ( const auto& kv : mp )
+				{
+					write_integral_( w, kv.first );
+					write_integral_( w, kv.second );
+				}
+			}
+			return w.ok();
+		}
+
+		template <class Reader>
+		bool deserialize( Reader& r )
+		{
+			static_assert( std::is_integral_v<Key> && std::is_integral_v<Weight>, "Memoization serialization requires integral key/weight." );
+			std::uint8_t enabled_flag = 0;
+			std::uint64_t depth_count = 0;
+			if ( !r.read_u8( enabled_flag ) )
+				return false;
+			if ( !r.read_u64( depth_count ) )
+				return false;
+
+			initialize( static_cast<std::size_t>( depth_count ), enabled_flag != 0u, "memoization.deserialize.init" );
+			if ( !( enabled_flag != 0u ) )
+				return true;
+
+			bool store = enabled();
+			for ( std::size_t depth = 0; depth < depth_count; ++depth )
+			{
+				std::uint64_t count = 0;
+				if ( !r.read_u64( count ) )
+					return false;
+
+				if ( store )
+				{
+					try
+					{
+						maps_[ depth ].reserve( static_cast<std::size_t>( count ) );
+					}
+					catch ( const std::bad_alloc& )
+					{
+						disable_and_release_( "memoization.deserialize.reserve" );
+						store = false;
+					}
+				}
+
+				for ( std::uint64_t i = 0; i < count; ++i )
+				{
+					Key key {};
+					Weight weight {};
+					if ( !read_integral_( r, key ) )
+						return false;
+					if ( !read_integral_( r, weight ) )
+						return false;
+					if ( store )
+					{
+						try
+						{
+							maps_[ depth ].try_emplace( key, weight );
+						}
+						catch ( const std::bad_alloc& )
+						{
+							disable_and_release_( "memoization.deserialize.emplace" );
+							store = false;
+						}
+					}
+				}
+			}
+			return true;
+		}
+
 		// Returns true if the caller should PRUNE this node (already seen <= weight).
 		bool should_prune_and_update( std::size_t depth, const Key& key, const Weight& weight, bool disable_when_memory_pressure, bool reserve_on_first_use, std::size_t reserve_hint, std::uint64_t estimated_bytes_per_entry, const char* oom_tag_reserve, const char* oom_tag_emplace )
 		{
@@ -565,6 +753,57 @@ namespace TwilightDream::runtime_component
 			pmr_report_oom_once( where ? where : "memoization.oom" );
 			maps_.clear();
 			pool_.release();
+		}
+
+		template <class Writer, class T>
+		static void write_integral_( Writer& w, T value )
+		{
+			using U = std::make_unsigned_t<T>;
+			const U u = static_cast<U>( value );
+			if constexpr ( sizeof( U ) == 1 )
+				w.write_u8( static_cast<std::uint8_t>( u ) );
+			else if constexpr ( sizeof( U ) == 2 )
+				w.write_u16( static_cast<std::uint16_t>( u ) );
+			else if constexpr ( sizeof( U ) == 4 )
+				w.write_u32( static_cast<std::uint32_t>( u ) );
+			else if constexpr ( sizeof( U ) == 8 )
+				w.write_u64( static_cast<std::uint64_t>( u ) );
+		}
+
+		template <class Reader, class T>
+		static bool read_integral_( Reader& r, T& value )
+		{
+			using U = std::make_unsigned_t<T>;
+			U u {};
+			bool ok = false;
+			if constexpr ( sizeof( U ) == 1 )
+			{
+				std::uint8_t tmp = 0;
+				ok = r.read_u8( tmp );
+				u = static_cast<U>( tmp );
+			}
+			else if constexpr ( sizeof( U ) == 2 )
+			{
+				std::uint16_t tmp = 0;
+				ok = r.read_u16( tmp );
+				u = static_cast<U>( tmp );
+			}
+			else if constexpr ( sizeof( U ) == 4 )
+			{
+				std::uint32_t tmp = 0;
+				ok = r.read_u32( tmp );
+				u = static_cast<U>( tmp );
+			}
+			else if constexpr ( sizeof( U ) == 8 )
+			{
+				std::uint64_t tmp = 0;
+				ok = r.read_u64( tmp );
+				u = static_cast<U>( tmp );
+			}
+			if ( !ok )
+				return false;
+			value = static_cast<T>( u );
+			return true;
 		}
 
 		bool														   enabled_ = false;

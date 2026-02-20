@@ -65,7 +65,7 @@ test_neoalzette_arx_trace.exe
 
 ### `test_neoalzette_differential_best_search.exe` (best trail search with injection model)
 
-CLI (4 frontends / subcommands):
+CLI (3 frontends / subcommands):
 
 - **Strategy mode (recommended, fewer knobs)**:
   - `test_neoalzette_differential_best_search.exe strategy <time|balanced|space> --round-count <R> [--delta-a <DA> --delta-b <DB> | --seed <S>] [strategy_flags]`
@@ -73,26 +73,22 @@ CLI (4 frontends / subcommands):
   - `test_neoalzette_differential_best_search.exe detail --round-count <R> [--delta-a <DA> --delta-b <DB> | --seed <S>] [detail_flags]`
 - **Auto mode (two-stage: breadth scan -> deep search, requires explicit start diffs)**:
   - `test_neoalzette_differential_best_search.exe auto --round-count <R> --delta-a <DA> --delta-b <DB> [auto_flags]`
-- **Legacy mode (backward-compatible)**:
-  - `test_neoalzette_differential_best_search.exe legacy <round_count> <deltaA_hex> <deltaB_hex> [flags]`
-  - `test_neoalzette_differential_best_search.exe legacy <round_count> --seed <seed> [flags]`
-
 Notes:
 
 - If you omit `--delta-a/--delta-b`, **you must provide `--seed`** (no silent default input difference / seed).
-- `--maximum-constant-subtraction-candidates 0` and `--maximum-affine-mixing-output-differences 0` mean **exact/unlimited enumeration** (can be very slow).
+- Disabling heuristics (e.g. strategy preset `time`) forces **exact/unlimited enumeration** for expensive branching (can be very slow).
 - In **strategy mode**, the program will print a **`[Strategy] resolved settings`** block at startup (all auto-derived knobs).
 - **Batch mode requires `--seed` only when generating random jobs** (e.g. `--batch-job-count N`). If you use `--batch-file`, seed is not required.
 - When shared cache is enabled and you don't explicitly set `--shared-cache-shards` (alias `--cache-shards`), the program may **auto-increase shards** based on thread count and shared-cache size.
 - Entry point aliases:
-  - You can also select the frontend via `--mode strategy|detail|auto|legacy` (equivalent to using the subcommand).
-  - If you run the executable without a subcommand, it defaults to the legacy/detail-compatible parser (positional args still work).
+  - You can also select the frontend via `--mode strategy|detail|auto` (equivalent to using the subcommand).
+  - If you run the executable without a subcommand, it defaults to the detail parser (positional args still work).
 
 Strategy presets (strategy mode):
 
-- `time`: **time-first / memory-heavy**, disables heuristics (forces `--maximum-affine-mixing-output-differences 0`), and auto-sizes caches from available RAM (keeps headroom by default, typically ~2–4GiB; see `--memory-headroom-mib` default rule).
-- `balanced`: balanced default; heuristics enabled and **`maxmix` is auto-chosen** from threads/rounds.
-- `space`: space-first / smaller memory; memoization off; heuristics enabled and **`maxmix` is auto-chosen** (smaller).
+- `time`: **time-first / memory-heavy**, disables heuristics (branch cap = 0), and auto-sizes caches from available RAM (keeps headroom by default, typically ~2–4GiB; see `--memory-headroom-mib` default rule).
+- `balanced`: balanced default; heuristics enabled and branch-cap is auto-chosen from threads/rounds.
+- `space`: space-first / smaller memory; memoization off; heuristics enabled and branch-cap is auto-chosen (smaller).
 - Strategy-only endpoint knob:
   - `--total-work N` (alias `--total`): sets an overall “endpoint/amount”. Bigger `N` auto-scales budgets.
     - In both single/batch: it increases per-job `maximum_search_nodes` (gently, roughly by order of magnitude).
@@ -103,8 +99,6 @@ Detail flags (long names; short-name aliases still accepted):
 
 - `--addition-weight-cap N` (alias `--add`, 0..31)
 - `--constant-subtraction-weight-cap N` (alias `--subtract`, 0..32)
-- `--maximum-constant-subtraction-candidates N` (alias `--maxconst`, 0=exact/all)
-- `--maximum-affine-mixing-output-differences N` (alias `--maxmix`, 0=exact/all)
 - `--maximum-search-nodes N` (alias `--maxnodes`, `0`=unlimited)
 - `--disable-state-memoization` (alias `--nomemo`)
 - `--enable-verbose-output` (alias `--verbose`)
@@ -120,18 +114,15 @@ Detail flags (long names; short-name aliases still accepted):
   - `--cache-max-entries-per-thread N` (alias `--cache`, `0`=disable)
   - `--shared-cache-total-entries N` (alias `--cache-shared`, `0`=disable)
   - `--shared-cache-shards S` (alias `--cache-shards`)
-- `--legacy` (legacy Route-B regression mode)
-
 Auto flags (auto mode, high-signal knobs):
 
-- Breadth stage (many candidates, small budget):
+- Breadth stage (many candidates, small budget; strict enumeration):
   - `--auto-breadth-jobs N` (alias: `--auto-breadth-max-runs`)
   - `--auto-breadth-top_candidates K`
   - `--auto-breadth-threads T` (0=auto)
   - `--auto-breadth-seed S` (default: derived from the provided start diffs)
   - `--auto-breadth-maxnodes N`
-  - `--auto-breadth-maxconst N`
-  - `--auto-breadth-heuristic-branch-cap N` (alias: `--auto-breadth-hcap`)
+  - `--auto-breadth-heuristic-branch-cap N` (alias: `--auto-breadth-hcap`, ignored; breadth is strict)
   - `--auto-breadth-max-bitflips F`
   - `--auto-print-breadth-candidates`
 - Deep stage (top-K candidates, big budget):
@@ -143,8 +134,6 @@ Auto-mode constraints:
 
 - Auto mode **does not support batch mode**.
 - Auto mode **requires explicit** `--delta-a` and `--delta-b` (no `--seed` fallback).
-- Auto mode **does not support** `--legacy`.
-
 Examples:
 
 ```bat
@@ -152,7 +141,6 @@ test_neoalzette_differential_best_search.exe strategy balanced --round-count 3 -
 test_neoalzette_differential_best_search.exe strategy balanced --round-count 4 --batch-job-count 2000 --thread-count 16 --seed 0x1234
 test_neoalzette_differential_best_search.exe detail --round-count 3 --delta-a 0x0 --delta-b 0x1 --maximum-search-nodes 5000000
 test_neoalzette_differential_best_search.exe auto --round-count 4 --delta-a 0x0 --delta-b 0x1 --auto-breadth-jobs 512 --auto-breadth-top_candidates 3 --auto-breadth-threads 0
-test_neoalzette_differential_best_search.exe legacy 3 0x0 0x1 --maxnodes 5000000
 ```
 
 ### `test_neoalzette_linear_best_search.exe` (best linear trail / mask search)
@@ -167,6 +155,8 @@ CLI (3 frontends / subcommands; same style as the differential program):
 - `test_neoalzette_linear_best_search.exe strategy <time|balanced|space> --round-count <R> [--output-branch-a-mask <MA> --output-branch-b-mask <MB> | --seed <S>]`
 - `test_neoalzette_linear_best_search.exe detail --round-count <R> --output-branch-a-mask <MA> --output-branch-b-mask <MB> [options]`
 - `test_neoalzette_linear_best_search.exe auto --round-count <R> --output-branch-a-mask <MA> --output-branch-b-mask <MB> [options]`
+
+Note: auto/batch breadth runs in **strict** mode (caps disabled). `--auto-breadth-hcap` is ignored.
 
 Examples:
 

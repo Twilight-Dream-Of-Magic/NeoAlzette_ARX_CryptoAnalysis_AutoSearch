@@ -67,7 +67,7 @@ test_neoalzette_arx_trace.exe
 
 ### `test_neoalzette_differential_best_search.exe`（含注入模型的最佳 trail 搜尋）
 
-命令列（4 種前端 / 子命令）：
+命令列（3 種前端 / 子命令）：
 
 - **策略模式（推薦，少量參數）**：
   - `test_neoalzette_differential_best_search.exe strategy <time|balanced|space> --round-count <R> [--delta-a <DA> --delta-b <DB> | --seed <S>] [strategy_flags]`
@@ -75,20 +75,16 @@ test_neoalzette_arx_trace.exe
   - `test_neoalzette_differential_best_search.exe detail --round-count <R> [--delta-a <DA> --delta-b <DB> | --seed <S>] [detail_flags]`
 - **Auto 模式（兩階段：breadth 掃描 -> deep 搜尋；要求明確起始差分）**：
   - `test_neoalzette_differential_best_search.exe auto --round-count <R> --delta-a <DA> --delta-b <DB> [auto_flags]`
-- **Legacy 模式（相容舊語法）**：
-  - `test_neoalzette_differential_best_search.exe legacy <round_count> <deltaA_hex> <deltaB_hex> [flags]`
-  - `test_neoalzette_differential_best_search.exe legacy <round_count> --seed <seed> [flags]`
-
 注意：
 
 - 若省略 `--delta-a/--delta-b`，**必須提供 `--seed`**（不再默默使用預設輸入差分 / 預設 seed）。
-- `--maximum-constant-subtraction-candidates 0` 與 `--maximum-affine-mixing-output-differences 0` 代表 **精確/無上限枚舉**（可能非常慢）。
+- 關閉啟發式（例如策略模式 `time`）會強制 **精確/無上限枚舉**（可能非常慢）。
 - 策略模式會在啟動時印出 **`[Strategy] resolved settings`**（所有自動推導的參數都會列出）。
 - Batch 模式只有在「隨機生成 job」（例如 `--batch-job-count N`）時 **才必須**提供 `--seed`。若使用 `--batch-file` 讀入 job，則不需要 seed。
 - 當啟用 shared cache 且未明確指定 `--shared-cache-shards`（別名 `--cache-shards`）時，程式可能會依照執行緒數與 shared cache 大小 **自動把 shards 調大**。
 - 入口別名：
-  - 也可以用 `--mode strategy|detail|auto|legacy` 選擇前端（等價於使用子命令）。
-  - 若不帶子命令直接執行，預設使用 legacy/detail 相容的 parser（仍可使用舊的 positional 參數）。
+  - 也可以用 `--mode strategy|detail|auto` 選擇前端（等價於使用子命令）。
+  - 若不帶子命令直接執行，預設使用 detail parser（仍可使用舊的 positional 參數）。
 
 策略模式額外“終點/總量”參數：
 
@@ -101,8 +97,6 @@ test_neoalzette_arx_trace.exe
 
 - `--addition-weight-cap N`（別名 `--add`，0..31）
 - `--constant-subtraction-weight-cap N`（別名 `--subtract`，0..32）
-- `--maximum-constant-subtraction-candidates N`（別名 `--maxconst`，0=精確/全部）
-- `--maximum-affine-mixing-output-differences N`（別名 `--maxmix`，0=精確/全部）
 - `--maximum-search-nodes N`（別名 `--maxnodes`，`0`=不限制）
 - `--disable-state-memoization`（別名 `--nomemo`）
 - `--enable-verbose-output`（別名 `--verbose`）
@@ -118,18 +112,15 @@ test_neoalzette_arx_trace.exe
   - `--cache-max-entries-per-thread N`（別名 `--cache`，`0`=關閉）
   - `--shared-cache-total-entries N`（別名 `--cache-shared`，`0`=關閉）
   - `--shared-cache-shards S`（別名 `--cache-shards`）
-- `--legacy`（Legacy Route-B regression）
-
 Auto 模式參數（只列最常用的 knobs）：
 
-- Breadth 階段（多候選、低資源）：
+- Breadth 階段（多候選、低資源；嚴格枚舉）：
   - `--auto-breadth-jobs N`（別名 `--auto-breadth-max-runs`）
   - `--auto-breadth-top_candidates K`
   - `--auto-breadth-threads T`（0=auto）
   - `--auto-breadth-seed S`（預設：由提供的起始差分推導）
   - `--auto-breadth-maxnodes N`
-  - `--auto-breadth-maxconst N`
-  - `--auto-breadth-heuristic-branch-cap N`（別名 `--auto-breadth-hcap`）
+  - `--auto-breadth-heuristic-branch-cap N`（別名 `--auto-breadth-hcap`，忽略；breadth 為嚴格）
   - `--auto-breadth-max-bitflips F`
   - `--auto-print-breadth-candidates`
 - Deep 階段（對 top-K 候選做高資源搜尋）：
@@ -141,8 +132,6 @@ Auto 模式限制：
 
 - Auto 模式 **不支援 batch**。
 - Auto 模式 **必須明確提供** `--delta-a` 與 `--delta-b`（不支援 `--seed` fallback）。
-- Auto 模式 **不支援** `--legacy`。
-
 範例：
 
 ```bat
@@ -150,7 +139,6 @@ test_neoalzette_differential_best_search.exe strategy balanced --round-count 3 -
 test_neoalzette_differential_best_search.exe strategy balanced --round-count 4 --batch-job-count 2000 --thread-count 16 --seed 0x1234
 test_neoalzette_differential_best_search.exe detail --round-count 3 --delta-a 0x0 --delta-b 0x1 --maximum-search-nodes 5000000
 test_neoalzette_differential_best_search.exe auto --round-count 4 --delta-a 0x0 --delta-b 0x1 --auto-breadth-jobs 512 --auto-breadth-top_candidates 3 --auto-breadth-threads 0
-test_neoalzette_differential_best_search.exe legacy 3 0x0 0x1 --maxnodes 5000000
 ```
 
 ### `test_neoalzette_linear_best_search.exe`（線性最佳 trail / mask 搜尋）
@@ -165,6 +153,8 @@ test_neoalzette_differential_best_search.exe legacy 3 0x0 0x1 --maxnodes 5000000
 - `test_neoalzette_linear_best_search.exe strategy <time|balanced|space> --round-count <R> [--output-branch-a-mask <MA> --output-branch-b-mask <MB> | --seed <S>]`
 - `test_neoalzette_linear_best_search.exe detail --round-count <R> --output-branch-a-mask <MA> --output-branch-b-mask <MB> [options]`
 - `test_neoalzette_linear_best_search.exe auto --round-count <R> --output-branch-a-mask <MA> --output-branch-b-mask <MB> [options]`
+
+註：auto/batch 的 breadth 走嚴格枚舉（不啟用 cap），`--auto-breadth-hcap` 會被忽略。
 
 範例：
 
