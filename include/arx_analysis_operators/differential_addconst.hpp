@@ -75,14 +75,6 @@
 #include <utility>
 #include "arx_analysis_operators/math_util.hpp"
 
-#if defined(__cpp_lib_bitops) && (__cpp_lib_bitops >= 201907L)
-  #include <bit>      // std::bit_width
-#endif
-
-#if defined(_MSC_VER)
-  #include <intrin.h> // _BitScanReverse64
-#endif
-
 namespace TwilightDream
 {
 	namespace bitvector
@@ -102,13 +94,7 @@ namespace TwilightDream
 		 */
 		inline constexpr std::uint32_t HammingWeight( std::uint32_t x ) noexcept
 		{
-			#if defined( __cpp_lib_bitops ) && ( __cpp_lib_bitops >= 201907L )
-						return static_cast<std::uint32_t>( std::popcount( x ) );
-			#elif defined( _MSC_VER )
-						return static_cast<std::uint32_t>( __popcnt( static_cast<unsigned long>( x ) ) );
-			#else
-						return static_cast<std::uint32_t>( __builtin_popcount( x ) );
-			#endif
+			return static_cast<std::uint32_t>( std::popcount( x ) );
 		}
 
 		// Forward declaration (Rev uses BitReverse)
@@ -192,14 +178,7 @@ namespace TwilightDream
 		{
 			if ( x == 0 )
 				return 32u;
-
-			#if __cpp_lib_bitops >= 201907L
-						return static_cast<uint32_t>( std::countl_zero( x ) );
-			#elif defined( _MSC_VER )
-						return static_cast<uint32_t>( __lzcnt( x ) );
-			#else
-						return static_cast<uint32_t>( __builtin_clz( x ) );
-			#endif
+			return static_cast<uint32_t>( std::countl_zero( x ) );
 		}
 
 		/**
@@ -651,6 +630,16 @@ namespace TwilightDream
 		}
 
 		/**
+		 * @brief 精確 differential weight（32-bit convenience wrapper）
+		 *
+		 * 回傳 `ceil(exact_weight)`；不可能時回傳 `-1`。
+		 */
+		inline int diff_addconst_exact_weight_ceil_int( std::uint32_t delta_x, std::uint32_t constant, std::uint32_t delta_y ) noexcept
+		{
+			return diff_addconst_exact_weight_ceil_int_n( delta_x, constant, delta_y, 32 );
+		}
+
+		/**
 		 * @brief 精確 differential weight（不做 Qκ 截斷）：用論文 Lemma 3/4/5 的閉式計算 Σ log2(pi)
 		 *
 		 * 參考：
@@ -959,7 +948,7 @@ namespace TwilightDream
 		 * 工程化實作策略：
 		 * - 論文的 Algorithm 1 目標是「可用 bit-vector primitives 表達」；
 		 *   本工程在固定 32-bit 搜尋時，直接按照 Lemma 4/5 的定義逐鏈計算 πᵢ，
-		 *   讓每個中間量可列印/可單測，並避免 OCR 對符號（如  / ）的歧義。
+
 		 * - 我們仍然輸出同一個近似量（BvWeight），因此可用於「相似性/近似剪枝」：
 		 *   若要與精確權重比對，請先用枚舉/DP 算精確 Pr，再看 |apxweight - exact_weight| 是否小於閾值。
 		 *
@@ -967,6 +956,7 @@ namespace TwilightDream
 		 */
 		inline std::uint32_t diff_addconst_bvweight_q4_n( std::uint32_t delta_x, std::uint32_t constant, std::uint32_t delta_y, int n ) noexcept
 		{
+			return diff_addconst_bvweight_fixed_point_n( delta_x, constant, delta_y, n, 4 );
 			// κ=4 的便捷封裝：等價於 Azimi Algorithm 1 的原始設定（Q4 fixed-point）。
 			return diff_addconst_bvweight_fixed_point_n( delta_x, constant, delta_y, n, 4 );
 		}
@@ -1020,31 +1010,6 @@ namespace TwilightDream
 		}
 
 		/**
-		 * @brief 精確 weight（整數，上取整）：給現有搜尋框架的「整數權重」介面
-		 * 
-		 * 重要：為了不去大改你的搜尋框架（它目前吃 `int` 權重），
-		 * 我們在這個函式回傳 **精確 weight 的上取整**（不低估），而不是論文 Q4 的 BvWeight。
-		 * 
-		 * 出處/對照：
-		 * - count/DP 的逐位 DP：Machado, IACR ePrint 2001/052（也可視為 Azimi DCC 2022 Theorem 2 的等價形式）。
-		 * - 若你要 Azimi 的位向量近似（Algorithm 1 / Q4），請改用：
-		 *     `diff_addconst_bvweight_q4_n`（Q4 fixed-point）
-		 *     `diff_addconst_bvweight_fixed_point_n`（Qκ fixed-point）
-		 *     `diff_addconst_bvweight_q4_int_ceil`（Q4→int 的對照封裝）
-		 *
-		 * 若你要做「相似性判定/閾值」比較，請用 Q4（或 double 精確 weight）版本，不要用這個整數上取整版本。
-		 * 
-		 * @param delta_x 輸入差分
-		 * @param constant 常量K
-		 * @param delta_y 輸出差分
-		 * @return 整數權重（精確 weight 的上取整），0表示權重為0，-1表示不可能
-		 */
-		inline int diff_addconst_bvweight( std::uint32_t delta_x, std::uint32_t constant, std::uint32_t delta_y ) noexcept
-		{
-			return diff_addconst_exact_weight_ceil_int_n( delta_x, constant, delta_y, 32 );
-		}
-
-		/**
 		 * @brief 對照/演示：把 Azimi Algorithm 1 的 Q4 BvWeight 轉成整數（ceil）
 		 *
 		 * - 本函式保留給「對照實驗」或「近似剪枝」用途（例如：你想檢驗 BVWeight 與精確 weight 的相似性）。
@@ -1072,20 +1037,15 @@ namespace TwilightDream
 		// 使用公共 math_util.hpp 的 neg_mod_2n
 
 		/**
-		 * @brief 常量減法差分權重
-		 * 
-		 * X ⊟ C = X ⊞ (~C + 1)
-		 * 
-		 * @param delta_x 輸入差分
-		 * @param constant 常量C
-		 * @param delta_y 輸出差分
-		 * @return 近似權重
+		 * @brief 精確 subtraction-by-constant weight（32-bit convenience wrapper）
+		 *
+		 * 透過 `x ⊟ c == x ⊞ (-c mod 2^n)` 轉換，回傳 `ceil(exact_weight)`；
+		 * 不可能時回傳 `-1`。
 		 */
-		inline int diff_subconst_bvweight( std::uint32_t delta_x, std::uint32_t constant, std::uint32_t delta_y ) noexcept
+		inline int diff_subconst_exact_weight_ceil_int( std::uint32_t delta_x, std::uint32_t constant, std::uint32_t delta_y ) noexcept
 		{
-			// X - C = X + ((~C) + 1)
-			std::uint32_t neg_constant = TwilightDream::arx_operators::neg_mod_2n<uint32_t>( constant, 32 );
-			return diff_addconst_bvweight( delta_x, neg_constant, delta_y );
+			const std::uint32_t neg_constant = TwilightDream::arx_operators::neg_mod_2n<uint32_t>( constant, 32 );
+			return diff_addconst_exact_weight_ceil_int( delta_x, neg_constant, delta_y );
 		}
 
 		/**

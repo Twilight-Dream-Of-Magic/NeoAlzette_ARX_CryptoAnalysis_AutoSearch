@@ -1,18 +1,716 @@
-test_neoalzette_differential_best_search.exe strategy time --round-count 1 --delta-a 0x0 --delta-b 0x1 --total-work 10000000
-test_neoalzette_differential_best_search.exe strategy time --round-count 1 --batch --total-work 10000000 --thread-count 24 --seed 0x1234
+NeoAlzette AutoSearch practical command handbook
+Windows PowerShell + Linux Bash
+Updated: 2026-03-25
 
+========================================================================
+0. What each program is for
+========================================================================
 
-test_neoalzette_differential_best_search.exe strategy time --round-count 1 --delta-a 0x0000 --delta-b 0x0102  --process-sec 10
+Use these four root executables:
 
-.\test_neoalzette_differential_best_search.exe auto --round-count 1 --delta-a 0x80404100 --delta-b 0x41004041 ^
-  --auto-breadth-jobs 2048 --auto-breadth-top_candidates 32 --auto-breadth-threads 0 ^
-  --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 ^
-  --auto-breadth-maxnodes 16777216 ^
-  --auto-deep-maxnodes 200000000 --auto-target-best-weight 8 ^
-  --progress-sec 60 --memory-ballast --memory-headroom-mib 2048
+1. Differential single-source best-search / auto pipeline
+   Windows: `test_neoalzette_differential_best_search.exe`
+   Linux: `test_neoalzette_differential_best_search`
 
-.\test_neoalzette_differential_best_search.exe auto --round-count 1 --delta-a 0x00004100 --delta-b 0x00004041 --auto-breadth-jobs 4096 --auto-breadth-top_candidates 64 --auto-breadth-threads 16 --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 --auto-breadth-maxnodes 16777216 --auto-deep-maxnodes 0 --auto-max-time 1d --auto-target-best-weight 8 --progress-sec 60 --memory-ballast --memory-headroom-mib 2048
+2. Linear single-source best-search / auto pipeline
+   Windows: `test_neoalzette_linear_best_search.exe`
+   Linux: `test_neoalzette_linear_best_search`
 
+3. Differential strict hull wrapper / batch wrapper
+   Windows: `test_neoalzette_differential_hull_wrapper.exe`
+   Linux: `test_neoalzette_differential_hull_wrapper`
 
-test_neoalzette_differential_best_search.exe strategy time --round-count R --delta-a  0x0000 --delta-b 0x0102 --target-best-weight W
-test_neoalzette_differential_best_search.exe auto --round-count R --delta-a  0x0000 --delta-b 0x0102 --auto-target-best-weight --auto-max-time 18h
+4. Linear strict hull wrapper / batch wrapper
+   Windows: `test_neoalzette_linear_hull_wrapper.exe`
+   Linux: `test_neoalzette_linear_hull_wrapper`
+
+Practical meaning:
+
+- `*_best_search`
+  Use this when you already know the fixed input difference / output mask you want to analyze.
+  It can do single-run exact best-search, threshold-certified best-search, resume, and auto candidate mining.
+
+- `*_hull_wrapper`
+  Use this when you want exact hull aggregation for one fixed source, or batch breadth->deep source mining plus strict hull collection over the selected sources.
+
+========================================================================
+1. Build and verify the CLI actually works
+========================================================================
+
+1A. Windows PowerShell
+
+Quick build:
+
+.\build_and_test.bat --build-only
+
+Confirm binaries exist:
+
+Get-ChildItem .\test_neoalzette_*.exe
+
+Confirm CLI help works:
+
+.\test_neoalzette_differential_best_search.exe --help
+.\test_neoalzette_linear_best_search.exe --help
+.\test_neoalzette_differential_hull_wrapper.exe --help
+.\test_neoalzette_linear_hull_wrapper.exe --help
+
+1B. Linux Bash
+
+Quick build:
+
+chmod +x ./build_and_test.sh
+./build_and_test.sh --build-only
+
+Confirm binaries exist:
+
+ls -l ./build/linux-release/test_neoalzette_*
+
+Confirm CLI help works:
+
+./build/linux-release/test_neoalzette_differential_best_search --help
+./build/linux-release/test_neoalzette_linear_best_search --help
+./build/linux-release/test_neoalzette_differential_hull_wrapper --help
+./build/linux-release/test_neoalzette_linear_hull_wrapper --help
+
+========================================================================
+2. Certification vocabulary
+========================================================================
+
+Read the output fields like this:
+
+- `best_weight_certified=1`
+  means exact best weight was certified.
+
+- `best_weight_certification=exact_best_certified`
+  same meaning, but with the newer explicit label.
+
+- `best_weight_certification=threshold_target_certified`
+  means the program hit `--target-best-weight` or `--auto-target-best-weight`
+  under otherwise strict local search conditions.
+  This certifies the threshold statement.
+  It does not claim exact best completion.
+
+- `exact_within_collect_weight_cap=1`
+  means the hull collector is exact within the chosen `collect_weight_cap`.
+
+========================================================================
+3. What is exact-best strict, and what is not
+========================================================================
+
+Treat a fixed-source best-search run as exact-best strict only when all hold:
+
+- `--search-mode strict`
+- no `--target-best-weight`
+- no `--auto-target-best-weight`
+- `--maximum-search-nodes 0`
+- `--maximum-search-seconds 0`
+- differential full local caps:
+  `--addition-weight-cap 31 --constant-subtraction-weight-cap 32`
+- linear full local caps:
+  `--addition-weight-cap 31 --constant-subtraction-weight-cap 32`
+- linear exact cLAT:
+  `--enable-z-shell --z-shell-max-candidates 0`
+
+Treat a fixed-source hull run as exact within the chosen cap only when all hold:
+
+- no search hard limit:
+  `--maximum-search-nodes 0 --maximum-search-seconds 0`
+- no collector trail-count truncation:
+  `--maximum-collected-trails 0`
+- `--collect-weight-window 0`
+  if you want the strict best-weight shell after certifying best weight
+- or explicit exact cap:
+  `--collect-weight-cap W`
+
+Do not call these formal-global strict source-discovery runs:
+
+- any `auto` mode
+- any batch breadth->deep wrapper mode
+- any batch wrapper result over selected sources
+
+Reason:
+
+- the local search inside a candidate may be strict,
+- but the source candidate set is still selected by the auto / batch front stage.
+
+========================================================================
+4. Common server variables
+========================================================================
+
+4A. Windows PowerShell
+
+$THREADS = [Environment]::ProcessorCount
+$TOTAL_MIB = [int][Math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1MB)
+$HEADROOM_MIB = [Math]::Max(16384, [int]($TOTAL_MIB / 8))
+$REBUILDABLE_MIB = [Math]::Max(4096, [int]($TOTAL_MIB / 16))
+$CACHE_PER_THREAD = 262144
+$SHARED_CACHE_TOTAL = $THREADS * $CACHE_PER_THREAD
+$CACHE_SHARDS = 1024
+$PROGRESS_SEC = 300
+$CHECKPOINT_SEC = 1800
+
+$DIFF_BEST = ".\test_neoalzette_differential_best_search.exe"
+$LINEAR_BEST = ".\test_neoalzette_linear_best_search.exe"
+$DIFF_HULL = ".\test_neoalzette_differential_hull_wrapper.exe"
+$LINEAR_HULL = ".\test_neoalzette_linear_hull_wrapper.exe"
+
+$ROOT = ".\runs"
+New-Item -ItemType Directory -Force -Path $ROOT | Out-Null
+
+4B. Linux Bash
+
+THREADS="$(nproc)"
+TOTAL_MIB="$(awk '/MemTotal:/ {print int($2/1024)}' /proc/meminfo)"
+HEADROOM_MIB="$(( TOTAL_MIB / 8 ))"
+if (( HEADROOM_MIB < 16384 )); then HEADROOM_MIB=16384; fi
+REBUILDABLE_MIB="$(( TOTAL_MIB / 16 ))"
+if (( REBUILDABLE_MIB < 4096 )); then REBUILDABLE_MIB=4096; fi
+CACHE_PER_THREAD=262144
+SHARED_CACHE_TOTAL="$(( THREADS * CACHE_PER_THREAD ))"
+CACHE_SHARDS=1024
+PROGRESS_SEC=300
+CHECKPOINT_SEC=1800
+
+BUILD_DIR=./build/linux-release
+DIFF_BEST="$BUILD_DIR/test_neoalzette_differential_best_search"
+LINEAR_BEST="$BUILD_DIR/test_neoalzette_linear_best_search"
+DIFF_HULL="$BUILD_DIR/test_neoalzette_differential_hull_wrapper"
+LINEAR_HULL="$BUILD_DIR/test_neoalzette_linear_hull_wrapper"
+
+ROOT=./runs
+mkdir -p "$ROOT"
+
+========================================================================
+5. Differential: exact-best strict for one fixed input difference
+========================================================================
+
+5A. Windows PowerShell
+
+$RUN = ".\runs\win_diff_exact_best_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $DIFF_BEST detail --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 `
+  --search-mode strict `
+  --enable-pddt --pddt-max-weight 24 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --runtime-log "$RUN\main.runtime.log" `
+  --checkpoint-out "$RUN\main.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading:
+
+- `best_weight_certification=exact_best_certified`
+- `exact_best_weight_certified=1`
+
+Resume:
+
+& $DIFF_BEST --resume "$RUN\main.ckpt" `
+  --runtime-log "$RUN\resume.runtime.log" `
+  --checkpoint-out "$RUN\main.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+5B. Linux Bash
+
+RUN=./runs/linux_diff_exact_best_R4_caseA
+mkdir -p "$RUN"
+
+"$DIFF_BEST" detail --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 \
+  --search-mode strict \
+  --enable-pddt --pddt-max-weight 12 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --runtime-log "$RUN/main.runtime.log" \
+  --checkpoint-out "$RUN/main.ckpt" --checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast --rebuildable-reserve-mib "$REBUILDABLE_MIB" \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+6. Differential: threshold-certified fixed-source best-search
+========================================================================
+
+Use this when you want to certify:
+"there exists a trail with total weight <= W"
+but you do not require exact best completion.
+
+6A. Windows PowerShell
+
+$RUN = ".\runs\win_diff_threshold_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $DIFF_BEST detail --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 `
+  --search-mode strict `
+  --enable-pddt --pddt-max-weight 12 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --target-best-weight 40 `
+  --runtime-log "$RUN\main.runtime.log" `
+  --checkpoint-out "$RUN\main.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading after hit:
+
+- `best_weight_certification=threshold_target_certified`
+- `exact_best_weight_certified=0`
+
+6B. Linux Bash
+
+RUN=./runs/linux_diff_threshold_R4_caseA
+mkdir -p "$RUN"
+
+"$DIFF_BEST" detail --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 \
+  --search-mode strict \
+  --enable-pddt --pddt-max-weight 12 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --target-best-weight 40 \
+  --runtime-log "$RUN/main.runtime.log" \
+  --checkpoint-out "$RUN/main.ckpt" --checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast --rebuildable-reserve-mib "$REBUILDABLE_MIB" \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+7. Differential: strict hull for one fixed input difference
+========================================================================
+
+7A. Certify exact best first, then collect exact best-weight shell
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_diff_best_shell_hull_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $DIFF_HULL --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 `
+  --enable-pddt --pddt-max-weight 12 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --collect-weight-window 0 `
+  --maximum-collected-trails 0 --maximum-stored-trails 0 `
+  --best-search-history-log "$RUN\best.history.log" `
+  --best-search-runtime-log "$RUN\best.runtime.log" `
+  --best-search-checkpoint-out "$RUN\best.ckpt" --best-search-checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading:
+
+- `best_weight_certification=exact_best_certified`
+- `strict_endpoint_hulls_within_collect_weight_cap=1`
+- `exact_within_collect_weight_cap=1`
+
+Linux Bash:
+
+RUN=./runs/linux_diff_best_shell_hull_R4_caseA
+mkdir -p "$RUN"
+
+"$DIFF_HULL" --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 \
+  --enable-pddt --pddt-max-weight 12 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --collect-weight-window 0 \
+  --maximum-collected-trails 0 --maximum-stored-trails 0 \
+  --best-search-history-log "$RUN/best.history.log" \
+  --best-search-runtime-log "$RUN/best.runtime.log" \
+  --best-search-checkpoint-out "$RUN/best.ckpt" --best-search-checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+7B. Exact within an explicit collect cap, without proving best weight
+
+Use this when you already know the cap you want and do not need best-weight certification.
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_diff_explicit_cap_hull_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $DIFF_HULL --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 `
+  --enable-pddt --pddt-max-weight 12 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --collect-weight-cap 40 `
+  --maximum-collected-trails 0 --maximum-stored-trails 0 `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading:
+
+- `best_weight_certified=0`
+- `exact_within_collect_weight_cap=1`
+
+Linux Bash:
+
+RUN=./runs/linux_diff_explicit_cap_hull_R4_caseA
+mkdir -p "$RUN"
+
+"$DIFF_HULL" --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 \
+  --enable-pddt --pddt-max-weight 12 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --collect-weight-cap 40 \
+  --maximum-collected-trails 0 --maximum-stored-trails 0 \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+8. Linear: exact-best strict for one fixed output-mask pair
+========================================================================
+
+8A. Windows PowerShell
+
+$RUN = ".\runs\win_linear_exact_best_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $LINEAR_BEST detail --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 `
+  --search-mode strict `
+  --enable-z-shell --z-shell-max-candidates 0 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --runtime-log "$RUN\main.runtime.log" `
+  --checkpoint-out "$RUN\main.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading:
+
+- `best_weight_certification=exact_best_certified`
+- `exact_best_weight_certified=1`
+
+8B. Linux Bash
+
+RUN=./runs/linux_linear_exact_best_R4_caseA
+mkdir -p "$RUN"
+
+"$LINEAR_BEST" detail --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 \
+  --search-mode strict \
+  --enable-z-shell --z-shell-max-candidates 0 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --runtime-log "$RUN/main.runtime.log" \
+  --checkpoint-out "$RUN/main.ckpt" --checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast --rebuildable-reserve-mib "$REBUILDABLE_MIB" \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+9. Linear: threshold-certified fixed-source best-search
+========================================================================
+
+9A. Windows PowerShell
+
+$RUN = ".\runs\win_linear_threshold_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $LINEAR_BEST detail --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 `
+  --search-mode strict `
+  --enable-z-shell --z-shell-max-candidates 0 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --target-best-weight 40 `
+  --runtime-log "$RUN\main.runtime.log" `
+  --checkpoint-out "$RUN\main.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading after hit:
+
+- `best_weight_certification=threshold_target_certified`
+- `exact_best_weight_certified=0`
+
+9B. Linux Bash
+
+RUN=./runs/linux_linear_threshold_R4_caseA
+mkdir -p "$RUN"
+
+"$LINEAR_BEST" detail --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 \
+  --search-mode strict \
+  --enable-z-shell --z-shell-max-candidates 0 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --target-best-weight 40 \
+  --runtime-log "$RUN/main.runtime.log" \
+  --checkpoint-out "$RUN/main.ckpt" --checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast --rebuildable-reserve-mib "$REBUILDABLE_MIB" \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+10. Linear: strict hull for one fixed output-mask pair
+========================================================================
+
+10A. Certify exact best first, then collect exact best-weight shell
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_linear_best_shell_hull_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $LINEAR_HULL --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 `
+  --enable-z-shell --z-shell-max-candidates 0 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --collect-weight-window 0 `
+  --maximum-collected-trails 0 --maximum-stored-trails 0 `
+  --best-search-history-log "$RUN\best.history.log" `
+  --best-search-runtime-log "$RUN\best.runtime.log" `
+  --best-search-checkpoint-out "$RUN\best.ckpt" --best-search-checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading:
+
+- `best_weight_certification=exact_best_certified`
+- `strict_endpoint_hulls_within_collect_weight_cap=1`
+- `exact_within_collect_weight_cap=1`
+
+Linux Bash:
+
+RUN=./runs/linux_linear_best_shell_hull_R4_caseA
+mkdir -p "$RUN"
+
+"$LINEAR_HULL" --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 \
+  --enable-z-shell --z-shell-max-candidates 0 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --collect-weight-window 0 \
+  --maximum-collected-trails 0 --maximum-stored-trails 0 \
+  --best-search-history-log "$RUN/best.history.log" \
+  --best-search-runtime-log "$RUN/best.runtime.log" \
+  --best-search-checkpoint-out "$RUN/best.ckpt" --best-search-checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+10B. Exact within an explicit collect cap, without proving best weight
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_linear_explicit_cap_hull_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $LINEAR_HULL --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 `
+  --enable-z-shell --z-shell-max-candidates 0 `
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 `
+  --maximum-search-nodes 0 --maximum-search-seconds 0 `
+  --collect-weight-cap 40 `
+  --maximum-collected-trails 0 --maximum-stored-trails 0 `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-seconds $PROGRESS_SEC
+
+Expected reading:
+
+- `best_weight_certified=0`
+- `exact_within_collect_weight_cap=1`
+
+Linux Bash:
+
+RUN=./runs/linux_linear_explicit_cap_hull_R4_caseA
+mkdir -p "$RUN"
+
+"$LINEAR_HULL" --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 \
+  --enable-z-shell --z-shell-max-candidates 0 \
+  --addition-weight-cap 31 --constant-subtraction-weight-cap 32 \
+  --maximum-search-nodes 0 --maximum-search-seconds 0 \
+  --collect-weight-cap 40 \
+  --maximum-collected-trails 0 --maximum-stored-trails 0 \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+11. Full functionality: auto mode and batch wrapper
+========================================================================
+
+Use these when you want the whole workflow, not just one fixed source.
+
+11A. Differential auto
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_diff_auto_full_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $DIFF_BEST auto --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 `
+  --search-mode strict `
+  --enable-pddt --pddt-max-weight 12 `
+  --auto-breadth-jobs 65536 --auto-breadth-top_candidates 128 --auto-breadth-threads 0 `
+  --auto-breadth-frontier-width 128 --auto-breadth-max-hops 3 `
+  --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 --auto-breadth-maxnodes 33554432 `
+  --auto-deep-maxnodes 0 --auto-max-time 12h `
+  --auto-target-best-weight 40 `
+  --runtime-log "$RUN\auto.runtime.log" `
+  --checkpoint-out "$RUN\auto.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+Linux Bash:
+
+RUN=./runs/linux_diff_auto_full_R4_caseA
+mkdir -p "$RUN"
+
+"$DIFF_BEST" auto --round-count 4 --delta-a 0x80404100 --delta-b 0x41004041 \
+  --search-mode strict \
+  --enable-pddt --pddt-max-weight 12 \
+  --auto-breadth-jobs 65536 --auto-breadth-top_candidates 128 --auto-breadth-threads 0 \
+  --auto-breadth-frontier-width 128 --auto-breadth-max-hops 3 \
+  --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 --auto-breadth-maxnodes 33554432 \
+  --auto-deep-maxnodes 0 --auto-max-time 12h \
+  --auto-target-best-weight 40 \
+  --runtime-log "$RUN/auto.runtime.log" \
+  --checkpoint-out "$RUN/auto.ckpt" --checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast --rebuildable-reserve-mib "$REBUILDABLE_MIB" \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+How to read it:
+
+- inner candidate search is locally strict
+- source discovery is still not formal-global strict
+- if target is hit, read `best_weight_certification=threshold_target_certified`
+
+11B. Linear auto
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_linear_auto_full_R4_caseA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $LINEAR_BEST auto --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 `
+  --search-mode strict `
+  --enable-z-shell --z-shell-max-candidates 0 `
+  --auto-breadth-jobs 65536 --auto-breadth-top_candidates 128 --auto-breadth-threads 0 `
+  --auto-breadth-frontier-width 128 --auto-breadth-max-hops 3 `
+  --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 --auto-breadth-maxnodes 33554432 `
+  --auto-deep-maxnodes 0 --auto-max-time 12h `
+  --auto-target-best-weight 40 `
+  --runtime-log "$RUN\auto.runtime.log" `
+  --checkpoint-out "$RUN\auto.ckpt" --checkpoint-every-seconds $CHECKPOINT_SEC `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast --rebuildable-reserve-mib $REBUILDABLE_MIB `
+  --progress-every-seconds $PROGRESS_SEC
+
+Linux Bash:
+
+RUN=./runs/linux_linear_auto_full_R4_caseA
+mkdir -p "$RUN"
+
+"$LINEAR_BEST" auto --round-count 4 --output-branch-a-mask 0x00000000 --output-branch-b-mask 0x00000001 \
+  --search-mode strict \
+  --enable-z-shell --z-shell-max-candidates 0 \
+  --auto-breadth-jobs 65536 --auto-breadth-top_candidates 128 --auto-breadth-threads 0 \
+  --auto-breadth-frontier-width 128 --auto-breadth-max-hops 3 \
+  --auto-breadth-seed 0x12345678 --auto-breadth-max-bitflips 16 --auto-breadth-maxnodes 33554432 \
+  --auto-deep-maxnodes 0 --auto-max-time 12h \
+  --auto-target-best-weight 40 \
+  --runtime-log "$RUN/auto.runtime.log" \
+  --checkpoint-out "$RUN/auto.ckpt" --checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast --rebuildable-reserve-mib "$REBUILDABLE_MIB" \
+  --progress-every-seconds "$PROGRESS_SEC"
+
+11C. Differential batch wrapper
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_diff_batch_full_R4_seed1234"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $DIFF_HULL --round-count 4 --batch-job-count 65536 --seed 0x1234 `
+  --thread-count $THREADS `
+  --enable-pddt --pddt-max-weight 12 `
+  --auto-breadth-maxnodes 4194304 --auto-deep-maxnodes 0 --auto-max-time-seconds 21600 `
+  --auto-target-best-weight 40 `
+  --collect-weight-window 0 --maximum-stored-trails 16 --stored-trail-policy strongest `
+  --cache-max-entries-per-thread $CACHE_PER_THREAD `
+  --shared-cache-total-entries $SHARED_CACHE_TOTAL --shared-cache-shards $CACHE_SHARDS `
+  --best-search-history-log "$RUN\embedded_best.history.log" `
+  --best-search-runtime-log "$RUN\embedded_best.runtime.log" `
+  --best-search-checkpoint-out "$RUN\embedded_best.ckpt" --best-search-checkpoint-every-seconds $CHECKPOINT_SEC `
+  --batch-checkpoint-out "$RUN\batch.ckpt" --batch-runtime-log "$RUN\batch.runtime.log" `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-jobs 200 --progress-every-seconds $PROGRESS_SEC
+
+Resume:
+
+& $DIFF_HULL --round-count 4 --batch-resume "$RUN\batch.ckpt" `
+  --enable-pddt --pddt-max-weight 12 `
+  --best-search-history-log "$RUN\embedded_best.resume.history.log" `
+  --best-search-runtime-log "$RUN\embedded_best.resume.runtime.log" `
+  --best-search-checkpoint-out "$RUN\embedded_best.ckpt" --best-search-checkpoint-every-seconds $CHECKPOINT_SEC `
+  --batch-checkpoint-out "$RUN\batch.ckpt" --batch-runtime-log "$RUN\batch.resume.runtime.log" `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-seconds $PROGRESS_SEC
+
+Linux Bash:
+
+RUN=./runs/linux_diff_batch_full_R4_seed1234
+mkdir -p "$RUN"
+
+"$DIFF_HULL" --round-count 4 --batch-job-count 65536 --seed 0x1234 \
+  --thread-count "$THREADS" \
+  --enable-pddt --pddt-max-weight 12 \
+  --auto-breadth-maxnodes 4194304 --auto-deep-maxnodes 0 --auto-max-time-seconds 21600 \
+  --auto-target-best-weight 40 \
+  --collect-weight-window 0 --maximum-stored-trails 16 --stored-trail-policy strongest \
+  --cache-max-entries-per-thread "$CACHE_PER_THREAD" \
+  --shared-cache-total-entries "$SHARED_CACHE_TOTAL" --shared-cache-shards "$CACHE_SHARDS" \
+  --best-search-history-log "$RUN/embedded_best.history.log" \
+  --best-search-runtime-log "$RUN/embedded_best.runtime.log" \
+  --best-search-checkpoint-out "$RUN/embedded_best.ckpt" --best-search-checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --batch-checkpoint-out "$RUN/batch.ckpt" --batch-runtime-log "$RUN/batch.runtime.log" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast \
+  --progress-every-jobs 200 --progress-every-seconds "$PROGRESS_SEC"
+
+11D. Linear batch wrapper
+
+Windows PowerShell:
+
+$RUN = ".\runs\win_linear_batch_full_R4_jobsA"
+New-Item -ItemType Directory -Force -Path $RUN | Out-Null
+
+& $LINEAR_HULL --round-count 4 --batch-file ".\jobs\linear_jobs.txt" `
+  --thread-count $THREADS `
+  --enable-z-shell --z-shell-max-candidates 0 `
+  --auto-breadth-maxnodes 4194304 --auto-deep-maxnodes 0 --auto-max-time-seconds 21600 `
+  --auto-target-best-weight 40 `
+  --collect-weight-window 0 --maximum-stored-trails 16 --stored-trail-policy strongest `
+  --best-search-history-log "$RUN\embedded_best.history.log" `
+  --best-search-runtime-log "$RUN\embedded_best.runtime.log" `
+  --best-search-checkpoint-out "$RUN\embedded_best.ckpt" --best-search-checkpoint-every-seconds $CHECKPOINT_SEC `
+  --batch-checkpoint-out "$RUN\batch.ckpt" --batch-runtime-log "$RUN\batch.runtime.log" `
+  --memory-headroom-mib $HEADROOM_MIB --memory-ballast `
+  --progress-every-jobs 200 --progress-every-seconds $PROGRESS_SEC
+
+Linux Bash:
+
+RUN=./runs/linux_linear_batch_full_R4_jobsA
+mkdir -p "$RUN"
+
+"$LINEAR_HULL" --round-count 4 --batch-file ./jobs/linear_jobs.txt \
+  --thread-count "$THREADS" \
+  --enable-z-shell --z-shell-max-candidates 0 \
+  --auto-breadth-maxnodes 4194304 --auto-deep-maxnodes 0 --auto-max-time-seconds 21600 \
+  --auto-target-best-weight 40 \
+  --collect-weight-window 0 --maximum-stored-trails 16 --stored-trail-policy strongest \
+  --best-search-history-log "$RUN/embedded_best.history.log" \
+  --best-search-runtime-log "$RUN/embedded_best.runtime.log" \
+  --best-search-checkpoint-out "$RUN/embedded_best.ckpt" --best-search-checkpoint-every-seconds "$CHECKPOINT_SEC" \
+  --batch-checkpoint-out "$RUN/batch.ckpt" --batch-runtime-log "$RUN/batch.runtime.log" \
+  --memory-headroom-mib "$HEADROOM_MIB" --memory-ballast \
+  --progress-every-jobs 200 --progress-every-seconds "$PROGRESS_SEC"
+
+========================================================================
+12. Batch file formats
+========================================================================
+
+Differential wrapper batch file:
+
+- each non-empty line is `delta_a delta_b`
+- or `round_count delta_a delta_b`
+
+Linear wrapper batch file:
+
+- each non-empty line is `mask_a mask_b`
+- or `round_count mask_a mask_b`
+
+Parsing rules:
+
+- numbers accept hex (`0x...`) or decimal
+- commas are allowed
+- `#` starts a comment

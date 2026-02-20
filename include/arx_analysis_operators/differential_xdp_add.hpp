@@ -59,16 +59,9 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <bit>
 #include <concepts>
 #include <type_traits>
-
-#if defined(__cpp_lib_bitops) && (__cpp_lib_bitops >= 201907L)
-#include <bit>      // std::popcount
-#endif
-
-#if defined(_MSC_VER)
-#include <intrin.h> // _BitScanReverse64
-#endif
 
 namespace TwilightDream
 {
@@ -152,13 +145,7 @@ namespace TwilightDream
 			std::uint32_t masked_bad = ( ~eq_val ) & mask_lower;
 
 			// weight = popcount(¬eq(α,β,γ) & mask(n-1))
-			#if __cpp_lib_bitops >= 201907L
-				int weight = std::popcount(masked_bad);
-			#elif defined(_MSC_VER)
-				int weight = __popcnt( masked_bad );
-			#else
-				int weight = __builtin_popcount( masked_bad );
-			#endif
+			int weight = static_cast<int>( std::popcount( masked_bad ) );
 
 			return weight;
 		}
@@ -221,13 +208,7 @@ namespace TwilightDream
 			std::uint32_t mask_lower = ( n == 32 ) ? 0x7FFFFFFFu : ( ( 1u << ( n - 1 ) ) - 1 );
 			std::uint32_t masked_bad = ( ~psi_val ) & mask_lower;
 
-			#if __cpp_lib_bitops >= 201907L
-				int weight = std::popcount( masked_bad );
-			#elif defined(_MSC_VER)
-				int weight = __popcnt( masked_bad );
-			#else
-				int weight = __builtin_popcount( masked_bad );
-			#endif
+			int weight = static_cast<int>( std::popcount( masked_bad ) );
 
 			return weight;
 		}

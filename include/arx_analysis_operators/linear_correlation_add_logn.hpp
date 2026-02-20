@@ -21,17 +21,10 @@
 
 #include <cstdint>
 #include <cmath>
+#include <bit>
 #include <array>
 #include <optional>
 #include <functional>
-
-#if defined(__cpp_lib_bitops) && (__cpp_lib_bitops >= 201907L)
-#include <bit>      // std::popcount
-#endif
-
-#if defined(_MSC_VER)
-#include <intrin.h> // _BitScanReverse64
-#endif
 
 namespace TwilightDream
 {
@@ -40,13 +33,7 @@ namespace TwilightDream
 
 		inline constexpr std::uint32_t HammingWeight( std::uint32_t x ) noexcept
 		{
-			#if defined( __cpp_lib_bitops ) && ( __cpp_lib_bitops >= 201907L )
-						return static_cast<std::uint32_t>( std::popcount( x ) );
-			#elif defined( _MSC_VER )
-						return static_cast<std::uint32_t>( __popcnt( static_cast<unsigned long>( x ) ) );
-			#else
-						return static_cast<std::uint32_t>( __builtin_popcount( x ) );
-			#endif
+			return static_cast<std::uint32_t>( std::popcount( x ) );
 		}
 
 		// ============================================================================
@@ -82,7 +69,7 @@ namespace TwilightDream
 				return std::nullopt;  // Not feasible
 			}
 
-			return __builtin_popcount( z_star );
+			return static_cast<int>( std::popcount( z_star ) );
 		}
 
 		/**
@@ -114,28 +101,8 @@ namespace TwilightDream
 			// Wallén's paper writes vectors as (x_{n-1},...,x_0)^t; our uint64_t stores x_i at bit i.
 			auto msb_index_u64 = []( std::uint64_t v ) noexcept -> int
 			{
-#if defined(__cpp_lib_bitops) && (__cpp_lib_bitops >= 201907L)
 				// C++20: bit_width(v) = floor(log2(v)) + 1 (for v != 0)
 				return v ? static_cast<int>(std::bit_width(v) - 1) : -1;
-
-#elif defined(_MSC_VER)
-				unsigned long idx = 0;
-				return _BitScanReverse64(&idx, v) ? static_cast<int>(idx) : -1;
-
-#elif defined(__GNUC__) || defined(__clang__)
-				// __builtin_clzll(0) is UB, so guard.
-				constexpr int kUllBits = static_cast<int>(8 * sizeof(unsigned long long));
-				return v ? (kUllBits - 1 - static_cast<int>(__builtin_clzll(static_cast<unsigned long long>(v)))) : -1;
-
-#else
-				// Portable fallback
-				if ( v == 0 )
-					return -1;
-				int idx = 0;
-				while ( ( v >>= 1 ) != 0 )
-					++idx;
-				return idx;
-#endif
 			};
 
 			// Definition 5 (strip): strip(x) clears the highest 1-bit (if any).

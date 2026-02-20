@@ -31,14 +31,6 @@
 #include <cmath>
 #include <optional>
 
-#if defined(__cpp_lib_bitops) && (__cpp_lib_bitops >= 201907L)
-#include <bit>      // std::popcount
-#endif
-
-#if defined(_MSC_VER)
-#include <intrin.h> // _BitScanReverse64
-#endif
-
 namespace TwilightDream
 {
 	namespace arx_operators
@@ -60,13 +52,7 @@ namespace TwilightDream
 		/// @brief Hamming weight |x|
 		[[nodiscard]] inline unsigned popcount_u64( std::uint64_t x ) noexcept
 		{
-#if __cpp_lib_bitops >= 201907L
 			return static_cast<unsigned>( std::popcount( x ) );
-#elif defined( _MSC_VER )
-			return static_cast<unsigned>( __popcnt64( x ) );
-#else
-			return static_cast<unsigned>( __builtin_popcountll( x ) );
-#endif
 		}
 
 		/// @brief parity(x) = |x| mod 2

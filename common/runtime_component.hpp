@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -17,6 +18,7 @@
 #include <source_location>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -88,7 +90,496 @@ namespace TwilightDream::runtime_component
 
 	void		print_word32_hex( const char* label, std::uint32_t v );
 	std::string format_local_time_now();
+	std::string format_local_timestamp_for_filename_now();
+	std::string make_unique_timestamped_artifact_path( const std::string& stem_path, const std::string& extension );
+	std::string append_timestamp_to_artifact_path( const std::string& path );
 	std::string hex8( std::uint32_t v );
+
+	struct RuntimeEventLog
+	{
+		std::ofstream out {};
+		std::string	  path {};
+
+		static std::string default_path( const std::string& stem_path )
+		{
+			return make_unique_timestamped_artifact_path( stem_path, ".runtime.log" );
+		}
+
+		bool open_append( const std::string& path )
+		{
+			out.open( path, std::ios::out | std::ios::app );
+			if ( out )
+				this->path = path;
+			return bool( out );
+		}
+
+		template <class WriteFieldsFn>
+		void write_event( const char* event_name, WriteFieldsFn&& write_fields )
+		{
+			if ( !out )
+				return;
+			out << "=== runtime_event ===\n";
+			out << "timestamp_local=" << format_local_time_now() << "\n";
+			out << "event=" << ( event_name ? event_name : "unknown" ) << "\n";
+			write_fields( out );
+			out << "\n";
+			out.flush();
+		}
+	};
+
+	// ============================================================================
+	// Binary file I/O helpers
+	// ============================================================================
+
+	struct BinaryWriter
+	{
+		std::ofstream out;
+
+		explicit BinaryWriter( const std::string& path );
+
+		bool ok() const;
+
+		void write_bytes( const void* data, std::size_t size );
+		void write_u8( std::uint8_t v );
+		void write_u16( std::uint16_t v );
+		void write_u32( std::uint32_t v );
+		void write_u64( std::uint64_t v );
+		void write_i32( std::int32_t v );
+		void write_i64( std::int64_t v );
+		void write_string( const std::string& s );
+	};
+
+	struct BinaryReader
+	{
+		std::ifstream in;
+
+		explicit BinaryReader( const std::string& path );
+
+		bool ok() const;
+
+		bool read_bytes( void* data, std::size_t size );
+		bool read_u8( std::uint8_t& out );
+		bool read_u16( std::uint16_t& out );
+		bool read_u32( std::uint32_t& out );
+		bool read_u64( std::uint64_t& out );
+		bool read_i32( std::int32_t& out );
+		bool read_i64( std::int64_t& out );
+		bool read_string( std::string& out );
+	};
+
+	void discard_atomic_binary_write( const std::string& tmp_path ) noexcept;
+	bool commit_atomic_binary_write( const std::string& tmp_path, const std::string& path ) noexcept;
+
+	template <class Fn>
+	bool write_atomic_binary_file( const std::string& path, Fn&& fn )
+	{
+		const std::string tmp = path + ".tmp";
+		BinaryWriter		  writer( tmp );
+		if ( !writer.ok() )
+			return false;
+		if ( !std::forward<Fn>( fn )( writer ) )
+		{
+			writer.out.close();
+			discard_atomic_binary_write( tmp );
+			return false;
+		}
+		writer.out.flush();
+		writer.out.close();
+		return commit_atomic_binary_write( tmp, path );
+	}
+
+	// ============================================================================
+	// Shared runtime budget / limiter helpers
+	// ============================================================================
+
+	struct SearchRuntimeControls
+	{
+		std::uint64_t maximum_search_nodes = 0;		// per-invocation node budget
+		std::uint64_t maximum_search_seconds = 0;	// per-invocation wall-clock budget; resume starts a fresh timer
+		std::uint64_t progress_every_seconds = 0;
+		std::uint64_t checkpoint_every_seconds = 0;
+	};
+
+	struct RuntimeWatchdogControl
+	{
+		std::atomic<std::uint64_t> total_nodes_visited { 0 };
+		std::atomic<std::uint64_t> run_nodes_visited { 0 };
+		std::atomic<bool>			 stop_due_to_time_limit { false };
+		std::atomic<bool>			 stop_due_to_node_limit { false };
+		std::atomic<bool>			 checkpoint_latest_due { false };
+		std::atomic<bool>			 checkpoint_archive_due { false };
+	};
+
+	struct RuntimeCheckpointWatchdogRequests
+	{
+		bool latest_due = false;
+		bool archive_due = false;
+	};
+
+	enum class RuntimeTimeLimitScope : std::uint8_t
+	{
+		PerInvocationWallClock = 0
+	};
+
+	inline RuntimeTimeLimitScope runtime_time_limit_scope() noexcept
+	{
+		return RuntimeTimeLimitScope::PerInvocationWallClock;
+	}
+
+	inline const char* runtime_time_limit_scope_name( RuntimeTimeLimitScope scope ) noexcept
+	{
+		switch ( scope )
+		{
+		case RuntimeTimeLimitScope::PerInvocationWallClock:
+		default:
+			return "per_invocation_wall_clock";
+		}
+	}
+
+	inline bool runtime_time_limit_reached_at(
+		std::uint64_t maximum_search_seconds,
+		const std::chrono::steady_clock::time_point& run_start_time,
+		const std::chrono::steady_clock::time_point& now ) noexcept
+	{
+		if ( maximum_search_seconds == 0 || run_start_time.time_since_epoch().count() == 0 )
+			return false;
+		return std::chrono::duration<double>( now - run_start_time ).count() >= double( maximum_search_seconds );
+	}
+
+	inline bool runtime_time_limit_reached_now(
+		std::uint64_t maximum_search_seconds,
+		const std::chrono::steady_clock::time_point& run_start_time ) noexcept
+	{
+		return runtime_time_limit_reached_at( maximum_search_seconds, run_start_time, std::chrono::steady_clock::now() );
+	}
+
+	enum class RuntimeBudgetMode : std::uint8_t
+	{
+		Unlimited = 0,
+		NodeOnly = 1,
+		TimeOnly = 2
+	};
+
+	inline RuntimeBudgetMode runtime_budget_mode( const SearchRuntimeControls& runtime_controls ) noexcept
+	{
+		if ( runtime_controls.maximum_search_seconds != 0 )
+			return RuntimeBudgetMode::TimeOnly;
+		if ( runtime_controls.maximum_search_nodes != 0 )
+			return RuntimeBudgetMode::NodeOnly;
+		return RuntimeBudgetMode::Unlimited;
+	}
+
+	inline const char* runtime_budget_mode_name( const SearchRuntimeControls& runtime_controls ) noexcept
+	{
+		switch ( runtime_budget_mode( runtime_controls ) )
+		{
+		case RuntimeBudgetMode::TimeOnly:
+			return "time_only";
+		case RuntimeBudgetMode::NodeOnly:
+			return "node_only";
+		case RuntimeBudgetMode::Unlimited:
+		default:
+			return "unlimited";
+		}
+	}
+
+	inline bool runtime_nodes_ignored_due_to_time_limit( const SearchRuntimeControls& runtime_controls ) noexcept
+	{
+		return runtime_controls.maximum_search_seconds != 0 && runtime_controls.maximum_search_nodes != 0;
+	}
+
+	inline std::uint64_t runtime_effective_maximum_search_nodes( const SearchRuntimeControls& runtime_controls ) noexcept
+	{
+		return ( runtime_budget_mode( runtime_controls ) == RuntimeBudgetMode::TimeOnly ) ? 0ull : runtime_controls.maximum_search_nodes;
+	}
+
+	struct RuntimeInvocationState
+	{
+		std::chrono::steady_clock::time_point run_start_time {};
+		std::uint64_t						  total_nodes_visited = 0;
+		std::uint64_t						  run_nodes_visited = 0;
+		std::uint64_t						  progress_node_mask = ( 1ull << 18 ) - 1;
+		bool								  stop_due_to_time_limit = false;
+		bool								  stop_due_to_node_limit = false;
+		RuntimeWatchdogControl*			  watchdog_control = nullptr;
+	};
+
+	inline void runtime_sync_watchdog_control( RuntimeInvocationState& runtime_state ) noexcept
+	{
+		if ( runtime_state.watchdog_control == nullptr )
+			return;
+		runtime_state.watchdog_control->total_nodes_visited.store( runtime_state.total_nodes_visited, std::memory_order_relaxed );
+		runtime_state.watchdog_control->run_nodes_visited.store( runtime_state.run_nodes_visited, std::memory_order_relaxed );
+		if ( runtime_state.stop_due_to_time_limit )
+			runtime_state.watchdog_control->stop_due_to_time_limit.store( true, std::memory_order_relaxed );
+		if ( runtime_state.stop_due_to_node_limit )
+			runtime_state.watchdog_control->stop_due_to_node_limit.store( true, std::memory_order_relaxed );
+	}
+
+	inline void runtime_pull_watchdog_stop_flags( RuntimeInvocationState& runtime_state ) noexcept
+	{
+		if ( runtime_state.watchdog_control == nullptr )
+			return;
+		if ( runtime_state.watchdog_control->stop_due_to_time_limit.load( std::memory_order_relaxed ) )
+			runtime_state.stop_due_to_time_limit = true;
+		if ( runtime_state.watchdog_control->stop_due_to_node_limit.load( std::memory_order_relaxed ) )
+			runtime_state.stop_due_to_node_limit = true;
+	}
+
+	inline bool runtime_watchdog_checkpoint_request_pending( const RuntimeInvocationState& runtime_state ) noexcept
+	{
+		return
+			runtime_state.watchdog_control != nullptr &&
+			( runtime_state.watchdog_control->checkpoint_latest_due.load( std::memory_order_relaxed ) ||
+			  runtime_state.watchdog_control->checkpoint_archive_due.load( std::memory_order_relaxed ) );
+	}
+
+	inline RuntimeCheckpointWatchdogRequests runtime_take_watchdog_checkpoint_requests( RuntimeInvocationState& runtime_state ) noexcept
+	{
+		RuntimeCheckpointWatchdogRequests requests {};
+		if ( runtime_state.watchdog_control == nullptr )
+			return requests;
+		requests.latest_due = runtime_state.watchdog_control->checkpoint_latest_due.exchange( false, std::memory_order_relaxed );
+		requests.archive_due = runtime_state.watchdog_control->checkpoint_archive_due.exchange( false, std::memory_order_relaxed );
+		return requests;
+	}
+
+	inline std::uint64_t recommended_progress_node_mask_for_time_limit( std::uint64_t maximum_search_seconds ) noexcept
+	{
+		if ( maximum_search_seconds == 0 )
+			return ( 1ull << 18 ) - 1;
+		if ( maximum_search_seconds <= 2 )
+			return ( 1ull << 8 ) - 1;
+		if ( maximum_search_seconds <= 10 )
+			return ( 1ull << 10 ) - 1;
+		return ( 1ull << 12 ) - 1;
+	}
+
+	inline std::chrono::steady_clock::time_point begin_runtime_invocation(
+		const SearchRuntimeControls& runtime_controls,
+		std::uint64_t& progress_node_mask,
+		bool& stop_due_to_time_limit ) noexcept
+	{
+		stop_due_to_time_limit = false;
+		progress_node_mask = ( 1ull << 18 ) - 1;
+		if ( runtime_controls.maximum_search_seconds != 0 )
+		{
+			progress_node_mask =
+				std::min<std::uint64_t>(
+					progress_node_mask,
+					recommended_progress_node_mask_for_time_limit( runtime_controls.maximum_search_seconds ) );
+		}
+		return std::chrono::steady_clock::now();
+	}
+
+	inline void begin_runtime_invocation( const SearchRuntimeControls& runtime_controls, RuntimeInvocationState& runtime_state ) noexcept
+	{
+		runtime_state.run_nodes_visited = 0;
+		runtime_state.stop_due_to_time_limit = false;
+		runtime_state.stop_due_to_node_limit = false;
+		runtime_state.run_start_time =
+			begin_runtime_invocation(
+				runtime_controls,
+				runtime_state.progress_node_mask,
+				runtime_state.stop_due_to_time_limit );
+		runtime_sync_watchdog_control( runtime_state );
+	}
+
+	inline bool poll_runtime_stop_after_node_visit(
+		const SearchRuntimeControls& runtime_controls,
+		std::uint64_t run_nodes_visited,
+		std::uint64_t progress_node_mask,
+		const std::chrono::steady_clock::time_point& run_start_time,
+		bool& stop_due_to_time_limit ) noexcept
+	{
+		if ( stop_due_to_time_limit )
+			return true;
+		const std::uint64_t effective_maximum_search_nodes = runtime_effective_maximum_search_nodes( runtime_controls );
+		if ( effective_maximum_search_nodes != 0 && run_nodes_visited >= effective_maximum_search_nodes )
+			return true;
+		if ( ( run_nodes_visited & progress_node_mask ) == 0 )
+		{
+			const auto now = std::chrono::steady_clock::now();
+			memory_governor_poll_if_needed( now );
+			if ( runtime_time_limit_reached_at( runtime_controls.maximum_search_seconds, run_start_time, now ) )
+			{
+				stop_due_to_time_limit = true;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	inline bool runtime_poll( const SearchRuntimeControls& runtime_controls, RuntimeInvocationState& runtime_state ) noexcept
+	{
+		runtime_pull_watchdog_stop_flags( runtime_state );
+		if ( runtime_state.stop_due_to_time_limit || runtime_state.stop_due_to_node_limit )
+			return true;
+		const std::uint64_t effective_maximum_search_nodes = runtime_effective_maximum_search_nodes( runtime_controls );
+		if ( effective_maximum_search_nodes != 0 && runtime_state.run_nodes_visited >= effective_maximum_search_nodes )
+		{
+			runtime_state.stop_due_to_node_limit = true;
+			runtime_sync_watchdog_control( runtime_state );
+			return true;
+		}
+		if ( ( runtime_state.run_nodes_visited & runtime_state.progress_node_mask ) == 0 )
+		{
+			const auto now = std::chrono::steady_clock::now();
+			memory_governor_poll_if_needed( now );
+			if ( runtime_time_limit_reached_at( runtime_controls.maximum_search_seconds, runtime_state.run_start_time, now ) )
+			{
+				runtime_state.stop_due_to_time_limit = true;
+				runtime_sync_watchdog_control( runtime_state );
+				return true;
+			}
+		}
+		return false;
+	}
+
+	inline bool runtime_note_node_visit( const SearchRuntimeControls& runtime_controls, RuntimeInvocationState& runtime_state ) noexcept
+	{
+		++runtime_state.total_nodes_visited;
+		++runtime_state.run_nodes_visited;
+		runtime_sync_watchdog_control( runtime_state );
+		return runtime_poll( runtime_controls, runtime_state );
+	}
+
+	inline bool runtime_maximum_search_nodes_hit( const SearchRuntimeControls& runtime_controls, std::uint64_t run_nodes_visited ) noexcept
+	{
+		const std::uint64_t effective_maximum_search_nodes = runtime_effective_maximum_search_nodes( runtime_controls );
+		return effective_maximum_search_nodes != 0 && run_nodes_visited >= effective_maximum_search_nodes;
+	}
+
+	inline bool runtime_maximum_search_nodes_hit( const SearchRuntimeControls& runtime_controls, const RuntimeInvocationState& runtime_state ) noexcept
+	{
+		const std::uint64_t effective_maximum_search_nodes = runtime_effective_maximum_search_nodes( runtime_controls );
+		const bool watchdog_stop =
+			runtime_state.watchdog_control != nullptr &&
+			runtime_state.watchdog_control->stop_due_to_node_limit.load( std::memory_order_relaxed );
+		return effective_maximum_search_nodes != 0 && ( runtime_state.stop_due_to_node_limit || watchdog_stop || runtime_state.run_nodes_visited >= effective_maximum_search_nodes );
+	}
+
+	inline bool runtime_time_limit_hit( const SearchRuntimeControls& runtime_controls, bool stop_due_to_time_limit ) noexcept
+	{
+		return runtime_controls.maximum_search_seconds != 0 && stop_due_to_time_limit;
+	}
+
+	inline bool runtime_time_limit_hit( const SearchRuntimeControls& runtime_controls, const RuntimeInvocationState& runtime_state ) noexcept
+	{
+		const bool watchdog_stop =
+			runtime_state.watchdog_control != nullptr &&
+			runtime_state.watchdog_control->stop_due_to_time_limit.load( std::memory_order_relaxed );
+		return runtime_controls.maximum_search_seconds != 0 && ( runtime_state.stop_due_to_time_limit || watchdog_stop );
+	}
+
+	inline double runtime_elapsed_seconds( const std::chrono::steady_clock::time_point& run_start_time ) noexcept
+	{
+		if ( run_start_time.time_since_epoch().count() == 0 )
+			return 0.0;
+		return std::chrono::duration<double>( std::chrono::steady_clock::now() - run_start_time ).count();
+	}
+
+	inline std::uint64_t runtime_elapsed_microseconds( const std::chrono::steady_clock::time_point& run_start_time ) noexcept
+	{
+		if ( run_start_time.time_since_epoch().count() == 0 )
+			return 0;
+		const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - run_start_time ).count();
+		return ( elapsed <= 0 ) ? 0ull : static_cast<std::uint64_t>( elapsed );
+	}
+
+	inline double runtime_elapsed_seconds( const RuntimeInvocationState& runtime_state ) noexcept
+	{
+		return runtime_elapsed_seconds( runtime_state.run_start_time );
+	}
+
+	inline std::uint64_t runtime_elapsed_microseconds( const RuntimeInvocationState& runtime_state ) noexcept
+	{
+		return runtime_elapsed_microseconds( runtime_state.run_start_time );
+	}
+
+	struct RuntimeTimeLimitProbeState
+	{
+		const SearchRuntimeControls* runtime_controls = nullptr;
+		RuntimeInvocationState*		runtime_state = nullptr;
+		const std::chrono::steady_clock::time_point* run_start_time = nullptr;
+		std::uint64_t maximum_search_seconds = 0;
+		bool* stop_due_to_time_limit = nullptr;
+	};
+
+	inline RuntimeTimeLimitProbeState& runtime_time_limit_probe_state() noexcept
+	{
+		static thread_local RuntimeTimeLimitProbeState state {};
+		return state;
+	}
+
+	inline bool runtime_time_limit_reached() noexcept
+	{
+		RuntimeTimeLimitProbeState& state = runtime_time_limit_probe_state();
+		if ( state.runtime_controls != nullptr && state.runtime_state != nullptr )
+		{
+			runtime_pull_watchdog_stop_flags( *state.runtime_state );
+			if ( state.runtime_state->stop_due_to_time_limit || state.runtime_state->stop_due_to_node_limit )
+				return true;
+			const std::uint64_t effective_maximum_search_nodes = runtime_effective_maximum_search_nodes( *state.runtime_controls );
+			if ( effective_maximum_search_nodes != 0 && state.runtime_state->run_nodes_visited >= effective_maximum_search_nodes )
+			{
+				state.runtime_state->stop_due_to_node_limit = true;
+				runtime_sync_watchdog_control( *state.runtime_state );
+				return true;
+			}
+			const auto now = std::chrono::steady_clock::now();
+			memory_governor_poll_if_needed( now );
+			if ( runtime_time_limit_reached_at( state.runtime_controls->maximum_search_seconds, state.runtime_state->run_start_time, now ) )
+			{
+				state.runtime_state->stop_due_to_time_limit = true;
+				runtime_sync_watchdog_control( *state.runtime_state );
+				return true;
+			}
+			return false;
+		}
+		if ( state.stop_due_to_time_limit && *state.stop_due_to_time_limit )
+			return true;
+		if ( state.run_start_time == nullptr || state.stop_due_to_time_limit == nullptr || state.maximum_search_seconds == 0 )
+			return false;
+		if ( runtime_time_limit_reached_now( state.maximum_search_seconds, *state.run_start_time ) )
+		{
+			*state.stop_due_to_time_limit = true;
+			return true;
+		}
+		return false;
+	}
+
+	struct ScopedRuntimeTimeLimitProbe
+	{
+		RuntimeTimeLimitProbeState previous {};
+
+		ScopedRuntimeTimeLimitProbe( const SearchRuntimeControls& runtime_controls, RuntimeInvocationState& runtime_state )
+			: previous( runtime_time_limit_probe_state() )
+		{
+			RuntimeTimeLimitProbeState& state = runtime_time_limit_probe_state();
+			state.runtime_controls = &runtime_controls;
+			state.runtime_state = &runtime_state;
+			state.run_start_time = &runtime_state.run_start_time;
+			state.maximum_search_seconds = runtime_controls.maximum_search_seconds;
+			state.stop_due_to_time_limit = &runtime_state.stop_due_to_time_limit;
+		}
+
+		ScopedRuntimeTimeLimitProbe( const std::chrono::steady_clock::time_point& run_start_time, std::uint64_t maximum_search_seconds, bool& stop_due_to_time_limit )
+			: previous( runtime_time_limit_probe_state() )
+		{
+			RuntimeTimeLimitProbeState& state = runtime_time_limit_probe_state();
+			state.runtime_controls = nullptr;
+			state.runtime_state = nullptr;
+			state.run_start_time = &run_start_time;
+			state.maximum_search_seconds = maximum_search_seconds;
+			state.stop_due_to_time_limit = &stop_due_to_time_limit;
+		}
+
+		~ScopedRuntimeTimeLimitProbe()
+		{
+			runtime_time_limit_probe_state() = previous;
+		}
+	};
 
 	// ============================================================================
 	// Thread-safe output + per-thread progress prefix (shared)
@@ -143,18 +634,159 @@ namespace TwilightDream::runtime_component
 	{
 		std::uint64_t total_physical_bytes = 0;
 		std::uint64_t available_physical_bytes = 0;
+		std::uint64_t process_rss_bytes = 0;	   // VmRSS / working set (best-effort)
+		std::uint64_t committed_as_bytes = 0;	   // Linux: Committed_AS; Windows: CommitTotal
+		std::uint64_t commit_limit_bytes = 0;	   // Linux: CommitLimit; Windows: CommitLimit
 	};
 
 	// Best-effort query; returns {0,0} if unsupported.
 	SystemMemoryInfo query_system_memory_info();
+	bool			 physical_memory_allocation_guard_active() noexcept;
 
 	// Default poll function for `memory_governor_set_poll_fn()`.
 	void governor_poll_system_memory_once();
+
+	// Print a compact status line with VmRSS / MemAvailable / Committed_AS (best-effort).
+	void print_system_memory_status_line( std::ostream& os, const SystemMemoryInfo& info, const char* prefix = nullptr );
+
+	// ============================================================================
+	// Workstation-greedy memory budgeting (must-live vs rebuildable pools)
+	// ============================================================================
+
+	struct MemoryBudget
+	{
+		std::uint64_t available_physical_bytes = 0;
+		std::uint64_t headroom_bytes = 0;
+		std::uint64_t total_budget_bytes = 0;
+		std::uint64_t must_live_budget_bytes = 0;
+		std::uint64_t rebuildable_budget_bytes = 0;
+	};
+
+	// Split `available - headroom` into MUST-LIVE and REBUILDABLE budgets.
+	MemoryBudget compute_workstation_greedy_budget( const SystemMemoryInfo& info, std::uint64_t headroom_bytes, double must_live_fraction = 0.35 );
+
+	class BudgetedMemoryPool
+	{
+	public:
+		explicit BudgetedMemoryPool( const char* label );
+		BudgetedMemoryPool( const BudgetedMemoryPool& ) = delete;
+		BudgetedMemoryPool& operator=( const BudgetedMemoryPool& ) = delete;
+
+		void		  set_budget_bytes( std::uint64_t bytes );
+		std::uint64_t budget_bytes() const;
+		std::uint64_t allocated_bytes() const;
+		const char*	  label() const;
+
+		// Returns nullptr on failure or budget exceeded.
+		void* allocate( std::uint64_t bytes, bool touch_pages );
+		void  release_all();
+
+	private:
+		struct Block
+		{
+			void*		  p = nullptr;
+			std::uint64_t size = 0;
+		};
+
+		const char*			  label_ = nullptr;
+		mutable std::mutex	  mutex_ {};
+		std::vector<Block>	  blocks_ {};
+		std::uint64_t		  budget_bytes_ = 0;	 // 0 = unlimited
+		std::uint64_t		  allocated_bytes_ = 0;
+	};
+
+	BudgetedMemoryPool& must_live_pool();
+	BudgetedMemoryPool& rebuildable_pool();
+	void			   configure_memory_pools( const MemoryBudget& budget );
+	void			   release_rebuildable_pool();
+
+	void* alloc_must_live( std::uint64_t bytes, bool touch_pages = false );
+	void* alloc_rebuildable( std::uint64_t bytes, bool touch_pages = true );
+
+	// Optional hook called right before `release_rebuildable_pool()` frees memory.
+	// Use this to drop/clear any metadata that may point into the rebuildable pool.
+	using RebuildableCleanupCallback = void ( * )();
+	void rebuildable_set_cleanup_fn( RebuildableCleanupCallback fn );
+
+	// Memory pressure hooks: checkpoint -> release rebuildable -> degrade must-live (optional).
+	using MemoryPressureCallback = void ( * )();
+	void memory_pressure_set_checkpoint_fn( MemoryPressureCallback fn );
+	void memory_pressure_set_must_live_degrade_fn( MemoryPressureCallback fn );
+	void on_memory_pressure();
+
+	// ============================================================================
+	// Table budget helpers (cLAT / pDDT)
+	// ============================================================================
+
+	// cLAT memory estimate from paper: 2^{3(m-8)} * 1.2 GB (approx).
+	std::uint64_t clat_estimated_bytes_for_m( unsigned m );
+	unsigned	  clat_select_m_for_budget( std::uint64_t budget_bytes, unsigned min_m = 8, unsigned max_m = 16 );
+
+	// Generic threshold chooser: `estimate_bytes(threshold)` must be monotonic decreasing w.r.t. threshold.
+	template <class Estimator>
+	inline double pddt_select_threshold_for_budget( Estimator&& estimate_bytes, double min_threshold, double max_threshold, std::uint64_t budget_bytes, int iterations = 32 )
+	{
+		if ( budget_bytes == 0 )
+			return max_threshold;
+		double lo = min_threshold;
+		double hi = max_threshold;
+		double best = max_threshold;
+		for ( int i = 0; i < iterations; ++i )
+		{
+			const double mid = ( lo + hi ) * 0.5;
+			const std::uint64_t est = static_cast<std::uint64_t>( estimate_bytes( mid ) );
+			if ( est > budget_bytes )
+			{
+				lo = mid;  // threshold too low (table too big)
+			}
+			else
+			{
+				best = mid;
+				hi = mid;  // can lower threshold
+			}
+		}
+		return best;
+	}
 
 	inline double bytes_to_gibibytes( std::uint64_t bytes )
 	{
 		return double( bytes ) / double( 1024.0 * 1024.0 * 1024.0 );
 	}
+
+	enum class MemoryGateStatus : std::uint8_t
+	{
+		Ok = 0,
+		Warn = 1,
+		Reject = 2
+	};
+
+	struct MemoryGateEvaluation
+	{
+		std::uint64_t physical_available_bytes = 0;
+		std::uint64_t must_live_bytes = 0;
+		std::uint64_t optional_rebuildable_bytes = 0;
+		double		  warn_fraction = 0.80;
+		double		  reject_fraction = 0.95;
+		double		  must_live_fraction_of_available = 0.0;
+		MemoryGateStatus status = MemoryGateStatus::Ok;
+	};
+
+	const char*		  memory_gate_status_name( MemoryGateStatus status ) noexcept;
+	MemoryGateEvaluation evaluate_memory_gate(
+		std::uint64_t physical_available_bytes,
+		std::uint64_t must_live_bytes,
+		std::uint64_t optional_rebuildable_bytes,
+		double warn_fraction = 0.80,
+		double reject_fraction = 0.95 );
+
+	struct SearchInvocationMetadata
+	{
+		std::uint64_t physical_available_bytes = 0;
+		std::uint64_t estimated_must_live_bytes = 0;
+		std::uint64_t estimated_optional_rebuildable_bytes = 0;
+		MemoryGateStatus memory_gate_status = MemoryGateStatus::Ok;
+		bool startup_memory_gate_advisory_only = false;
+	};
 
 	inline std::uint64_t compute_memory_headroom_bytes( std::uint64_t available_physical_bytes, std::uint64_t memory_headroom_mib, bool memory_headroom_mib_was_provided )
 	{
@@ -164,10 +796,10 @@ namespace TwilightDream::runtime_component
 		const std::uint64_t mebibyte_in_bytes = 1024ull * 1024ull;
 		const std::uint64_t gibibyte_in_bytes = 1024ull * 1024ull * 1024ull;
 
-		// Default rule: keep max(2 GiB, min(4 GiB, available/10)).
-		// Rationale: time-first modes can be extremely memory-hungry; 512 MiB headroom is too risky on Windows.
-		std::uint64_t headroom_bytes = std::min<std::uint64_t>( 4ull * gibibyte_in_bytes, available_physical_bytes / 10ull );
-		headroom_bytes = std::max<std::uint64_t>( headroom_bytes, 2ull * gibibyte_in_bytes );
+		// Default rule (workstation-greedy): keep ~6-8 GiB headroom.
+		// Rationale: time-first modes can be extremely memory-hungry; keep OS responsive while enabling large tables/caches.
+		std::uint64_t headroom_bytes = std::min<std::uint64_t>( 8ull * gibibyte_in_bytes, available_physical_bytes / 8ull );
+		headroom_bytes = std::max<std::uint64_t>( headroom_bytes, 6ull * gibibyte_in_bytes );
 
 		// Optional override (still clamped to a small hard minimum to avoid "0 headroom => OS thrash").
 		if ( memory_headroom_mib_was_provided )
@@ -272,14 +904,19 @@ namespace TwilightDream::runtime_component
 	// Reserve policy helpers (avoid huge upfront bucket allocations).
 	inline std::size_t compute_initial_cache_reserve_hint( std::size_t cap )
 	{
-		// For small caps, reserving the full cap is fine and avoids rehash overhead.
-		if ( cap <= 16384u )
+		if ( cap == 0 )
+			return 0;
+		if ( cap <= 64u )
 			return cap;
-		// For larger caps, reserve a fraction to avoid committing too much memory upfront.
-		// Clamp to a reasonable range to keep hash tables stable.
-		std::size_t h = cap / 8;  // 12.5% of cap
-		h = std::clamp<std::size_t>( h, 16384u, 262144u );
-		return std::min( h, cap );
+		if ( cap <= 256u )
+			return 64u;
+		if ( cap <= 4096u )
+			return 128u;
+		if ( cap <= 65536u )
+			return 256u;
+		if ( cap <= 1048576u )
+			return 512u;
+		return 1024u;
 	}
 
 	inline std::size_t compute_next_cache_reserve_hint( std::size_t current_hint, std::size_t cap )
@@ -287,9 +924,13 @@ namespace TwilightDream::runtime_component
 		if ( cap == 0 )
 			return 0;
 		const std::size_t base = compute_initial_cache_reserve_hint( cap );
-		const std::size_t next = ( current_hint != 0 ) ? ( current_hint * 2 ) : base;
-		// Keep a safety ceiling; beyond this, unordered_map bucket counts can become huge and memory-hungry.
-		return std::min<std::size_t>( cap, std::min<std::size_t>( 1'000'000u, next ) );
+		if ( current_hint == 0 )
+			return base;
+		const std::size_t next =
+			( current_hint < 4096u ) ?
+				( current_hint * 2u ) :
+				( current_hint + std::max<std::size_t>( 1024u, current_hint / 2u ) );
+		return std::min<std::size_t>( cap, next );
 	}
 
 	inline std::size_t budgeted_reserve_target( std::size_t current_size, std::size_t desired_target, std::uint64_t estimated_bytes_per_entry )
@@ -317,12 +958,17 @@ namespace TwilightDream::runtime_component
 
 	inline std::size_t compute_initial_memo_reserve_hint( std::size_t hint )
 	{
-		// hint is already clamped by caller to [4096..1'000'000].
-		if ( hint <= 16384u )
+		if ( hint == 0 )
+			return 0;
+		if ( hint <= 64u )
 			return hint;
-		std::size_t h = hint / 16;	// 6.25% of hint
-		h = std::clamp<std::size_t>( h, 16384u, 131072u );
-		return std::min( h, hint );
+		if ( hint <= 512u )
+			return 64u;
+		if ( hint <= 8192u )
+			return 128u;
+		if ( hint <= 131072u )
+			return 256u;
+		return 512u;
 	}
 
 	// ============================================================================
@@ -352,27 +998,11 @@ namespace TwilightDream::runtime_component
 			const std::size_t sc = round_up_power_of_two( std::max<std::size_t>( 1, shard_count ) );
 			shard_mask_ = sc - 1;
 			per_shard_cap_ = ( total_entries + sc - 1 ) / sc;  // ceil
-			// Small reserve to reduce early rehashing without committing full memory upfront.
-			const std::size_t reserve_hint = std::min<std::size_t>( per_shard_cap_, 16384 );
 			shards_.clear();
-			shards_.reserve( sc );
 			for ( std::size_t i = 0; i < sc; ++i )
 			{
 				auto shard = std::make_unique<Shard>( &pool_ );
-				try
-				{
-					shard->map.reserve( reserve_hint );
-				}
-				catch ( const std::bad_alloc& )
-				{
-					// Shared cache is optional. If we can't reserve it, disable it for this run.
-					disabled_due_to_oom_.store( true, std::memory_order_relaxed );
-					pmr_report_oom_once( "shared_cache.reserve" );
-					shards_.clear();
-					per_shard_cap_ = 0;
-					shard_mask_ = 0;
-					return;
-				}
+				shard->map.max_load_factor( 0.7f );
 				shards_.push_back( std::move( shard ) );
 			}
 		}
@@ -496,7 +1126,6 @@ namespace TwilightDream::runtime_component
 
 			try
 			{
-				maps_.reserve( depth_count );
 				for ( std::size_t i = 0; i < depth_count; ++i )
 				{
 					maps_.emplace_back( &pool_ );
@@ -514,9 +1143,110 @@ namespace TwilightDream::runtime_component
 			return enabled_ && !disabled_due_to_oom_;
 		}
 
+		template <class Writer>
+		bool serialize( Writer& w ) const
+		{
+			static_assert( std::is_integral_v<Key> && std::is_integral_v<Weight>, "Memoization serialization requires integral key/weight." );
+			const bool on = enabled();
+			w.write_u8( on ? 1u : 0u );
+			w.write_u64( static_cast<std::uint64_t>( maps_.size() ) );
+			if ( !on )
+				return w.ok();
+
+			for ( const auto& mp : maps_ )
+			{
+				w.write_u64( static_cast<std::uint64_t>( mp.size() ) );
+				for ( const auto& kv : mp )
+				{
+					write_integral_( w, kv.first );
+					write_integral_( w, kv.second );
+				}
+			}
+			return w.ok();
+		}
+
+		template <class Reader>
+		bool deserialize( Reader& r )
+		{
+			static_assert( std::is_integral_v<Key> && std::is_integral_v<Weight>, "Memoization serialization requires integral key/weight." );
+			std::uint8_t enabled_flag = 0;
+			std::uint64_t depth_count = 0;
+			if ( !r.read_u8( enabled_flag ) )
+				return false;
+			if ( !r.read_u64( depth_count ) )
+				return false;
+
+			initialize( static_cast<std::size_t>( depth_count ), enabled_flag != 0u, "memoization.deserialize.init" );
+			if ( !( enabled_flag != 0u ) )
+				return true;
+
+			bool store = enabled();
+			for ( std::size_t depth = 0; depth < depth_count; ++depth )
+			{
+				std::uint64_t count = 0;
+				if ( !r.read_u64( count ) )
+					return false;
+
+				for ( std::uint64_t i = 0; i < count; ++i )
+				{
+					Key key {};
+					Weight weight {};
+					if ( !read_integral_( r, key ) )
+						return false;
+					if ( !read_integral_( r, weight ) )
+						return false;
+					if ( store )
+					{
+						try
+						{
+							maps_[ depth ].try_emplace( key, weight );
+						}
+						catch ( const std::bad_alloc& )
+						{
+							disable_and_release_( "memoization.deserialize.emplace" );
+							store = false;
+						}
+					}
+				}
+			}
+			return true;
+		}
+
+		void clone_from( const BestWeightMemoizationByDepth& other, const char* oom_tag_init = nullptr, const char* oom_tag_reserve = nullptr, const char* oom_tag_emplace = nullptr )
+		{
+			( void )oom_tag_reserve;
+			initialize(
+				other.maps_.size(),
+				other.enabled(),
+				oom_tag_init ? oom_tag_init : "memoization.clone.init" );
+			if ( !enabled() || !other.enabled() )
+				return;
+
+			for ( std::size_t depth = 0; depth < other.maps_.size(); ++depth )
+			{
+				const auto& src = other.maps_[ depth ];
+				for ( const auto& kv : src )
+				{
+					try
+					{
+						maps_[ depth ].try_emplace( kv.first, kv.second );
+					}
+					catch ( const std::bad_alloc& )
+					{
+						disable_and_release_( oom_tag_emplace ? oom_tag_emplace : "memoization.clone.emplace" );
+						return;
+					}
+				}
+			}
+		}
+
 		// Returns true if the caller should PRUNE this node (already seen <= weight).
 		bool should_prune_and_update( std::size_t depth, const Key& key, const Weight& weight, bool disable_when_memory_pressure, bool reserve_on_first_use, std::size_t reserve_hint, std::uint64_t estimated_bytes_per_entry, const char* oom_tag_reserve, const char* oom_tag_emplace )
 		{
+			( void )reserve_on_first_use;
+			( void )reserve_hint;
+			( void )estimated_bytes_per_entry;
+			( void )oom_tag_reserve;
 			if ( !enabled() )
 				return false;
 			if ( disable_when_memory_pressure && memory_governor_in_pressure() )
@@ -525,19 +1255,6 @@ namespace TwilightDream::runtime_component
 				return false;
 
 			auto& mp = maps_[ depth ];
-			if ( reserve_on_first_use && mp.empty() && reserve_hint != 0 )
-			{
-				try
-				{
-					const std::size_t target = budgeted_reserve_target( mp.size(), compute_initial_memo_reserve_hint( reserve_hint ), estimated_bytes_per_entry );
-					mp.reserve( target );
-				}
-				catch ( const std::bad_alloc& )
-				{
-					disable_and_release_( oom_tag_reserve ? oom_tag_reserve : "memoization.reserve" );
-					return false;
-				}
-			}
 
 			try
 			{
@@ -565,6 +1282,57 @@ namespace TwilightDream::runtime_component
 			pmr_report_oom_once( where ? where : "memoization.oom" );
 			maps_.clear();
 			pool_.release();
+		}
+
+		template <class Writer, class T>
+		static void write_integral_( Writer& w, T value )
+		{
+			using U = std::make_unsigned_t<T>;
+			const U u = static_cast<U>( value );
+			if constexpr ( sizeof( U ) == 1 )
+				w.write_u8( static_cast<std::uint8_t>( u ) );
+			else if constexpr ( sizeof( U ) == 2 )
+				w.write_u16( static_cast<std::uint16_t>( u ) );
+			else if constexpr ( sizeof( U ) == 4 )
+				w.write_u32( static_cast<std::uint32_t>( u ) );
+			else if constexpr ( sizeof( U ) == 8 )
+				w.write_u64( static_cast<std::uint64_t>( u ) );
+		}
+
+		template <class Reader, class T>
+		static bool read_integral_( Reader& r, T& value )
+		{
+			using U = std::make_unsigned_t<T>;
+			U u {};
+			bool ok = false;
+			if constexpr ( sizeof( U ) == 1 )
+			{
+				std::uint8_t tmp = 0;
+				ok = r.read_u8( tmp );
+				u = static_cast<U>( tmp );
+			}
+			else if constexpr ( sizeof( U ) == 2 )
+			{
+				std::uint16_t tmp = 0;
+				ok = r.read_u16( tmp );
+				u = static_cast<U>( tmp );
+			}
+			else if constexpr ( sizeof( U ) == 4 )
+			{
+				std::uint32_t tmp = 0;
+				ok = r.read_u32( tmp );
+				u = static_cast<U>( tmp );
+			}
+			else if constexpr ( sizeof( U ) == 8 )
+			{
+				std::uint64_t tmp = 0;
+				ok = r.read_u64( tmp );
+				u = static_cast<U>( tmp );
+			}
+			if ( !ok )
+				return false;
+			value = static_cast<T>( u );
+			return true;
 		}
 
 		bool														   enabled_ = false;

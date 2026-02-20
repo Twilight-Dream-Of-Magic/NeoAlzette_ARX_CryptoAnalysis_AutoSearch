@@ -33,9 +33,11 @@
  *   Treat this file as an auxiliary *framework-level tracing tool*.
  *   If you are looking for the actual analysis/search implementation, read:
  *     test_neoalzette_differential_best_search.hpp
- *     - class DifferentialBestTrailSearcher
+ *     - run_differential_best_search(...)
+ *     - continue_differential_best_search_from_cursor(...)
  *     test_neoalzette_linear_best_search.hpp
- *     - class LinearBestTrailSearcher
+ *     - run_linear_best_search(...)
+ *     - linear_best_search_continue_from_cursor(...)
  */
 
 
@@ -53,7 +55,7 @@
 
 using TwilightDream::NeoAlzetteCore;
 using TwilightDream::arx_operators::find_optimal_gamma_with_weight;
-using TwilightDream::arx_operators::diff_subconst_bvweight;
+using TwilightDream::arx_operators::diff_subconst_exact_weight_ceil_int;
 
 namespace {
 
@@ -242,8 +244,8 @@ static std::pair<std::uint32_t, int> choose_subtraction_by_constant_output_diffe
     const std::uint32_t greedy_output_difference =
         compute_trace_chosen_output_difference_for_addition_by_constant(input_difference, additive_constant);
 
-    const int greedy_weight = diff_subconst_bvweight(input_difference, subtractive_constant, greedy_output_difference);
-    const int identity_weight = diff_subconst_bvweight(input_difference, subtractive_constant, input_difference);
+    const int greedy_weight = diff_subconst_exact_weight_ceil_int(input_difference, subtractive_constant, greedy_output_difference);
+    const int identity_weight = diff_subconst_exact_weight_ceil_int(input_difference, subtractive_constant, input_difference);
 
     if (greedy_weight >= 0 && (identity_weight < 0 || greedy_weight <= identity_weight)) {
         return {greedy_output_difference, greedy_weight};
@@ -306,12 +308,6 @@ static void trace_differential_trail_path(std::uint32_t initial_branch_a_differe
         print_differential_trace_step("A ^= injection_from_B(B) (affine-derivative offset)", branch_a_difference, branch_b_difference, total_probability);
     }
 
-    // B = l1_backward(B)
-    {
-        branch_b_difference = NeoAlzetteCore::l1_backward(branch_b_difference);
-        print_differential_trace_step("B = l1_backward(B)", branch_a_difference, branch_b_difference, total_probability);
-    }
-
     // --- Second subround ---
     // A += (rotl(B,31) ^ rotl(B,17) ^ ROUND_CONSTANTS[5])
     {
@@ -352,12 +348,6 @@ static void trace_differential_trail_path(std::uint32_t initial_branch_a_differe
         branch_b_difference ^= chosen_injected_xor_difference;
         total_probability *= weight_to_probability(transition.rank_weight);
         print_differential_trace_step("B ^= injection_from_A(A) (affine-derivative offset)", branch_a_difference, branch_b_difference, total_probability);
-    }
-
-    // A = l2_backward(A)
-    {
-        branch_a_difference = NeoAlzetteCore::l2_backward(branch_a_difference);
-        print_differential_trace_step("A = l2_backward(A)", branch_a_difference, branch_b_difference, total_probability);
     }
 
     std::cout << "\nTrace score (this single replayed path only): log2P = "  << std::log2(total_probability) << "\n";
