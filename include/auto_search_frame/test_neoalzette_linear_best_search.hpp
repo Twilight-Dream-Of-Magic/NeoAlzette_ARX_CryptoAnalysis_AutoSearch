@@ -94,35 +94,7 @@ namespace TwilightDream::auto_search_linear
 	// ============================================================================
 
 	/** Transpose transformations for linear cryptanalysis **/
-
-	// L1 transpose transformation - 用于线性密码分析的掩码传播
-	static inline std::uint32_t l1_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotl 改成 rotr
-		// L1(x) = x ^ rotl(x, 2) ^ rotl(x, 10) ^ rotl(x, 18) ^ rotl(x, 24)
-		// L1^T(x) = x ^ rotr(x, 2) ^ rotr(x, 10) ^ rotr(x, 18) ^ rotr(x, 24)
-		return x ^ NeoAlzetteCore::rotr( x, 2 ) ^ NeoAlzetteCore::rotr( x, 10 ) ^ NeoAlzetteCore::rotr( x, 18 ) ^ NeoAlzetteCore::rotr( x, 24 );
-	}
-
-	static inline std::uint32_t l1_backward_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotr 改成 rotl
-		return x ^ NeoAlzetteCore::rotl( x, 2 ) ^ NeoAlzetteCore::rotl( x, 8 ) ^ NeoAlzetteCore::rotl( x, 10 ) ^ NeoAlzetteCore::rotl( x, 14 ) ^ NeoAlzetteCore::rotl( x, 16 ) ^ NeoAlzetteCore::rotl( x, 18 ) ^ NeoAlzetteCore::rotl( x, 20 ) ^ NeoAlzetteCore::rotl( x, 24 ) ^ NeoAlzetteCore::rotl( x, 28 ) ^ NeoAlzetteCore::rotl( x, 30 );
-	}
-	// L2 transpose transformation - 用于线性密码分析的掩码传播
-	static inline std::uint32_t l2_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotl 改成 rotr
-		// L2(x) = x ^ rotl(x, 8) ^ rotl(x, 14) ^ rotl(x, 22) ^ rotl(x, 30)
-		// L2^T(x) = x ^ rotr(x, 8) ^ rotr(x, 14) ^ rotr(x, 22) ^ rotr(x, 30)
-		return x ^ NeoAlzetteCore::rotr( x, 8 ) ^ NeoAlzetteCore::rotr( x, 14 ) ^ NeoAlzetteCore::rotr( x, 22 ) ^ NeoAlzetteCore::rotr( x, 30 );
-	}
-
-	static inline std::uint32_t l2_backward_transpose( std::uint32_t x ) noexcept
-	{
-		// Transpose：把所有 rotr 改成 rotl
-		return x ^ NeoAlzetteCore::rotl( x, 2 ) ^ NeoAlzetteCore::rotl( x, 4 ) ^ NeoAlzetteCore::rotl( x, 8 ) ^ NeoAlzetteCore::rotl( x, 12 ) ^ NeoAlzetteCore::rotl( x, 14 ) ^ NeoAlzetteCore::rotl( x, 16 ) ^ NeoAlzetteCore::rotl( x, 18 ) ^ NeoAlzetteCore::rotl( x, 22 ) ^ NeoAlzetteCore::rotl( x, 24 ) ^ NeoAlzetteCore::rotl( x, 30 );
-	}
+	// Transpose：把所有 rotl 改成 rotr
 
 	// ============================================================================
 	// Injection model for linear correlations (quadratic -> rank/2 weight)
@@ -1519,7 +1491,8 @@ namespace TwilightDream::auto_search_linear
 			state.round_output_branch_a_mask = current_round_output_branch_a_mask;
 			state.round_output_branch_b_mask = current_round_output_branch_b_mask;
 
-			state.branch_a_mask_before_linear_layer_two_backward = l2_backward_transpose( current_round_output_branch_a_mask );
+			// Linear layer on branch A removed (treat as identity in reverse propagation)
+			state.branch_a_mask_before_linear_layer_two_backward = current_round_output_branch_a_mask;
 			state.branch_b_mask_before_injection_from_branch_a = current_round_output_branch_b_mask;
 
 			state.injection_from_branch_a_transition = compute_injection_transition_from_branch_a( current_round_output_branch_b_mask );
@@ -1727,7 +1700,8 @@ namespace TwilightDream::auto_search_linear
 				state.input_branch_b_mask_before_second_constant_subtraction = second_constant_subtraction_candidate_for_branch_b.input_mask_on_x;
 				state.branch_b_mask_after_linear_layer_one_backward =
 					state.input_branch_b_mask_before_second_constant_subtraction ^ state.branch_b_mask_contribution_from_second_addition_term;
-				state.branch_b_mask_after_first_xor_with_rotated_branch_a_base = l1_backward_transpose( state.branch_b_mask_after_linear_layer_one_backward );
+				// Linear layer on branch B removed (treat as identity in reverse propagation)
+				state.branch_b_mask_after_first_xor_with_rotated_branch_a_base = state.branch_b_mask_after_linear_layer_one_backward;
 
 				state.base_weight_after_second_subconst = state.base_weight_after_inj_b + state.weight_second_constant_subtraction;
 				if ( state.base_weight_after_second_subconst >= state.round_weight_cap )

@@ -40,11 +40,10 @@ The core pieces are:
       heuristic similar to the one used in the original test
       harness.  It selects an output difference for the subtraction
       that minimises the weight.
-    - Dynamic diffusion masks, linear diffusion functions L1/L2 and
-      injection functions exactly matching the C++ header provided by
-      the user (neoalzette_injection_constexpr.hpp).  These allow
-      modelling the cost and effect of the NOT‑* gate based cross
-      branch injection in NeoAlzette.
+    - Dynamic diffusion masks and injection functions exactly matching
+      the C++ constexpr reference (neoalzette_injection_constexpr.hpp).
+      These allow modelling the cost and effect of the NOT‑* gate based
+      cross-branch injection in NeoAlzette.
     - Simulation of a single Alzette round and a single NeoAlzette
       round in the difference domain, including updates of the delta
       values.
@@ -73,29 +72,12 @@ def rotr32(x: int, r: int) -> int:
 
 
 ######################################################################
-# Linear diffusion layers (L1/L2) and their inverses
+# NOTE: legacy linear layers (L1/L2)
+#
+# Older drafts of the NeoAlzette spec inserted additional linear layers
+# around injection. The current C++ reference implementation has removed
+# those steps. We keep no L1/L2 propagation in the delta-round model below.
 ######################################################################
-
-def l1_forward(x: int) -> int:
-    return x ^ rotl32(x, 2) ^ rotl32(x, 10) ^ rotl32(x, 18) ^ rotl32(x, 24)
-
-
-def l2_forward(x: int) -> int:
-    return x ^ rotl32(x, 8) ^ rotl32(x, 14) ^ rotl32(x, 22) ^ rotl32(x, 30)
-
-
-def l1_backward(x: int) -> int:
-    # inverse of l1_forward from neoalzette_core.hpp
-    return x ^ rotr32(x, 2) ^ rotr32(x, 8) ^ rotr32(x, 10) ^ rotr32(x, 14) ^ \
-           rotr32(x, 16) ^ rotr32(x, 18) ^ rotr32(x, 20) ^ rotr32(x, 24) ^ \
-           rotr32(x, 28) ^ rotr32(x, 30)
-
-
-def l2_backward(x: int) -> int:
-    # inverse of l2_forward from neoalzette_core.hpp
-    return x ^ rotr32(x, 2) ^ rotr32(x, 4) ^ rotr32(x, 8) ^ rotr32(x, 12) ^ \
-           rotr32(x, 14) ^ rotr32(x, 16) ^ rotr32(x, 18) ^ rotr32(x, 22) ^ \
-           rotr32(x, 24) ^ rotr32(x, 30)
 
 ######################################################################
 # Constants (ROUND_CONSTANTS) – reused from neoalzette_core.hpp
@@ -118,16 +100,22 @@ RC = [
 
 def generate_dynamic_diffusion_mask0(X: int) -> int:
     """Generate mask0 as defined in neoalzette_injection_constexpr.hpp."""
-    return (rotl32(X, 2) ^ rotl32(X, 3) ^ rotl32(X, 6) ^ rotl32(X, 9) ^
-            rotl32(X, 10) ^ rotl32(X, 13) ^ rotl32(X, 16) ^ rotl32(X, 17) ^
-            rotl32(X, 20) ^ rotl32(X, 24) ^ rotl32(X, 27) ^ rotl32(X, 31))
+    v0 = X & 0xFFFFFFFF
+    v1 = v0 ^ rotl32(v0, 2)
+    v2 = v0 ^ rotl32(v1, 17)
+    v3 = v0 ^ rotl32(v2, 4)
+    v4 = v3 ^ rotl32(v3, 24)
+    return (v2 ^ rotl32(v4, 7)) & 0xFFFFFFFF
 
 
 def generate_dynamic_diffusion_mask1(X: int) -> int:
     """Generate mask1 as defined in neoalzette_injection_constexpr.hpp."""
-    return (rotr32(X, 2) ^ rotr32(X, 3) ^ rotr32(X, 6) ^ rotr32(X, 9) ^
-            rotr32(X, 10) ^ rotr32(X, 13) ^ rotr32(X, 16) ^ rotr32(X, 17) ^
-            rotr32(X, 20) ^ rotr32(X, 24) ^ rotr32(X, 27) ^ rotr32(X, 31))
+    v0 = X & 0xFFFFFFFF
+    v1 = v0 ^ rotr32(v0, 2)
+    v2 = v0 ^ rotr32(v1, 17)
+    v3 = v0 ^ rotr32(v2, 4)
+    v4 = v3 ^ rotr32(v3, 24)
+    return (v2 ^ rotr32(v4, 7)) & 0xFFFFFFFF
 
 
 def cd_injection_from_B(B: int, rc0: int, rc1: int) -> tuple[int, int]:
@@ -137,9 +125,10 @@ def cd_injection_from_B(B: int, rc0: int, rc1: int) -> tuple[int, int]:
     """
     # RC indices as in neoalzette_core.hpp (0‑based).  We assume RC is
     # provided externally when this function is called.
-    s_box_in_B = (B ^ RC[2]) ^ (~(B & generate_dynamic_diffusion_mask0(B)) & 0xFFFFFFFF)
-    c = l2_forward(B)
-    d = l1_forward(B) ^ rc0
+    mask0 = generate_dynamic_diffusion_mask0(B)
+    s_box_in_B = (B ^ RC[2]) ^ (~(B & mask0) & 0xFFFFFFFF)
+    c = B & 0xFFFFFFFF
+    d = (mask0 ^ rc0) & 0xFFFFFFFF
     t = c ^ d
     c ^= d ^ s_box_in_B
     d ^= rotr32(t, 16) ^ rc1
@@ -151,9 +140,10 @@ def cd_injection_from_A(A: int, rc0: int, rc1: int) -> tuple[int, int]:
     Compute the cross‑branch injection from branch A (value domain) as in the
     C++ implementation.  The s_box term uses a NOT‑OR and constant XOR.
     """
-    s_box_in_A = (A ^ RC[7]) ^ (~(A | generate_dynamic_diffusion_mask1(A)) & 0xFFFFFFFF)
-    c = l1_forward(A)
-    d = l2_forward(A) ^ rc0
+    mask1 = generate_dynamic_diffusion_mask1(A)
+    s_box_in_A = (A ^ RC[7]) ^ (~(A | mask1) & 0xFFFFFFFF)
+    c = A & 0xFFFFFFFF
+    d = (mask1 ^ rc0) & 0xFFFFFFFF
     t = c ^ d
     c ^= d ^ s_box_in_A
     d ^= rotl32(t, 16) ^ rc1
@@ -525,9 +515,6 @@ def neoalzette_round_delta(delta_a: int, delta_b: int) -> tuple[int, int, float,
     A ^= inj
     weight_inj += float(rank)
 
-    # Step 6: B = L1^{-1}(B)
-    B = l1_backward(B)
-
     # Subround 1 (swap roles)
     # Step 1: A += (rotl(B,31) ^ rotl(B,17) ^ RC[5])
     add_operand = rotl32(B, 31) ^ rotl32(B, 17)
@@ -551,9 +538,6 @@ def neoalzette_round_delta(delta_a: int, delta_b: int) -> tuple[int, int, float,
     rank = injection_weight_branch_a(A)
     B ^= inj
     weight_inj += float(rank)
-
-    # Step 6: A = L2^{-1}(A)
-    A = l2_backward(A)
 
     # Final constant XORs have no weight and no effect on deltas
 

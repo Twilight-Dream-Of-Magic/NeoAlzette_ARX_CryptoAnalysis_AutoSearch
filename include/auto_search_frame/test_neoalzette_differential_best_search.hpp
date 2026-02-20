@@ -915,8 +915,7 @@ namespace TwilightDream::auto_search_differential
 				current_branch_a_difference ^= injection_transition.offset;
 			}
 
-			// Linear layer on branch B
-			current_branch_b_difference = NeoAlzetteCore::l1_backward( current_branch_b_difference );
+			// Linear layer on branch B (L1 removed)
 
 			// Second modular addition on branch A
 			const std::uint32_t second_addition_term_difference = NeoAlzetteCore::rotl<std::uint32_t>( current_branch_b_difference, 31 ) ^ NeoAlzetteCore::rotl<std::uint32_t>( current_branch_b_difference, 17 );
@@ -945,8 +944,7 @@ namespace TwilightDream::auto_search_differential
 				current_branch_b_difference ^= injection_transition.offset;
 			}
 
-			// Linear layer on branch A
-			current_branch_a_difference = NeoAlzetteCore::l2_backward( current_branch_a_difference );
+			// Linear layer on branch A (L2 removed)
 		}
 		if ( total_weight > INFINITE_WEIGHT )
 			return INFINITE_WEIGHT;
@@ -1004,8 +1002,8 @@ namespace TwilightDream::auto_search_differential
 			step_record.branch_a_difference_after_injection_from_branch_b = step_record.branch_a_difference_after_first_xor_with_rotated_branch_b ^ step_record.injection_from_branch_b_xor_difference;
 			total_weight += step_record.weight_injection_from_branch_b;
 
-			// Linear layer on branch B
-			step_record.branch_b_difference_after_linear_layer_one_backward = NeoAlzetteCore::l1_backward( step_record.branch_b_difference_after_first_xor_with_rotated_branch_a );
+			// Linear layer on branch B (L1 removed)
+			step_record.branch_b_difference_after_linear_layer_one_backward = step_record.branch_b_difference_after_first_xor_with_rotated_branch_a;
 
 			// Second modular addition on branch A
 			step_record.second_addition_term_difference = NeoAlzetteCore::rotl<std::uint32_t>( step_record.branch_b_difference_after_linear_layer_one_backward, 31 ) ^ NeoAlzetteCore::rotl<std::uint32_t>( step_record.branch_b_difference_after_linear_layer_one_backward, 17 );
@@ -1041,7 +1039,7 @@ namespace TwilightDream::auto_search_differential
 
 			// End-of-round boundary differences
 			step_record.output_branch_b_difference = step_record.branch_b_difference_after_second_xor_with_rotated_branch_a ^ step_record.injection_from_branch_a_xor_difference;
-			step_record.output_branch_a_difference = NeoAlzetteCore::l2_backward( step_record.branch_a_difference_after_second_xor_with_rotated_branch_b );
+			step_record.output_branch_a_difference = step_record.branch_a_difference_after_second_xor_with_rotated_branch_b;
 
 			step_record.round_weight = step_record.weight_first_addition + step_record.weight_first_constant_subtraction + step_record.weight_injection_from_branch_b + step_record.weight_second_addition + step_record.weight_second_constant_subtraction + step_record.weight_injection_from_branch_a;
 
@@ -1797,7 +1795,7 @@ namespace TwilightDream::auto_search_differential
 				output_branch_a_difference_after_first_constant_subtraction ^ NeoAlzetteCore::rotl<std::uint32_t>( state.output_branch_b_difference_after_first_addition, NeoAlzetteCore::CROSS_XOR_ROT_R0 );
 			state.branch_b_difference_after_first_xor_with_rotated_branch_a =
 				state.output_branch_b_difference_after_first_addition ^ NeoAlzetteCore::rotl<std::uint32_t>( state.branch_a_difference_after_first_xor_with_rotated_branch_b, NeoAlzetteCore::CROSS_XOR_ROT_R1 );
-			state.branch_b_difference_after_linear_layer_one_backward = NeoAlzetteCore::l1_backward( state.branch_b_difference_after_first_xor_with_rotated_branch_a );
+			state.branch_b_difference_after_linear_layer_one_backward = state.branch_b_difference_after_first_xor_with_rotated_branch_a;
 
 			const InjectionAffineTransition injection_transition_from_branch_b = compute_injection_transition_from_branch_b( state.branch_b_difference_after_first_xor_with_rotated_branch_a );
 			state.weight_injection_from_branch_b = injection_transition_from_branch_b.rank_weight;
@@ -1929,7 +1927,7 @@ namespace TwilightDream::auto_search_differential
 			auto& state = current_round_state();
 			state.injection_from_branch_a_xor_difference = injection_from_branch_a_xor_difference;
 			state.output_branch_b_difference = state.branch_b_difference_after_second_xor_with_rotated_branch_a ^ injection_from_branch_a_xor_difference;
-			state.output_branch_a_difference = NeoAlzetteCore::l2_backward( state.branch_a_difference_after_second_xor_with_rotated_branch_b );
+			state.output_branch_a_difference = state.branch_a_difference_after_second_xor_with_rotated_branch_b;
 
 			if ( should_prune_with_remaining_round_lower_bound( state.accumulated_weight_at_round_end ) )
 				return;

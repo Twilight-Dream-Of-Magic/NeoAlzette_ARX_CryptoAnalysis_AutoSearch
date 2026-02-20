@@ -79,22 +79,6 @@ namespace TwilightDream
 		}
 
 		// ========================================================================
-		// Linear diffusion layers
-		// ========================================================================
-
-		// L1 forward transformation
-		static constexpr std::uint32_t l1_forward( std::uint32_t x ) noexcept;
-
-		// L1 backward transformation (inverse) - 用于解密
-		static constexpr std::uint32_t l1_backward( std::uint32_t x ) noexcept;
-
-		// L2 forward transformation
-		static constexpr std::uint32_t l2_forward( std::uint32_t x ) noexcept;
-
-		// L2 backward transformation (inverse) - 用于解密
-		static constexpr std::uint32_t l2_backward( std::uint32_t x ) noexcept;
-
-		// ========================================================================
 		// Cross-branch injection (value domain with constants)
 		// ========================================================================
 
@@ -128,29 +112,5 @@ namespace TwilightDream
 		// Private constructor - this is a static utility class
 		NeoAlzetteCore() = delete;
 	};
-
-	// ============================================================================
-	// Inline implementations for performance-critical template functions
-	// ============================================================================
-
-	constexpr std::uint32_t NeoAlzetteCore::l1_forward( std::uint32_t x ) noexcept
-	{
-		return x ^ rotl( x, 2 ) ^ rotl( x, 10 ) ^ rotl( x, 18 ) ^ rotl( x, 24 );
-	}
-
-	constexpr std::uint32_t NeoAlzetteCore::l1_backward( std::uint32_t x ) noexcept
-	{
-		return x ^ rotr( x, 2 ) ^ rotr( x, 8 ) ^ rotr( x, 10 ) ^ rotr( x, 14 ) ^ rotr( x, 16 ) ^ rotr( x, 18 ) ^ rotr( x, 20 ) ^ rotr( x, 24 ) ^ rotr( x, 28 ) ^ rotr( x, 30 );
-	}
-
-	constexpr std::uint32_t NeoAlzetteCore::l2_forward( std::uint32_t x ) noexcept
-	{
-		return x ^ rotl( x, 8 ) ^ rotl( x, 14 ) ^ rotl( x, 22 ) ^ rotl( x, 30 );
-	}
-
-	constexpr std::uint32_t NeoAlzetteCore::l2_backward( std::uint32_t x ) noexcept
-	{
-		return x ^ rotr( x, 2 ) ^ rotr( x, 4 ) ^ rotr( x, 8 ) ^ rotr( x, 12 ) ^ rotr( x, 14 ) ^ rotr( x, 16 ) ^ rotr( x, 18 ) ^ rotr( x, 22 ) ^ rotr( x, 24 ) ^ rotr( x, 30 );
-	}
 
 }  // namespace TwilightDream

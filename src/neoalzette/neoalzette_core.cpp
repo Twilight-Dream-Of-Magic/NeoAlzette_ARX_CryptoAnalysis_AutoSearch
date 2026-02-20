@@ -2,21 +2,120 @@
 
 namespace TwilightDream
 {
-	// generate dynamic diffusion mask for NeoAlzette
-	// 3 + 7 + 7 + 7 .... mod 32 generate 3,10,17,24,31,6,13,20,27,2,9,16
+	// ========================================================================
+	// Linear diffusion layers
+	// ========================================================================
 
+	/*
+	
+	find_linear_box.exe --bits 32 --efficient-implementation --quality-threshold-branch-number 12 --max-xor 6 --seed 4 --need-found-result 2 --no-progress
+	M(rotl)_hex = 0xd05a0889  M(rotl)^{-1}_hex = 0x5fc08ef4
+	M(rotr)_hex = 0x2220b417  M(rotr)^{-1}_hex = 0x5ee207f4
+	minimum weight found (pair) = 12
+	rotl: diff=12 lin=12 combined=12
+	rotr: diff=12 lin=12 combined=12
+	Operations(rotl): start_bit=0 steps=6
+	v0 = (1 << 0)  [0x00000001]
+	v1 = v0 ^ rotl(v0,2)  [0x00000005]
+	v2 = v0 ^ rotl(v1,17)  [0x000a0001]
+	v3 = v0 ^ rotl(v2,4)  [0x00a00011]
+	v4 = v3 ^ rotl(v3,24)  [0x11a0a011]
+	v5 = v2 ^ rotl(v4,7)  [0xd05a0889]
+	Operations(rotr): start_bit=0 steps=6
+	v0 = (1 << 0)  [0x00000001]
+	v1 = v0 ^ rotr(v0,2)  [0x40000001]
+	v2 = v0 ^ rotr(v1,17)  [0x0000a001]
+	v3 = v0 ^ rotr(v2,4)  [0x10000a01]
+	v4 = v3 ^ rotr(v3,24)  [0x100a0b11]
+	v5 = v2 ^ rotr(v4,7)  [0x2220b417]
+
+	M(rotl)_hex = 0x29082a87  M(rotl)^{-1}_hex = 0x7868ab73
+	M(rotr)_hex = 0xc2a82129  M(rotr)^{-1}_hex = 0x9daa2c3d
+	minimum weight found (pair) = 12
+	rotl: diff=12 lin=12 combined=12
+	rotr: diff=12 lin=12 combined=12
+	Operations(rotl): start_bit=0 steps=6
+	v0 = (1 << 0)  [0x00000001]
+	v1 = v0 ^ rotl(v0,2)  [0x00000005]
+	v2 = v1 ^ rotl(v0,24)  [0x01000005]
+	v3 = v2 ^ rotl(v1,4)  [0x01000055]
+	v4 = v2 ^ rotl(v3,27)  [0xa9080007]
+	v5 = v4 ^ rotl(v3,7)  [0x29082a87]
+	Operations(rotr): start_bit=0 steps=6
+	v0 = (1 << 0)  [0x00000001]
+	v1 = v0 ^ rotr(v0,2)  [0x40000001]
+	v2 = v1 ^ rotr(v0,24)  [0x40000101]
+	v3 = v2 ^ rotr(v1,4)  [0x54000101]
+	v4 = v2 ^ rotr(v3,27)  [0xc000212b]
+	v5 = v4 ^ rotr(v3,7)  [0xc2a82129]
+
+	DONE.
+	Tested candidates = 5736
+	Accepted candidates (printed) = 2
+	Accepted candidates (total)   = 2
+	Elapsed seconds = 1.35393
+	Random ISD iterations executed (Prange screen) = 8896
+	Random ISD iterations executed (Quality gate)  = 32768
+	Random ISD iterations executed (Final confirm) = 16384
+	quality_threshold_branch_number(B) = 12
+	Quality gate = ON  (quality_trials=4096 exhaustive_input_weight_max=2 full_unit_scan=yes)
+
+	--- Best candidate (post-search confirmation) ---
+	M(rotl)_hex = 0x29082a87  M(rotl)^{-1}_hex = 0x7868ab73
+	M(rotr)_hex = 0xc2a82129  M(rotr)^{-1}_hex = 0x9daa2c3d
+	minimum weight found = 12
+
+
+	--- Search-phase upper bounds (before final confirmation) ---
+	Best(rotl) differential branch upper bound = 12
+	Best(rotl) linear branch upper bound       = 12
+	Best(rotl) combined branch upper bound     = 12
+	Best(rotr) differential branch upper bound = 12
+	Best(rotr) linear branch upper bound       = 12
+	Best(rotr) combined branch upper bound     = 12
+	Best(pair) combined branch upper bound     = 12
+
+	--- Post-search confirmed upper bounds ---
+	Confirmed(rotl) differential upper bound   = 12
+	Confirmed(rotl) linear upper bound         = 12
+	Confirmed(rotl) combined upper bound       = 12
+	Confirmed(rotr) differential upper bound   = 12
+	Confirmed(rotr) linear upper bound         = 12
+	Confirmed(rotr) combined upper bound       = 12
+	Confirmed(pair) combined upper bound       = 12
+
+	Threshold check (confirmed combined >= 12) = PASS
+
+	Quality: ACCEPTED (safe to forward to heuristic decomposer)
+	Next step: run linear_box_heuristic_decomposer --verify <hex> for strict validation (do this for BOTH matrices).
+
+	*/
 	std::uint32_t generate_dynamic_diffusion_mask0( std::uint32_t X ) noexcept
 	{
-		return NeoAlzetteCore::rotl( X, 2 ) ^ NeoAlzetteCore::rotl( X, 3 ) ^ NeoAlzetteCore::rotl( X, 6 ) ^ NeoAlzetteCore::rotl( X, 9 ) 
-			^ NeoAlzetteCore::rotl( X, 10 ) ^ NeoAlzetteCore::rotl( X, 13 ) ^ NeoAlzetteCore::rotl( X, 16 ) ^ NeoAlzetteCore::rotl( X, 17 ) 
-			^ NeoAlzetteCore::rotl( X, 20 ) ^ NeoAlzetteCore::rotl( X, 24 ) ^ NeoAlzetteCore::rotl( X, 27 ) ^ NeoAlzetteCore::rotl( X, 31 );
+		std::uint32_t Y = 0;
+		std::uint32_t v0 = X;
+
+		std::uint32_t v1 = v0 ^ NeoAlzetteCore::rotl(v0,2);
+		std::uint32_t v2 = v0 ^ NeoAlzetteCore::rotl(v1,17);
+		std::uint32_t v3 = v0 ^ NeoAlzetteCore::rotl(v2,4);
+		std::uint32_t v4 = v3 ^ NeoAlzetteCore::rotl(v3,24);
+		Y = v2 ^ NeoAlzetteCore::rotl(v4,7);
+
+		return Y;
 	}
 
 	std::uint32_t generate_dynamic_diffusion_mask1( std::uint32_t X ) noexcept
 	{
-		return NeoAlzetteCore::rotr( X, 2 ) ^ NeoAlzetteCore::rotr( X, 3 ) ^ NeoAlzetteCore::rotr( X, 6 ) ^ NeoAlzetteCore::rotr( X, 9 ) 
-			^ NeoAlzetteCore::rotr( X, 10 ) ^ NeoAlzetteCore::rotr( X, 13 ) ^ NeoAlzetteCore::rotr( X, 16 ) ^ NeoAlzetteCore::rotr( X, 17 ) 
-			^ NeoAlzetteCore::rotr( X, 20 ) ^ NeoAlzetteCore::rotr( X, 24 ) ^ NeoAlzetteCore::rotr( X, 27 ) ^ NeoAlzetteCore::rotr( X, 31 );
+		std::uint32_t Y = 0;
+		std::uint32_t v0 = X;
+
+		std::uint32_t v1 = v0 ^ NeoAlzetteCore::rotr(v0,2);
+		std::uint32_t v2 = v0 ^ NeoAlzetteCore::rotr(v1,17);
+		std::uint32_t v3 = v0 ^ NeoAlzetteCore::rotr(v2,4);
+		std::uint32_t v4 = v3 ^ NeoAlzetteCore::rotr(v3,24);
+		Y = v2 ^ NeoAlzetteCore::rotr(v4,7);
+
+		return Y;
 	}
 
 	// ============================================================================
@@ -27,10 +126,12 @@ namespace TwilightDream
 	{
 		const auto& RC = ROUND_CONSTANTS;
 		//XOR with NOT-AND and NOT-OR is balance of boolean logic
-		std::uint32_t s_box_in_B = ( B ^ RC[ 2 ] ) ^ ( ~( B & generate_dynamic_diffusion_mask0( B ) ) );
+		const std::uint32_t mask0 = generate_dynamic_diffusion_mask0( B );
+		std::uint32_t s_box_in_B = ( B ^ RC[ 2 ] ) ^ ( ~( B & mask0 ) );
 
-		std::uint32_t c = NeoAlzetteCore::l2_forward( B );
-		std::uint32_t d = NeoAlzetteCore::l1_forward( B ) ^ rc0;
+		// Performance: drop L1/L2 here; reuse the dynamic diffusion mask as the linear pre-mix.
+		std::uint32_t c = B;
+		std::uint32_t d = mask0 ^ rc0;
 
 		std::uint32_t t = c ^ d;
 		c ^= d ^ s_box_in_B;
@@ -42,10 +143,12 @@ namespace TwilightDream
 	{
 		const auto& RC = ROUND_CONSTANTS;
 		//XOR with NOT-AND and NOT-OR is balance of boolean logic
-		std::uint32_t s_box_in_A = ( A ^ RC[ 7 ] ) ^ ( ~( A | generate_dynamic_diffusion_mask1( A ) ) );
+		const std::uint32_t mask1 = generate_dynamic_diffusion_mask1( A );
+		std::uint32_t s_box_in_A = ( A ^ RC[ 7 ] ) ^ ( ~( A | mask1 ) );
 
-		std::uint32_t c = NeoAlzetteCore::l1_forward( A );
-		std::uint32_t d = NeoAlzetteCore::l2_forward( A ) ^ rc0;
+		// Performance: drop L1/L2 here; reuse the dynamic diffusion mask as the linear pre-mix.
+		std::uint32_t c = A;
+		std::uint32_t d = mask1 ^ rc0;
 
 		std::uint32_t t = c ^ d;
 		c ^= d ^ s_box_in_A;
@@ -71,7 +174,6 @@ namespace TwilightDream
 			//PRF B -> A
 			auto [ C0, D0 ] = cd_injection_from_B( B, ( RC[ 2 ] | RC[ 3 ] ), RC[ 3 ] );
 			A ^= ( NeoAlzetteCore::rotl( C0, 24 ) ^ NeoAlzetteCore::rotl( D0, 16 ) ^ RC[ 4 ] );
-			B = NeoAlzetteCore::l1_backward( B );
 		}
 
 		// Second subround
@@ -83,7 +185,6 @@ namespace TwilightDream
 			//PRF A -> B
 			auto [ C1, D1 ] = cd_injection_from_A( A, ( RC[ 7 ] & RC[ 8 ] ), RC[ 8 ] );
 			B ^= ( NeoAlzetteCore::rotl( C1, 24 ) ^ NeoAlzetteCore::rotl( D1, 16 ) ^ RC[ 9 ] );
-			A = NeoAlzetteCore::l2_backward( A );
 		}
 
 		// Final constant addition
@@ -104,7 +205,6 @@ namespace TwilightDream
 
 		// Reverse second subround
 		{
-			A = NeoAlzetteCore::l2_forward( A );
 			//PRF A -> B
 			auto [ C1, D1 ] = cd_injection_from_A( A, ( RC[ 7 ] & RC[ 8 ] ), RC[ 8 ] );
 			B ^= ( NeoAlzetteCore::rotl( C1, 24 ) ^ NeoAlzetteCore::rotl( D1, 16 ) ^ RC[ 9 ] );
@@ -116,7 +216,6 @@ namespace TwilightDream
 
 		// Reverse first subround
 		{
-			B = NeoAlzetteCore::l1_forward( B );
 			//PRF B -> A
 			auto [ C0, D0 ] = cd_injection_from_B( B, ( RC[ 2 ] | RC[ 3 ] ), RC[ 3 ] );
 			A ^= ( NeoAlzetteCore::rotl( C0, 24 ) ^ NeoAlzetteCore::rotl( D0, 16 ) ^ RC[ 4 ] );
