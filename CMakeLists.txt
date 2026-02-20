@@ -1,28 +1,41 @@
 cmake_minimum_required(VERSION 3.15) # for CMAKE_MSVC_RUNTIME_LIBRARY
+
+set(_neoalzette_visual_studio_generator OFF)
+if(DEFINED CMAKE_GENERATOR AND CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(_neoalzette_visual_studio_generator ON)
+endif()
+
+if(WIN32 AND NOT _neoalzette_visual_studio_generator AND NOT DEFINED CMAKE_CXX_COMPILER AND DEFINED ENV{CLANG64})
+    file(TO_CMAKE_PATH "$ENV{CLANG64}" _neoalzette_clang64_bin)
+    if(EXISTS "${_neoalzette_clang64_bin}/clang++.exe")
+        set(CMAKE_CXX_COMPILER "${_neoalzette_clang64_bin}/clang++.exe" CACHE FILEPATH "Preferred C++ compiler" FORCE)
+    endif()
+elseif(WIN32 AND _neoalzette_visual_studio_generator AND DEFINED ENV{CLANG64})
+    message(STATUS "Skipping CLANG64 auto-compiler selection for Visual Studio generator; use -G Ninja to build with MinGW clang++.")
+endif()
+
 project(NeoAlzette_ARX_CryptoAnalysis_AutoSearch VERSION 1.0.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
-# Default to Release for single-config generators (matches build_cmake.bat behavior).
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Some MinGW/clang setups in this repo are reported by CMake as "compiler
+# identification is unknown", so keep the explicit standard flag as a fallback.
+if(MSVC)
+    add_compile_options(/std:c++20 /utf-8)
+else()
+    add_compile_options(-std=c++20)
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (Release, Debug, RelWithDebInfo, MinSizeRel)" )
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (Release, Debug, RelWithDebInfo, MinSizeRel)")
 endif()
 
-# ============================================================================
-# Build switches (match current repo layout)
-# ============================================================================
-# This repo primarily provides a small core library + several research programs
-# under `test_*.cpp` (they are not unit tests in the strict sense).
 option(NEOALZETTE_BUILD_PROGRAMS "Build research programs (test_*.cpp)" ON)
-# Backward-compatible alias (deprecated).
-option(BUILD_TESTS "Deprecated: use NEOALZETTE_BUILD_PROGRAMS" OFF)
-if(BUILD_TESTS)
-    set(NEOALZETTE_BUILD_PROGRAMS ON)
-endif()
 
-# ============================================================================
-# Common target helpers
-# ============================================================================
 function(neoalzette_apply_warnings target_name)
     if(MSVC)
         target_compile_options(${target_name} PRIVATE /W4)
@@ -31,73 +44,101 @@ function(neoalzette_apply_warnings target_name)
     endif()
 endfunction()
 
-# ============================================================================
-# Static linking / runtime options
-# ============================================================================
-# - MSVC: use static CRT (/MT, /MTd) so produced EXEs don't depend on vcruntime DLLs.
-# - MinGW/Clang: optionally add -static flags for fully static binaries (where available).
+function(neoalzette_apply_windows_system_libs target_name)
+    if(WIN32)
+        if(MSVC)
+            target_link_libraries(${target_name} PRIVATE psapi)
+        else()
+            target_link_options(${target_name} PRIVATE -lpsapi)
+        endif()
+    endif()
+endfunction()
+
 option(NEOALZETTE_MSVC_STATIC_RUNTIME "Use static MSVC runtime (/MT, /MTd)" ON)
-if (MSVC AND NEOALZETTE_MSVC_STATIC_RUNTIME)
+if(MSVC AND NEOALZETTE_MSVC_STATIC_RUNTIME)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 set(_NEOALZETTE_DEFAULT_MINGW_STATIC OFF)
 if(WIN32 AND NOT MSVC)
-    # Align with build_and_test.bat (clang++ -static on Windows/MinGW toolchains).
     set(_NEOALZETTE_DEFAULT_MINGW_STATIC ON)
 endif()
 option(NEOALZETTE_MINGW_STATIC "Link executables statically on MinGW/Clang (adds -static flags)" ${_NEOALZETTE_DEFAULT_MINGW_STATIC})
+
 function(neoalzette_apply_static_linking target_name)
-    # Note: CMake's `MINGW` is not always set when using Clang targeting MinGW,
-    # so we use a more robust predicate here.
-    if (WIN32 AND NOT MSVC AND NEOALZETTE_MINGW_STATIC)
-        # Match build_and_test.bat (clang++ ... -static).
+    if(WIN32 AND NOT MSVC AND NEOALZETTE_MINGW_STATIC)
         target_link_options(${target_name} PRIVATE -static)
     endif()
 endfunction()
 
-# ============================================================================
-# 底層ARX分析算子（Header-only）
-# ============================================================================
-# 所有算子都是header-only，包括Algorithm 4（全inline實現）
-# 無需編譯，直接include即可使用
-
-# ============================================================================
-# NeoAlzette 核心庫（目前 repo 只保留 core）
-# ============================================================================
 add_library(neoalzette STATIC
     src/neoalzette/neoalzette_core.cpp
 )
-target_compile_features(neoalzette PUBLIC cxx_std_20)
-set_target_properties(neoalzette PROPERTIES CXX_EXTENSIONS OFF)
+set_target_properties(neoalzette PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 target_include_directories(neoalzette PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 neoalzette_apply_warnings(neoalzette)
 
-# ============================================================================
-# 可執行檔（目前 repo 的入口程式 / 研究程式）
-# ============================================================================
 if(NEOALZETTE_BUILD_PROGRAMS)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
     find_package(Threads REQUIRED)
 
-    add_executable(test_neoalzette_arx_trace
-        test_neoalzette_arx_trace.cpp
+    set(NEOALZETTE_BEST_SEARCH_SHARED_SOURCES
+        src/auto_search_frame/best_search_shared_core.cpp
+        src/arx_analysis_operators/linear_correlation/constant_fixed_alpha_core.cpp
+        src/arx_analysis_operators/linear_correlation/constant_fixed_beta_core.cpp
     )
-    target_link_libraries(test_neoalzette_arx_trace PRIVATE neoalzette Threads::Threads)
-    target_include_directories(test_neoalzette_arx_trace PRIVATE
-        ${PROJECT_SOURCE_DIR}
+
+    set(NEOALZETTE_LINEAR_BNB_DETAIL_SOURCES
+        src/auto_search_frame_bnb_detail/linear/varvar_z_shell_weight_sliced_clat_q2.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/varvar/fixed_u_q2.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/varvar/fixed_vw_q2.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/varvar/varvar_q1.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/varconst/fixed_beta_q2.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/varconst/fixed_alpha_q2.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/varconst/varconst_q1.cpp
     )
-    neoalzette_apply_warnings(test_neoalzette_arx_trace)
-    neoalzette_apply_static_linking(test_neoalzette_arx_trace)
+
+    set(NEOALZETTE_DIFFERENTIAL_BNB_DETAIL_SOURCES
+        src/auto_search_frame_bnb_detail/differential/varvar_weight_sliced_pddt_q2.cpp
+    )
+
+    set(NEOALZETTE_LINEAR_BEST_SEARCH_SOURCES
+        ${NEOALZETTE_BEST_SEARCH_SHARED_SOURCES}
+        ${NEOALZETTE_LINEAR_BNB_DETAIL_SOURCES}
+        src/auto_search_frame_bnb_detail/polarity/linear/linear_bnb_profile_fixed_u_fixed_beta.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/linear_bnb_profile_fixed_u_fixed_alpha.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/linear_bnb_profile_fixed_vw_fixed_beta.cpp
+        src/auto_search_frame_bnb_detail/polarity/linear/linear_bnb_profile_fixed_vw_fixed_alpha.cpp
+        src/auto_search_frame/linear_best_search_math.cpp
+        src/auto_search_frame/linear_best_search_checkpoint.cpp
+        src/auto_search_frame/linear_best_search_engine.cpp
+        src/auto_subspace_hull/linear_best_search_collector.cpp
+    )
+
+    set(NEOALZETTE_DIFFERENTIAL_BEST_SEARCH_SOURCES
+        ${NEOALZETTE_BEST_SEARCH_SHARED_SOURCES}
+        ${NEOALZETTE_DIFFERENTIAL_BNB_DETAIL_SOURCES}
+        src/auto_search_frame/differential_best_search_math.cpp
+        src/auto_search_frame/differential_best_search_checkpoint.cpp
+        src/auto_search_frame/differential_best_search_engine.cpp
+        src/auto_subspace_hull/differential_best_search_collector.cpp
+    )
 
     add_executable(test_neoalzette_differential_best_search
         test_neoalzette_differential_best_search.cpp
-        test_arx_operator_self_test.cpp
+        test_arx_operator_self_test_differential.cpp
         common/runtime_component.cpp
+        ${NEOALZETTE_DIFFERENTIAL_BEST_SEARCH_SOURCES}
     )
     target_link_libraries(test_neoalzette_differential_best_search PRIVATE neoalzette Threads::Threads)
+    neoalzette_apply_windows_system_libs(test_neoalzette_differential_best_search)
     target_include_directories(test_neoalzette_differential_best_search PRIVATE
         ${PROJECT_SOURCE_DIR}
     )
@@ -106,79 +147,92 @@ if(NEOALZETTE_BUILD_PROGRAMS)
 
     add_executable(test_neoalzette_linear_best_search
         test_neoalzette_linear_best_search.cpp
-        test_arx_operator_self_test.cpp
+        test_arx_operator_self_test_linear.cpp
         common/runtime_component.cpp
+        ${NEOALZETTE_LINEAR_BEST_SEARCH_SOURCES}
     )
     target_link_libraries(test_neoalzette_linear_best_search PRIVATE neoalzette Threads::Threads)
+    neoalzette_apply_windows_system_libs(test_neoalzette_linear_best_search)
     target_include_directories(test_neoalzette_linear_best_search PRIVATE
         ${PROJECT_SOURCE_DIR}
     )
     neoalzette_apply_warnings(test_neoalzette_linear_best_search)
     neoalzette_apply_static_linking(test_neoalzette_linear_best_search)
 
-    add_executable(test_neoalzette_arx_probabilistic_neutral_bits
-        test_neoalzette_arx_probabilistic_neutral_bits.cpp
+    add_executable(test_neoalzette_differential_hull_wrapper
+        test_neoalzette_differential_hull_wrapper.cpp
+        common/runtime_component.cpp
+        ${NEOALZETTE_DIFFERENTIAL_BEST_SEARCH_SOURCES}
     )
-    target_link_libraries(test_neoalzette_arx_probabilistic_neutral_bits PRIVATE neoalzette Threads::Threads)
-    target_include_directories(test_neoalzette_arx_probabilistic_neutral_bits PRIVATE
+    target_link_libraries(test_neoalzette_differential_hull_wrapper PRIVATE neoalzette Threads::Threads)
+    neoalzette_apply_windows_system_libs(test_neoalzette_differential_hull_wrapper)
+    target_include_directories(test_neoalzette_differential_hull_wrapper PRIVATE
         ${PROJECT_SOURCE_DIR}
     )
-    neoalzette_apply_warnings(test_neoalzette_arx_probabilistic_neutral_bits)
-    neoalzette_apply_static_linking(test_neoalzette_arx_probabilistic_neutral_bits)
+    neoalzette_apply_warnings(test_neoalzette_differential_hull_wrapper)
+    neoalzette_apply_static_linking(test_neoalzette_differential_hull_wrapper)
 
-    add_executable(test_neoalzette_arx_probabilistic_neutral_bits_average
-        test_neoalzette_arx_probabilistic_neutral_bits_average.cpp
+    add_executable(test_neoalzette_linear_hull_wrapper
+        test_neoalzette_linear_hull_wrapper.cpp
+        common/runtime_component.cpp
+        ${NEOALZETTE_LINEAR_BEST_SEARCH_SOURCES}
     )
-    target_link_libraries(test_neoalzette_arx_probabilistic_neutral_bits_average PRIVATE neoalzette Threads::Threads)
-    target_include_directories(test_neoalzette_arx_probabilistic_neutral_bits_average PRIVATE
+    target_link_libraries(test_neoalzette_linear_hull_wrapper PRIVATE neoalzette Threads::Threads)
+    neoalzette_apply_windows_system_libs(test_neoalzette_linear_hull_wrapper)
+    target_include_directories(test_neoalzette_linear_hull_wrapper PRIVATE
         ${PROJECT_SOURCE_DIR}
     )
-    neoalzette_apply_warnings(test_neoalzette_arx_probabilistic_neutral_bits_average)
-    neoalzette_apply_static_linking(test_neoalzette_arx_probabilistic_neutral_bits_average)
+    neoalzette_apply_warnings(test_neoalzette_linear_hull_wrapper)
+    neoalzette_apply_static_linking(test_neoalzette_linear_hull_wrapper)
+
+    add_executable(test_runtime_thread_pool
+        test_runtime_thread_pool.cpp
+        common/runtime_component.cpp
+    )
+    target_link_libraries(test_runtime_thread_pool PRIVATE Threads::Threads)
+    neoalzette_apply_windows_system_libs(test_runtime_thread_pool)
+    target_include_directories(test_runtime_thread_pool PRIVATE
+        ${PROJECT_SOURCE_DIR}
+    )
+    neoalzette_apply_warnings(test_runtime_thread_pool)
+    neoalzette_apply_static_linking(test_runtime_thread_pool)
+
 endif()
 
-# ============================================================================
-# 安裝配置
-# ============================================================================
 install(TARGETS neoalzette
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 install(DIRECTORY include/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        FILES_MATCHING
-        PATTERN "*.hpp"
-        PATTERN "*.h")
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING
+    PATTERN "*.hpp"
+    PATTERN "*.h"
+)
 
-# ============================================================================
-# 文檔
-# ============================================================================
 message(STATUS "")
 message(STATUS "=======================================================")
-message(STATUS "NeoAlzette ARX密碼分析與自動化搜索")
+message(STATUS "NeoAlzette ARX CryptoAnalysis AutoSearch")
 message(STATUS "=======================================================")
 message(STATUS "")
-message(STATUS "📁 項目結構：")
-message(STATUS "  include/arx_analysis_operators/  - 底層ARX算子（最優化）")
-message(STATUS "  include/neoalzette/              - NeoAlzette專用")
+message(STATUS "Project layout:")
+message(STATUS "  include/arx_analysis_operators/  - Header-only ARX analysis operators")
+message(STATUS "  include/neoalzette/              - NeoAlzette interfaces")
+message(STATUS "  include/auto_search_frame/       - best-search engine / auto-pipeline framework")
+message(STATUS "  include/auto_subspace_hull/      - sub-space hull analysis / aggregation / checkpoint layer")
 message(STATUS "")
-message(STATUS "📚 底層算子：")
-message(STATUS "  • differential_xdp_add.hpp          - LM-2001 Alg 2 (O(1))")
-message(STATUS "  • differential_optimal_gamma.hpp    - LM-2001 Alg 4 (Θ(log n)) 🆕")
-message(STATUS "  • differential_addconst.hpp         - BvWeight (O(log²n))")
-message(STATUS "  • linear_correlation_add_logn.hpp   - Wallén Θ(log n)")
-message(STATUS "  • linear_correlation_addconst.hpp   - carry-matrix chain (O(n))")
 message(STATUS "")
-message(STATUS "🎯 構建目標：")
-message(STATUS "  • neoalzette (static library)    - NeoAlzette庫")
+message(STATUS "Build targets:")
+message(STATUS "  neoalzette                         - static library")
 if(NEOALZETTE_BUILD_PROGRAMS)
-    message(STATUS "  • test_neoalzette_arx_trace      - 差分 trace")
-    message(STATUS "  • test_neoalzette_differential_best_search - 最佳差分 trail 搜尋")
-    message(STATUS "  • test_neoalzette_linear_best_search - 最佳線性 trail 搜尋")
-    message(STATUS "  • test_neoalzette_arx_probabilistic_neutral_bits - PNB-style + heatmap（CSV）")
-    message(STATUS "  • test_neoalzette_arx_probabilistic_neutral_bits_average - average PNB（原始碼設定）")
+    message(STATUS "  test_neoalzette_differential_best_search - differential best-search / auto pipeline")
+    message(STATUS "  test_neoalzette_linear_best_search - linear best-search / auto pipeline")
+    message(STATUS "  test_neoalzette_differential_hull_wrapper - strict differential hull wrapper")
+    message(STATUS "  test_neoalzette_linear_hull_wrapper - strict linear hull wrapper")
+    message(STATUS "  test_runtime_thread_pool - runtime thread-pool / service-thread selftest")
 else()
-    message(STATUS "  • (programs disabled) set -DNEOALZETTE_BUILD_PROGRAMS=ON to build test_*.cpp")
+    message(STATUS "  (programs disabled) set -DNEOALZETTE_BUILD_PROGRAMS=ON to build test_*.cpp")
 endif()
 message(STATUS "")
 message(STATUS "=======================================================")

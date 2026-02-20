@@ -41,6 +41,7 @@ set "BUILD_DIR=out\cmake-build"
 
 echo [1/3] Configure...
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
+echo   Note: best-search / hull sources are now resolved from CMake's shared source lists under src\auto_search_frame\.
 
 set "GEN_ARGS="
 if not "%CMAKE_GENERATOR%"=="" (
