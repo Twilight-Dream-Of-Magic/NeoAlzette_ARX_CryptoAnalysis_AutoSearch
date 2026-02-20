@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <chrono>
+#include "arx_analysis_operators/DefineSearchWeight.hpp"
 #include "neoalzette/neoalzette_core.hpp"
 
 namespace neoalz {
@@ -54,7 +55,7 @@ public:
             int round;
             std::uint32_t state_a;
             std::uint32_t state_b;
-            int weight;
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight;
             std::string algorithm;
             std::chrono::system_clock::time_point timestamp;
         };
@@ -71,7 +72,7 @@ public:
         
         // Export histogram data
         static bool export_histogram_csv(const std::string& filename, 
-                                        const std::vector<std::pair<int, int>>& histogram);
+                                        const std::vector<std::pair<TwilightDream::AutoSearchFrameDefine::SearchWeight, int>>& histogram);
         
         // Export top-N results
         template<typename ResultT>
@@ -120,23 +121,25 @@ public:
         struct Entry {
             std::uint32_t input_diff;
             std::uint32_t output_diff;
-            int weight;
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight;
             double probability;
         };
 
         SimplePDDT() = default;
         
         // Build PDDT for given bit size and weight threshold
-        void build(int n_bits = 32, int weight_threshold = 10);
+        void build(
+            int n_bits = 32,
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight_threshold = 10);
         
         // Query PDDT for given input difference
-        std::vector<Entry> query(std::uint32_t input_diff, int max_weight = 100) const;
+        std::vector<Entry> query(std::uint32_t input_diff, TwilightDream::AutoSearchFrameDefine::SearchWeight max_weight = 100) const;
         
         // Get statistics about the PDDT
         struct Stats {
             std::size_t total_entries;
-            int max_weight;
-            int min_weight;
+            TwilightDream::AutoSearchFrameDefine::SearchWeight max_weight;
+            TwilightDream::AutoSearchFrameDefine::SearchWeight min_weight;
             double avg_weight;
         };
         Stats get_stats() const;
@@ -172,12 +175,18 @@ public:
         };
 
         // Validate parameters for differential analysis
-        static ValidationResult validate_diff_params(int rounds, int weight_cap, 
-                                                     std::uint32_t start_dA, std::uint32_t start_dB);
+        static ValidationResult validate_diff_params(
+            int rounds,
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight_cap,
+            std::uint32_t start_dA,
+            std::uint32_t start_dB);
         
         // Validate parameters for linear analysis
-        static ValidationResult validate_linear_params(int rounds, int weight_cap, 
-                                                      std::uint32_t start_mA, std::uint32_t start_mB);
+        static ValidationResult validate_linear_params(
+            int rounds,
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight_cap,
+            std::uint32_t start_mA,
+            std::uint32_t start_mB);
         
         // Estimate resource requirements
         struct ResourceEstimate {
@@ -187,8 +196,10 @@ public:
             bool suitable_for_personal_computer;
         };
         
-        static ResourceEstimate estimate_resources(int rounds, int weight_cap, 
-                                                  const std::string& algorithm);
+        static ResourceEstimate estimate_resources(
+            int rounds,
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight_cap,
+            const std::string& algorithm);
     };
 
     // ========================================================================
@@ -227,8 +238,9 @@ public:
         static bool has_popcount_instruction();
         
         // Optimal parameter suggestions
-        static int suggest_weight_cap_for_personal_computer(int rounds);
-        static int suggest_max_rounds_for_personal_computer(int weight_cap);
+        static TwilightDream::AutoSearchFrameDefine::SearchWeight suggest_weight_cap_for_personal_computer(int rounds);
+        static int suggest_max_rounds_for_personal_computer(
+            TwilightDream::AutoSearchFrameDefine::SearchWeight weight_cap);
     };
 
     // ========================================================================

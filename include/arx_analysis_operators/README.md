@@ -1,157 +1,466 @@
-# ARX 分析算子（以“模加”为核心）/ ARX Analysis Operators (Addition-Centric)
+# ARX Analysis Operators
 
-* 更新时间 Updated: **2026-01-16**
-* 主要命名空间 / Namespace:
-  - `TwilightDream::arx_operators`（对外算子 / public operators）
-  - `TwilightDream::bitvector`（位向量/SWAR primitives；当前实现在 `differential_addconst.hpp` 内）
+Last reviewed against the current tree: **2026-04-16**
 
----
+This directory contains the ARX operator implementations used by the NeoAlzette search code. The focus is modular addition and addition/subtraction by a constant under:
 
-## 目标 / Goal
+- XOR differentials
+- linear correlations
+- Q1 evaluators for fixed masks/differences
+- Q2 helpers that optimize the opposite side when one side is fixed
 
-- **ZH**：本目录提供 ARX 密码分析里“模加 ⊞/⊟”相关的**差分**与**线性相关度**算子实现，强调**可审计**（注释对齐论文符号）与**可直接用于自动化搜索**（返回 weight / feasibility），并保留若干位向量 primitives 便于将来做 SMT/bit-vector 编码。
-- **EN**: This folder provides **auditable** and **search-friendly** operators for ARX analysis, focused on modular addition/subtraction under XOR differentials and linear correlations, with clear API contracts and feasibility/weight conventions.
+The primary public namespace is `TwilightDream::arx_operators`. The auxiliary namespace `TwilightDream::bitvector` is used by the differential add-constant evaluator for reusable bit-vector primitives.
 
----
+## Scope
 
-## 📁 头文件一览 / Header Inventory (current)
+The current operator tree is organized by analysis domain:
 
-- `differential_xdp_add.hpp`：XOR 差分下的 var-var 加法 DP⁺ / weight（LM-2001）
-- `differential_optimal_gamma.hpp`：给定 (α,β) 构造最优 γ（LM-2001 Algorithm 4）
-- `differential_addconst.hpp`：var-const 加/减的差分（精确 count/DP/weight + BvWeight^κ 近似）
-- `linear_correlation_add_logn.hpp`：Wallén 风格的“对数算法”实现（当前实现以 32-bit 为主）
-- `linear_correlation_addconst.hpp`：O(n) 精确线性相关（2×2 carry-state transfer matrices；var-const + var-var）
-- `math_util.hpp`：小工具（目前提供 `neg_mod_2n<T>(k,n)`）
-- `modular_addition_ccz.hpp`：Addition mod \(2^n\) 的 CCZ 等价与显式差分/线性公式算子（Schulte-Geers）
+- `differential_probability/`
+- `linear_correlation/`
 
-> 注：README 只描述 **目录中实际存在且可 include 的文件**；旧文件名（如 `bitvector_ops.hpp` / `linear_cor_addconst.hpp`）已不再使用。
+Most evaluators are header-only. The main exception is the exact var-const linear Q2 solver:
 
----
+- `linear_correlation/constant_optimal_alpha.hpp`
+- `linear_correlation/constant_optimal_beta.hpp`
 
-## 🧪 差分算子 / Differential Operators
+Those two headers declare the public API, while their compiled cores live in:
 
-### 1) `differential_xdp_add.hpp` — XOR 差分模加（变量-变量，LM-2001）
+- `src/arx_analysis_operators/linear_correlation/constant_fixed_beta_core.cpp`
+- `src/arx_analysis_operators/linear_correlation/constant_fixed_alpha_core.cpp`
 
-- **定义 / Definition**：\(z=x ⊞ y\)，\(z'=(x⊕α) ⊞ (y⊕β)\)，\(γ=z⊕z'\)，计算 \(DP^+(α,β↦γ)\) 与 \(w=-\log_2 DP^+\)。
-- **API（核心）/ Core API**（均在 `TwilightDream::arx_operators`）：
-  - `int xdp_add_lm2001(uint32_t alpha, uint32_t beta, uint32_t gamma)`：返回整数 weight `w`；不可能返回 `-1`
-  - `int xdp_add_lm2001_n(uint32_t alpha, uint32_t beta, uint32_t gamma, int n)`：支持 `1..32` 位（输入会 mask 到低 n 位）
-  - `double xdp_add_probability(uint32_t alpha, uint32_t beta, uint32_t gamma)`：返回 `DP^+`（不可能返回 `0.0`）
-  - `bool is_xdp_add_possible(uint32_t alpha, uint32_t beta, uint32_t gamma)`
+## Current File Layout
 
-### 2) `differential_optimal_gamma.hpp` — 最优输出差分 γ（LM-2001 Algorithm 4）
+### Shared support
 
-- **用途 / Use**：给定 (α,β) 直接构造使 \(DP^+\) 最大的 γ（避免枚举 γ）。
-- **API**（`TwilightDream::arx_operators`）：
-  - `uint32_t find_optimal_gamma(uint32_t alpha, uint32_t beta, int n=32)`
-  - `std::pair<uint32_t,int> find_optimal_gamma_with_weight(uint32_t alpha, uint32_t beta, int n=32)`
-    - `weight` 通过 `xdp_add_lm2001(_n)` 计算；不可能时为 `-1`
+| Path | Role |
+| --- | --- |
+| `DefineSearchWeight.hpp` | Defines `SearchWeight` and the common sentinel values used by the search framework. |
+| `math_util.hpp` | Small arithmetic helpers such as modular negation `neg_mod_2n<T>(...)`. |
+| `SignedInteger128Bit.hpp` | Fixed-width signed 128-bit helper used by exact numerator paths. |
+| `UnsignedInteger128Bit.hpp` | Fixed-width unsigned 128-bit helper used by exact count paths. |
 
-### 3) `differential_addconst.hpp` — 常量加/减的 XOR 差分（变量-常量）
+### Differential operators
 
-- **问题 / Problem**：\(y=x ⊞ a\)（或 \(y=x ⊟ a\)），输入差分 \(Δx\)，输出差分 \(Δy\)。
-- **三类输出 / Three kinds of outputs**（同一文件内）：
-  - **精确 count/DP/weight（O(n)）**：基于 carry-pair 4-state 逐位 DP，返回解数 `count` 与精确 `DP` / `weight`
-  - **闭式 weight（double）**：按 Azimi Lemma 3/4/5 的 \(\sum \log_2(\pi_i)\) 形式计算（不可行返回 `+∞`）
-  - **BvWeight^κ（Qκ fixed-point，近似）**：返回 `uint32_t`，低 `κ` bits 为小数；不可行返回 `0xFFFFFFFF`
+| Path | Status | Main role |
+| --- | --- | --- |
+| `differential_probability/weight_evaluation.hpp` | public | Exact LM-2001 XOR-differential weight/probability/feasibility for var-var modular addition. |
+| `differential_probability/optimal_gamma.hpp` | public | LM-2001 Algorithm 4: construct the output difference `gamma*` that maximizes `DP+`. |
+| `differential_probability/constant_weight_evaluation.hpp` | public | Exact and approximate XOR-differential evaluation for add/sub by constant, including exact count/DP/weight, log2-pi exact weight, and approximate `BvWeight^k`. |
+| `differential_probability/constant_optimal_q2_common.hpp` | internal support | Shared frontier/count utilities for constant Q2 differential generators. |
+| `differential_probability/constant_optimal_input_alpha.hpp` | public | Fixed-input-delta Q2 solver: given `delta_x`, find the best `delta_y`. |
+| `differential_probability/constant_optimal_output_beta.hpp` | public | Fixed-output-delta Q2 solver: given `delta_y`, find the best `delta_x`. |
 
-- **API（常用）/ Common API**（`TwilightDream::arx_operators`）：
-  - **可行性**：`bool is_diff_addconst_possible_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
-  - **精确**：
-    - `uint64_t diff_addconst_exact_count_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
-    - `double   diff_addconst_exact_probability_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
-    - `double   diff_addconst_exact_weight_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`（不可能返回 `+∞`）
-    - `int      diff_addconst_exact_weight_ceil_int_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`（不可能返回 `-1`）
-    - 32-bit wrappers：`diff_addconst_exact_count / diff_addconst_exact_probability / diff_addconst_exact_weight`
-  - **闭式（log2π）**：`double diff_addconst_weight_log2pi_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`
-    - 32-bit wrapper：`diff_addconst_weight_log2pi`
-  - **近似（BvWeight^κ）**：
-    - `uint32_t diff_addconst_bvweight_fixed_point_n(uint32_t dx, uint32_t a, uint32_t dy, int n, int fraction_bit_count)`
-    - `uint32_t diff_addconst_bvweight_q4_n(uint32_t dx, uint32_t a, uint32_t dy, int n)`（κ=4）
-    - 32-bit wrappers：`diff_addconst_bvweight_fixed_point / diff_addconst_bvweight_q4`
-  - **与现有“只吃 int 权重”的搜索框架对接**：
-    - `int diff_addconst_bvweight(uint32_t dx, uint32_t a, uint32_t dy)`：**返回精确 weight 的上取整**（即 `diff_addconst_exact_weight_ceil_int_n(...,32)`）
-    - `int diff_addconst_bvweight_q4_int_ceil(...)`：仅用于“近似 Q4 → int”的对照/实验（仍是近似）
-  - **近似概率（由 Q4 weight 换算）**：
-    - `double diff_addconst_probability(uint32_t dx, uint32_t a, uint32_t dy)`
-    - `double diff_subconst_probability(uint32_t dx, uint32_t a, uint32_t dy)`
-  - **减法**：`diff_subconst_*` 系列通过 `neg_mod_2n` 转换到 add-const
+### Linear operators
 
-- **位向量 primitives（在同一头文件内）/ Bit-vector primitives**（`TwilightDream::bitvector`）：
-  - `HammingWeight / Rev / Carry / RevCarry / LeadingZeros / ParallelLog / ParallelTrunc`
-  - 同名的 `*_n` 版本（支持 `n!=32` 的 domain）
+| Path | Status | Main role |
+| --- | --- | --- |
+| `linear_correlation/weight_evaluation.hpp` | public | Var-var linear correlation: Wallen CPM routes plus exact matrix-chain add/sub evaluators. |
+| `linear_correlation/weight_evaluation_ccz.hpp` | public | Explicit Schulte-Geers / CCZ formulas for differential and linear addition, including row/column maximizers. |
+| `linear_correlation/constant_weight_evaluation.hpp` | public | Exact var-const linear correlation for add/sub by constant; this is the current Q1 hot path for subtraction-by-constant. |
+| `linear_correlation/constant_weight_evaluation_flat.hpp` | public specialist path | Run-flattened exact/windowed var-const evaluator, plus binary-lift and cascade experiment helpers. |
+| `linear_correlation/constant_optimal_alpha.hpp` | public declarations | Fixed-beta exact var-const Q2 API and shared Q2 types. |
+| `linear_correlation/constant_optimal_beta.hpp` | public declarations | Fixed-alpha exact var-const Q2 API. |
+| `linear_correlation/fixed_alpha_research_debug.hpp` | research/debug | Diagnostics for fixed-alpha Q2 work. |
+| `linear_correlation/fixed_beta_research_debug.hpp` | research/debug | Diagnostics for fixed-beta Q2 work. |
 
-> 重要：当前工程实现为了“可审计/可单测”，在 BvWeight^κ 的计算上采用逐链展开（整体仍是 **O(n)** 量级）。论文中的纯 bit-vector（含 ParallelLog/ParallelTrunc）写法在本文件中作为 primitives 保留，便于未来回切到 SMT-friendly 的表达式形式。
+## Legacy Name Mapping
 
----
+Older notes in this workspace still mention flat header names that are no longer the current include paths. Use the following mapping:
 
-## 📈 线性算子 / Linear-Correlation Operators
+| Legacy name | Current path |
+| --- | --- |
+| `differential_xdp_add.hpp` | `differential_probability/weight_evaluation.hpp` |
+| `differential_optimal_gamma.hpp` | `differential_probability/optimal_gamma.hpp` |
+| `differential_addconst.hpp` | `differential_probability/constant_weight_evaluation.hpp` |
+| `linear_correlation_add_logn.hpp` | `linear_correlation/weight_evaluation.hpp` |
+| `linear_correlation_addconst.hpp` | `linear_correlation/constant_weight_evaluation.hpp` |
+| `modular_addition_ccz.hpp` | `linear_correlation/weight_evaluation_ccz.hpp` |
 
-### 4) `linear_correlation_add_logn.hpp` — Wallén 风格对数算法（变量-变量）
+The current README is intentionally written against the headers that actually exist in `include/arx_analysis_operators/`.
 
-- **核心 / Key idea**：将相关度可行性与权重归约到 carry-support 向量 / cpm（Common Prefix Mask）之上；不可行返回 `-1`。
-- **API（当前实现为 32-bit）/ API (current implementation is 32-bit focused)**（`TwilightDream::arx_operators`）：
-  - `int    internal_addition_wallen_logn(uint32_t u, uint32_t v, uint32_t w)`：返回 `Lw = -log2(|corr|)`（不可行返回 `-1`）
-  - `double linear_correlation_add_value_logn(uint32_t u, uint32_t v, uint32_t w)`：返回 `|corr|`（不可行返回 `0.0`；当前实现返回**绝对值**）
-  - 另外暴露 `compute_cpm_*` / `eq(x,y)` 等辅助函数（用于对照论文与回归测试）
+## How The Search Code Uses These Operators Today
 
-### 5) `linear_correlation_addconst.hpp` — 精确线性相关（var-const + var-var，O(n) 基线）
+This section describes the current wiring in the search framework, not just mathematical capability.
 
-- **方法 / Method**：每 bit 构造 2×2 carry-state transfer matrix，逐位左乘累积得到最终相关度 `corr`；再转为线性 weight：
-  - `Lw = -log2(|corr|)`，当 `corr==0` 时为 `+∞`
-- **平均因子 / Averaging factor（非常关键）**：
-  - **var-const**：只平均 `x_i` 两种情况 ⇒ `1/2`
-  - **var-var**：平均 `(x_i,y_i)` 四种情况 ⇒ `1/4`
-- **对外封装 API / Public wrappers**（`TwilightDream::arx_operators`）：
-  - `LinearCorrelation linear_x_modulo_plus_const32(uint32_t alpha, uint32_t K, uint32_t beta, int nbits=32)`
-  - `LinearCorrelation linear_x_modulo_minus_const32(uint32_t alpha, uint32_t C, uint32_t beta, int nbits=32)`
-  - `LinearCorrelation linear_x_modulo_plus_const64(uint64_t alpha, uint64_t K, uint64_t beta, int nbits=64)`
-  - `LinearCorrelation linear_x_modulo_minus_const64(uint64_t alpha, uint64_t C, uint64_t beta, int nbits=64)`
-  - `LinearCorrelation linear_add_varvar32(uint32_t alpha, uint32_t beta, uint32_t gamma, int nbits=32)`
-  - `LinearCorrelation linear_add_varvar64(uint64_t alpha, uint64_t beta, uint64_t gamma, int nbits=64)`
-  - `struct LinearCorrelation { double correlation; double weight; bool is_feasible() const; }`
+### Differential search
 
-### 6) `modular_addition_ccz.hpp` — CCZ 等价与显式公式（差分 + 线性）
+- `include/auto_search_frame/detail/differential_best_search_math.hpp` includes:
+  - `differential_probability/weight_evaluation.hpp`
+  - `differential_probability/optimal_gamma.hpp`
+  - `differential_probability/constant_weight_evaluation.hpp`
+- `src/auto_search_frame/differential_best_search_math.cpp` uses:
+  - `find_optimal_gamma_with_weight(...)` for greedy initialization and per-addition local optimization
+  - `diff_subconst_exact_weight_ceil_int(...)` for exact subtraction-by-constant scoring
+- `src/auto_search_frame_bnb_detail/differential/varvar_weight_sliced_pddt_q2.cpp` implements the rebuildable weight-sliced pDDT accelerator:
+  - exact shell generation is still defined by `xdp_add_lm2001_n(...)`
+  - cached shell semantics are `S_t(alpha,beta) = { gamma | w(alpha,beta -> gamma) = t }`
+- `differential_probability/constant_optimal_input_alpha.hpp` and `differential_probability/constant_optimal_output_beta.hpp` are operator-level exact Q2 generators. In the current tree they are primarily used by self-tests and research/audit programs, not by the listed main differential BnB hot path.
 
-- **定位 / Positioning**：给出 addition mod \(2^n\) 的**显式差分概率**（Theorem 3）与**显式 Walsh/相关系数**（Theorem 4）形式；适合作为“公式基准/交叉验证”，也可直接用于搜索中的可行性与权重计算。
-- **差分 API / Differential API**（`TwilightDream::arx_operators`）：
-  - `double differential_probability_add_ccz_value(uint64_t alpha, uint64_t beta, uint64_t gamma, int n)`：返回 \(2^{-k}\) 或 `0.0`
-  - `std::optional<int> differential_probability_add_ccz_weight(uint64_t alpha, uint64_t beta, uint64_t gamma, int n)`：返回 \(k\) 或 `nullopt`
-  - `bool differential_equation_add_ccz_solvable(uint64_t a, uint64_t b, uint64_t d, int n)`
-- **线性 API / Linear API**（`TwilightDream::arx_operators`）：
-  - `std::optional<double> linear_correlation_add_ccz_value(uint64_t u, uint64_t v, uint64_t w, int n)`：返回 \(±2^{-k}\) 或 `nullopt`
-  - `std::optional<int> linear_correlation_add_ccz_weight(uint64_t u, uint64_t v, uint64_t w, int n)`：返回 \(k\) 或 `nullopt`
-  - `double row_best_correlation_value(uint64_t u, int n)` / `std::optional<double> column_best_correlation_value(uint64_t v, uint64_t w, int n)`：行/列最大相关的便捷封装
+### Linear search
 
----
+- `include/auto_search_frame/detail/linear_best_search_math.hpp` includes:
+  - `linear_correlation/constant_weight_evaluation.hpp`
+  - `linear_correlation/weight_evaluation.hpp`
+  - `linear_correlation/weight_evaluation_ccz.hpp`
+- `src/auto_search_frame_bnb_detail/polarity/linear/varconst/varconst_q1.cpp` uses `correlation_sub_const_weight_ceil_int_logdepth(...)` as the exact Q1 evaluator for subtraction by a constant.
+- `src/auto_search_frame_bnb_detail/polarity/linear/varconst/fixed_alpha_q2.cpp` uses `find_optimal_beta_varconst_mod_sub(...)` for fixed-alpha Q2.
+- `src/auto_search_frame_bnb_detail/polarity/linear/varconst/fixed_beta_q2.cpp` uses `find_optimal_alpha_varconst_mod_sub(...)` for fixed-beta Q2.
+- `src/auto_search_frame_bnb_detail/polarity/linear/varvar/varvar_q1.cpp` uses `linear_correlation_add_ccz_weight(...)` as the exact var-var Q1 backend.
+- `src/auto_search_frame_bnb_detail/polarity/linear/varvar/fixed_u_q2.cpp` prepares row-side `(v,w)` candidates for fixed `u`. Depending on configuration it uses:
+  - split-8 exact streaming
+  - weight-sliced cLAT shell streaming
+  - materialized candidate lists
+- `src/auto_search_frame_bnb_detail/polarity/linear/varvar/fixed_vw_q2.cpp` uses `linear_correlation_add_phi2_column_max(...)` to obtain the exact column-optimal `u*` for fixed `(v,w)`.
+- `src/auto_search_frame_bnb_detail/linear/varvar_z_shell_weight_sliced_clat_q2.cpp` is the split-8 / z-shell enumerator used by the row-side exact shell path. Candidate shells are finalized with `linear_correlation_add_ccz_weight(...)`.
+- `linear_correlation/weight_evaluation.hpp` is still kept nearby as a fallback/regression backend, but the default var-var linear hot path is the CCZ backend in `linear_correlation/weight_evaluation_ccz.hpp`.
+- `linear_correlation/constant_weight_evaluation_flat.hpp` is not the default BnB hot path. It is the specialist exact/windowed evaluator for audits, experiments, and self-tests.
 
-## 📊 复杂度与精确度对照 / Complexity & Accuracy (as implemented)
+## Differential Operator Notes
 
-| 算子 / Operator | 场景 / Case | 方法 / Method | 复杂度 / Complexity | 精确度 / Accuracy |
-| --- | --- | --- | --- | --- |
-| XDP⁺ of ⊞ | var-var | LM-2001（ψ/eq + popcount） | 固定 32-bit ≈ O(1)；`*_n` 为常数级位运算 | **精确** |
-| XOR diff of ⊞a | var-const | carry-pair DP count | **O(n)** | **精确** |
-| XOR diff of ⊞a | var-const | Lemma 3/4/5（log2π） | **O(n)** | **精确**（浮点误差除外） |
-| XOR diff of ⊞a | var-const | BvWeight^κ（Qκ fixed-point） | **O(n)**（当前逐链实现） | **近似** |
-| linear corr of ⊞ | var-var | Wallén-logn（实现偏 32-bit） | 固定 32-bit 近似常数成本 | **精确**（权重/数值） |
-| linear corr of ⊞ / ⊞a | var-var / var-const | 2×2 transfer matrices | **O(n)** | **精确** |
+### `differential_probability/weight_evaluation.hpp`
 
----
+Purpose:
 
-## ✅ 一致性与约定 / Conventions
+- Exact XOR-differential weight for `z = x boxplus y` under LM-2001.
 
-- **差分 weight / Differential weight**：`w = -log2(DP)`；不可能通常用 `-1`（整数接口）或 `+∞`（double 接口）
-- **线性 weight / Linear weight**：`Lw = -log2(|corr|)`；`corr==0` ⇒ `+∞`
-- **位宽 / Word size**：
-  - `differential_xdp_add.hpp` 的 `*_n` 支持 `1..32`
-  - `linear_correlation_addconst.hpp` 的封装支持 `1..64`（通过 `uint64_t` + `nbits`）
+Key API:
 
----
+- `psi(...)`
+- `psi_with_mask(...)`
+- `xdp_add_lm2001(alpha, beta, gamma)`
+- `xdp_add_lm2001_n(alpha, beta, gamma, n)`
+- `xdp_add_probability(alpha, beta, gamma)`
+- `is_xdp_add_possible(alpha, beta, gamma)`
 
-## 🧷 构建与依赖 / Build & Notes
+Notes:
 
-- 代码中存在 `__builtin_popcount` / `__builtin_clz` 等内建（GCC/Clang/clang-cl 直接可用）；若使用 MSVC `cl.exe`，建议：
-  - 直接改用 clang-cl；或
-  - 为这些内建提供兼容层（本目录内 `modular_addition_ccz.hpp` 已对 MSVC 做了 popcount 分支）。
-- 无第三方依赖；以 header-only 为主；`math_util.hpp` 提供通用的模 \(2^n\) 取负 `neg_mod_2n`。
+- The public exact weight backend is integer-valued `SearchWeight`.
+- The `*_n` form supports widths `1..32`.
+- Infeasible transitions return `INFINITE_WEIGHT` or `0.0`, depending on the API.
 
+### `differential_probability/optimal_gamma.hpp`
+
+Purpose:
+
+- Construct `gamma* = argmax_gamma DP+(alpha, beta -> gamma)` without enumerating all outputs.
+
+Key API:
+
+- `carry_aop(...)`
+- `aop(...)`
+- `aopr(...)`
+- `bitreverse_n(...)`
+- `find_optimal_gamma<WordT>(...)`
+- `find_optimal_gamma32(...)`
+- `find_optimal_gamma64(...)`
+- `find_optimal_gamma128(...)`
+- `find_optimal_gamma_with_weight(alpha, beta, n)`
+
+Notes:
+
+- Generic bit helpers are implemented for `uint32_t`, `uint64_t`, and `UnsignedInteger128Bit`.
+- The convenience `find_optimal_gamma_with_weight(...)` wrapper is currently provided for the 32-bit XDP backend family.
+
+### `differential_probability/constant_weight_evaluation.hpp`
+
+Purpose:
+
+- Evaluate XOR differentials for `y = x boxplus a` and `y = x boxminus a`.
+
+Main result families:
+
+- exact count / probability / weight
+- exact closed-form weight via the log2-pi decomposition
+- approximate `BvWeight^k` fixed-point evaluators
+
+Representative API:
+
+- `is_diff_addconst_possible_n(...)`
+- `diff_addconst_exact_count_n(...)`
+- `diff_addconst_exact_probability_n(...)`
+- `diff_addconst_exact_weight_n(...)`
+- `diff_addconst_exact_weight_ceil_int_n(...)`
+- `diff_addconst_weight_log2pi_n(...)`
+- `diff_addconst_bvweight_fixed_point_n(...)`
+- `diff_addconst_bvweight_q4_n(...)`
+- `diff_subconst_exact_count_n(...)`
+- `diff_subconst_exact_probability_n(...)`
+- `diff_subconst_exact_weight_n(...)`
+- `diff_subconst_exact_weight_ceil_int(...)`
+- `diff_addconst_probability(...)`
+- `diff_subconst_probability(...)`
+
+Notes:
+
+- Public overloads exist for both 32-bit and 64-bit carriers.
+- The exact count type is widened automatically:
+  - `uint64_t` count for 32-bit inputs
+  - `UnsignedInteger128Bit` count for 64-bit inputs
+- `TwilightDream::bitvector` in this file exposes reusable primitives such as:
+  - `HammingWeight`
+  - `BitReverse`
+  - `Carry`
+  - `LeadingZeros`
+  - `ParallelLog`
+  - `ParallelTrunc`
+
+### `differential_probability/constant_optimal_input_alpha.hpp`
+
+Purpose:
+
+- Fixed-input-delta Q2 generator for add/sub by constant.
+
+Public result type:
+
+- `DiffConstOptimalOutputDeltaResult`
+
+Representative API:
+
+- `find_optimal_output_delta_addconst_exact_reference(...)`
+- `find_optimal_output_delta_subconst_exact_reference(...)`
+- `find_optimal_output_delta_addconst_phase8_banded_support_prototype(...)`
+- `find_optimal_output_delta_subconst_phase8_banded_support_prototype(...)`
+- `find_optimal_output_delta_addconst(...)`
+- `find_optimal_output_delta_subconst(...)`
+
+Notes:
+
+- The exact reference path is based on suffix response-vector Pareto frontiers and exact-count verification.
+- The prototype path adds a banded-support cache for the fixed-input direction.
+
+### `differential_probability/constant_optimal_output_beta.hpp`
+
+Purpose:
+
+- Fixed-output-delta Q2 generator for add/sub by constant.
+
+Public result type:
+
+- `DiffConstOptimalInputDeltaResult`
+
+Representative API:
+
+- `find_optimal_input_delta_addconst_exact_reference(...)`
+- `find_optimal_input_delta_subconst_exact_reference(...)`
+- `find_optimal_input_delta_addconst(...)`
+- `find_optimal_input_delta_subconst(...)`
+
+Notes:
+
+- This direction currently exposes the exact-reference solver family.
+
+### `differential_probability/constant_optimal_q2_common.hpp`
+
+Purpose:
+
+- Shared support code for the constant Q2 differential generators.
+
+Important shared utilities:
+
+- width masking and normalization helpers
+- exact-count conversion helpers
+- Pareto-frontier pruning
+- lightweight statistics updates
+
+## Linear Operator Notes
+
+### `linear_correlation/weight_evaluation.hpp`
+
+Purpose:
+
+- Var-var linear correlation only.
+
+It contains two families of evaluators:
+
+- Wallen CPM routes for fixed `(u,v,w)`
+- exact carry-transfer-matrix add/sub evaluators for var-var modular addition/subtraction
+
+Representative API:
+
+- `wallen_weight(mu, nu, omega, n)`
+- `compute_cpm_recursive(x, y, n)`
+- `compute_cpm_logn_bitsliced(x, y, n)`
+- `compute_cpm_logn(x, y, n)`
+- `internal_addition_wallen_logn(u, v, w)`
+- `linear_correlation_add_value_logn(u, v, w)`
+- `linear_correlation_add_logn32(u, v, w)`
+- `correlation_add_varvar(...)`
+- `correlation_sub_varvar(...)`
+- `linear_add_varvar32(...)`
+- `linear_add_varvar64(...)`
+- `linear_sub_varvar32(...)`
+- `linear_sub_varvar64(...)`
+
+Notes:
+
+- `compute_cpm_*` supports widths up to 64 bits.
+- The Wallen route is valuable both as a direct evaluator and as a regression/reference backend.
+
+### `linear_correlation/weight_evaluation_ccz.hpp`
+
+Purpose:
+
+- Explicit Schulte-Geers / CCZ formulas for modular addition.
+
+It provides both:
+
+- explicit differential formulas
+- explicit Walsh / linear-correlation formulas
+
+Representative API:
+
+- `mask_n(...)`
+- `L_of(...)`
+- `R_of(...)`
+- `M_of(...)`
+- `MnT_of(...)`
+- `differential_probability_add_ccz_value(...)`
+- `differential_probability_add_ccz_weight(...)`
+- `differential_equation_add_ccz_solvable(...)`
+- `linear_correlation_add_ccz_value(...)`
+- `linear_correlation_add_ccz_weight(...)`
+- `row_best_correlation_value(...)`
+- `column_best_correlation_value(...)`
+- `linear_correlation_add_phi2_row_max(...)`
+- `linear_correlation_add_phi2_column_max(...)`
+- `find_optimal_output_u_ccz(v, w, n)`
+
+Notes:
+
+- This is the current exact var-var linear hot path in the search code.
+- The row/column maximizers are the linear-side analog of "fix one side, optimize the other side" operator design.
+
+### `linear_correlation/constant_weight_evaluation.hpp`
+
+Purpose:
+
+- Exact linear correlation for:
+  - `z = x boxplus a`
+  - `z = x boxminus a`
+
+Public result type:
+
+- `LinearCorrelation { correlation, weight, is_feasible() }`
+
+Representative API:
+
+- `correlation_add_const(...)`
+- `correlation_sub_const(...)`
+- `correlation_add_const_exact_numerator_logdepth(...)`
+- `correlation_add_const_weight_ceil_int_logdepth(...)`
+- `correlation_sub_const_exact_numerator_logdepth(...)`
+- `correlation_sub_const_weight_ceil_int_logdepth(...)`
+- `linear_x_modulo_plus_const32(...)`
+- `linear_x_modulo_minus_const32(...)`
+- `linear_x_modulo_plus_const64(...)`
+- `linear_x_modulo_minus_const64(...)`
+- `linear_x_modulo_plus_const32_logdepth(...)`
+- `linear_x_modulo_minus_const32_logdepth(...)`
+- `linear_x_modulo_plus_const64_logdepth(...)`
+- `linear_x_modulo_minus_const64_logdepth(...)`
+
+Notes:
+
+- This file is the current exact Q1 backend for subtraction by a constant in the linear search.
+- The optimized path is event/run based, even though public names still retain the historical `*_logdepth` spelling.
+
+### `linear_correlation/constant_weight_evaluation_flat.hpp`
+
+Purpose:
+
+- Run-flattened exact and windowed linear correlation for `y = x boxplus c`, `n <= 64`.
+
+Public result/report types:
+
+- `DyadicCorrelation`
+- `WindowedCorrelationReport`
+- `BinaryLiftMasks`
+- `BinaryLiftedWindowedReport`
+- `CascadeRound`
+- `CascadeReport`
+
+Representative API:
+
+- `linear_correlation_add_const_exact_flat_dyadic(...)`
+- `linear_correlation_add_const_exact_flat(...)`
+- `linear_correlation_add_const_exact_flat_ld(...)`
+- `linear_correlation_add_const_exact_flat_weight_ceil_int(...)`
+- `linear_correlation_add_const_flat_bin_report(...)`
+- `linear_correlation_add_const_flat_bin(...)`
+- `linear_correlation_add_const_flat_bin_ld(...)`
+- `binary_lift_addconst_masks(...)`
+- `corr_add_const_binary_lifted_report(...)`
+- `corr_add_const_cascade(...)`
+
+Notes:
+
+- Exact results are dyadic rationals with denominator `2^n`.
+- With the internal run table cached, the natural online exact complexity is close to `O(#runs(c) + wt(beta))`.
+- A supporting note for this model lives in:
+  - `A Bit-Vector Linear Correlation Model for Modular Addition by a Constant (BvCorr-FLAT).md`
+
+### `linear_correlation/constant_optimal_alpha.hpp` and `linear_correlation/constant_optimal_beta.hpp`
+
+Purpose:
+
+- Exact var-const linear Q2 operators.
+
+Shared/public Q2 types:
+
+- `VarConstQ2Direction`
+- `VarConstQ2Operation`
+- `VarConstQ2MainlineMethod`
+- `VarConstQ2MainlineRequest`
+- `VarConstQ2MainlineResult`
+- `VarConstOptimalInputMaskResult`
+- `VarConstOptimalOutputMaskResult`
+- `VarConstQ2MainlineStats`
+
+Representative API:
+
+- `solve_varconst_q2_mainline(...)`
+- `solve_fixed_alpha_q2_canonical(...)`
+- `solve_fixed_alpha_q2_exact_transition_reference(...)`
+- `solve_fixed_alpha_q2_raw_reference(...)`
+- `find_optimal_alpha_varconst_mod_sub(...)`
+- `find_optimal_alpha_varconst_mod_add(...)`
+- `find_optimal_beta_varconst_mod_sub(...)`
+- `find_optimal_beta_varconst_mod_add(...)`
+
+Notes:
+
+- These Q2 APIs are the operator layer behind the fixed-alpha and fixed-beta linear BnB stages.
+- `constant_optimal_alpha.hpp` holds the shared type system and the fixed-beta-facing mainline entry point.
+- `constant_optimal_beta.hpp` exposes the fixed-alpha-facing canonical and reference entry points.
+
+## Conventions
+
+- Bit numbering is consistent across the operator tree:
+  - bit 0 = LSB
+  - carries propagate from lower bits to higher bits
+- Differential weight:
+  - `w = -log2(DP)`
+  - exact LM-2001 var-var weights are integer-valued
+  - constant-model exact integer APIs return ceil-style `SearchWeight`
+- Linear weight:
+  - `Lw = -log2(|corr|)`
+  - zero correlation maps to infinite weight
+- Sentinel behavior:
+  - integer-valued impossible cases use `INFINITE_WEIGHT`
+  - floating-point impossible cases use `0.0` or `+infinity`, depending on the API contract
+
+## Build Notes
+
+- The operator code expects a C++20 toolchain with `<bit>` support.
+- There are no third-party dependencies inside this directory.
+- Exact 128-bit-style arithmetic is provided by local fixed-width helpers instead of compiler-specific native `__int128` assumptions.
+
+## One-Line Summary
+
+The current ARX operator implementation is no longer a single flat set of headers. It is a domain-structured operator library with:
+
+- LM-2001 exact differential backends for var-var addition
+- exact and approximate differential backends for add/sub by constant
+- CCZ- and transfer-matrix-based linear backends
+- exact Q2 optimizers for var-const differential and linear problems
+- explicit row-shell and column-optimal accelerators that the NeoAlzette BnB search reuses directly
